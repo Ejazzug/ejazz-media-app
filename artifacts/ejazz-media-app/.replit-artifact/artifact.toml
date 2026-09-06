@@ -1,0 +1,24 @@
+kind = "mobile"
+previewPath = "/ejazz-media-app/"
+title = "EJazz Media App"
+description = "A premium Android media app for EJazz Media combining live radio, African pop on EJazz eXTRA, and an editorial EJazz News reading experience with persistent audio playback."
+version = "1.0.0"
+id = "artifacts/ejazz-media-app"
+router = "expo-domain"
+
+[[services]]
+name = "expo"
+ensurePreviewReachable = "/status"
+paths = [ "/ejazz-media-app/" ]
+localPort = 23383
+
+[services.development]
+run = "pnpm --filter @workspace/ejazz-media-app run dev"
+
+[services.production]
+build = [ "pnpm", "--filter", "@workspace/ejazz-media-app", "run", "build" ]
+run = [ "pnpm", "--filter", "@workspace/ejazz-media-app", "run", "serve" ]
+
+[services.env]
+PORT = "23383"
+BASE_PATH = "/ejazz-media-app/"
