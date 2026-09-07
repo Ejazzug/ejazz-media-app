@@ -1,0 +1,57 @@
+{
+  "expo": {
+    "name": "EJazz Media App",
+    "slug": "ejazz-media-app",
+    "version": "1.0.0",
+    "orientation": "portrait",
+    "icon": "./assets/images/ejazz-app-icon.png",
+    "scheme": "ejazz-media-app",
+    "userInterfaceStyle": "dark",
+    "ios": {
+      "supportsTablet": false
+    },
+    "android": {
+      "package": "com.ejazzug.ejazzmedia",
+      "permissions": [
+        "FOREGROUND_SERVICE",
+        "FOREGROUND_SERVICE_MEDIA_PLAYBACK",
+        "android.permission.RECORD_AUDIO",
+        "android.permission.MODIFY_AUDIO_SETTINGS",
+        "android.permission.FOREGROUND_SERVICE",
+        "android.permission.FOREGROUND_SERVICE_MEDIA_PLAYBACK"
+      ]
+    },
+    "web": {
+      "favicon": "./assets/images/ejazz-app-icon.png"
+    },
+    "plugins": [
+      "expo-router",
+      [
+        "expo-audio",
+        {
+          "enableBackgroundPlayback": true,
+          "enableLockScreenControls": true
+        }
+      ],
+      [
+        "expo-splash-screen",
+        {
+          "image": "./assets/images/ejazz-app-icon.png",
+          "resizeMode": "contain",
+          "backgroundColor": "#F2F2F2"
+        }
+      ],
+      "expo-asset"
+    ],
+    "experiments": {
+      "typedRoutes": true,
+      "reactCompiler": true
+    },
+    "extra": {
+      "eas": {
+        "projectId": "1da275ed-5456-4fbd-945b-4616f957c2fd"
+      }
+    },
+    "owner": "ejazz-media"
+  }
+}
