@@ -1,7 +1,7 @@
 import { Feather } from '@expo/vector-icons';
 import { Image } from 'expo-image';
 import { LinearGradient } from 'expo-linear-gradient';
-import { usePathname, useRouter } from 'expo-router';
+import { useRouter } from 'expo-router';
 import React from 'react';
 import {
   ActivityIndicator,
@@ -159,14 +159,14 @@ export function PlayButton({
 }
 
 export function StationCard({ station }: { station: Station }) {
-  const { activeStation, isPlaying, selectStation, togglePlayback } = usePlayer();
+  const { activeStation, isPlaying, playbackKind, selectStation, toggleRadioPlayback } = usePlayer();
   const colors = useColors();
   const isSelected = station.id === activeStation.id;
   return (
     <Pressable
       onPress={() => {
         if (!isSelected) selectStation(station.id);
-        else togglePlayback();
+        else toggleRadioPlayback();
       }}
       style={({ pressed }) => [
         styles.stationCard,
@@ -194,10 +194,10 @@ export function StationCard({ station }: { station: Station }) {
             <Text style={styles.stationDescription}>{station.genre}</Text>
           </View>
           <PlayButton
-            playing={isSelected && isPlaying}
+            playing={playbackKind === 'radio' && isSelected && isPlaying}
             onPress={() => {
               if (!isSelected) selectStation(station.id);
-              else togglePlayback();
+              else toggleRadioPlayback();
             }}
             size="small"
           />
@@ -239,42 +239,89 @@ export function StoryCard({ story, featured = false }: { story: Story; featured?
 }
 
 export function MiniPlayer() {
-  const { activeStation, isPlaying, isBuffering, togglePlayback, trackArtist, trackTitle } = usePlayer();
+  const {
+    activeStation,
+    playbackKind,
+    currentPodcast,
+    podcastQueue,
+    isPlaying,
+    isBuffering,
+    togglePlayback,
+    skipPodcast,
+    trackArtist,
+    trackTitle,
+  } = usePlayer();
   const router = useRouter();
   const insets = useSafeAreaInsets();
   const colors = useColors();
-  const pathname = usePathname();
-  if (pathname === '/podcasts') return null;
+  const isPodcast = playbackKind === 'podcast' && !!currentPodcast;
   return (
     <View style={[styles.miniPlayerWrap, { bottom: 76 + Math.max(insets.bottom, 0) }]}>
-      <Pressable onPress={() => router.push('/radio')} style={styles.miniPlayer}>
-        <View style={styles.miniLogoChip}>
-          <Image source={activeStation.logo} contentFit="contain" style={styles.miniLogo} />
-        </View>
+      <Pressable
+        onPress={() => router.push(
+          isPodcast
+            ? { pathname: '/radio', params: { mode: 'podcasts' } }
+            : '/radio',
+        )}
+        style={styles.miniPlayer}
+      >
+        {isPodcast ? (
+          currentPodcast.artworkUrl ? (
+            <Image source={currentPodcast.artworkUrl} contentFit="cover" style={styles.miniPodcastArtwork} />
+          ) : (
+            <View style={styles.miniPodcastFallback}>
+              <Feather name="mic" size={18} color={colors.accent} />
+            </View>
+          )
+        ) : (
+          <View style={styles.miniLogoChip}>
+            <Image source={activeStation.logo} contentFit="contain" style={styles.miniLogo} />
+          </View>
+        )}
         <View style={styles.miniCopy}>
           <View style={styles.miniTitleRow}>
             <View style={[styles.liveDot, { backgroundColor: colors.accent }]} />
-            <Text style={styles.miniLive}>LIVE ON {activeStation.shortName}</Text>
+            <Text numberOfLines={1} style={styles.miniLive}>
+              {isPodcast
+                ? `PODCAST · ${currentPodcast.showName}`
+                : `LIVE ON ${activeStation.shortName}`}
+            </Text>
             <PlayingEqualizer playing={isPlaying} compact />
           </View>
           <Text numberOfLines={1} style={styles.miniTrack}>
-            {trackArtist} · {trackTitle}
+            {isPodcast ? currentPodcast.title : `${trackArtist} · ${trackTitle}`}
           </Text>
         </View>
-        <Pressable
-          onPress={(event) => {
-            event.stopPropagation();
-            togglePlayback();
-          }}
-          hitSlop={10}
-          style={styles.miniPlay}
-        >
-          {isBuffering ? (
-            <ActivityIndicator size="small" color={colors.primary} />
-          ) : (
-            <Feather name={isPlaying ? 'pause' : 'play'} size={18} color={colors.primary} />
+        <View style={styles.miniActions}>
+          {isPodcast && podcastQueue.length > 0 && (
+            <Pressable
+              onPress={(event) => {
+                event.stopPropagation();
+                skipPodcast();
+              }}
+              accessibilityLabel={`Play next episode. ${podcastQueue.length} queued`}
+              hitSlop={8}
+              style={styles.miniNext}
+            >
+              <Feather name="skip-forward" size={15} color={colors.mutedForeground} />
+              <Text style={styles.miniQueueCount}>{podcastQueue.length}</Text>
+            </Pressable>
           )}
-        </Pressable>
+          <Pressable
+            onPress={(event) => {
+              event.stopPropagation();
+              togglePlayback();
+            }}
+            hitSlop={10}
+            style={styles.miniPlay}
+          >
+            {isBuffering ? (
+              <ActivityIndicator size="small" color={colors.primary} />
+            ) : (
+              <Feather name={isPlaying ? 'pause' : 'play'} size={18} color={colors.primary} />
+            )}
+          </Pressable>
+        </View>
       </Pressable>
     </View>
   );
@@ -336,10 +383,15 @@ const styles = StyleSheet.create({
   miniPlayer: { flexDirection: 'row', alignItems: 'center', gap: 11, padding: 8, paddingRight: 12, backgroundColor: '#102B55', borderWidth: 1, borderColor: '#2C4B75' },
   miniLogoChip: { width: 42, height: 42, padding: 4, borderRadius: 8, backgroundColor: '#FFFFFF' },
   miniLogo: { width: '100%', height: '100%' },
+  miniPodcastArtwork: { width: 42, height: 42, borderRadius: 7, backgroundColor: '#123363' },
+  miniPodcastFallback: { width: 42, height: 42, borderRadius: 7, alignItems: 'center', justifyContent: 'center', backgroundColor: '#123363' },
   miniCopy: { flex: 1, gap: 3 },
   miniTitleRow: { flexDirection: 'row', alignItems: 'center', gap: 5 },
   miniLive: { color: '#FF6B6B', fontSize: 9, fontWeight: '700', letterSpacing: 0.8 },
   miniTrack: { color: '#F7F9FC', fontSize: 12, fontWeight: '600' },
+  miniActions: { flexDirection: 'row', alignItems: 'center', gap: 3 },
+  miniNext: { minWidth: 34, height: 34, flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 2 },
+  miniQueueCount: { color: '#A7B7CC', fontSize: 8, fontWeight: '700' },
   miniPlay: { width: 34, height: 34, alignItems: 'center', justifyContent: 'center' },
   screenHeader: { paddingHorizontal: 20, paddingBottom: 18, gap: 21 },
   headerEyebrow: { color: '#FF6B6B', fontSize: 10, fontWeight: '700', letterSpacing: 1.6, marginBottom: 5 },

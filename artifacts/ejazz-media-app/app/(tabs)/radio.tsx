@@ -1,18 +1,23 @@
 import { Feather } from '@expo/vector-icons';
 import { Image } from 'expo-image';
 import { LinearGradient } from 'expo-linear-gradient';
+import { useLocalSearchParams } from 'expo-router';
 import React from 'react';
 import { ActivityIndicator, Pressable, Share, StyleSheet, Text, TextInput, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { PlayButton, PlayingEqualizer } from '@/components/MediaComponents';
 import { KeyboardAwareScrollViewCompat } from '@/components/KeyboardAwareScrollViewCompat';
+import { PodcastsPanel } from '@/components/PodcastsPanel';
 import { useColors } from '@/hooks/useColors';
 import { usePlayer } from '@/context/PlayerContext';
 import { useExtraSongRequest, useExtraSongSearch, useSongRequest } from '@/lib/radio';
 
+type RadioView = 'radio' | 'extra' | 'podcasts';
+
 export default function RadioScreen() {
   const colors = useColors();
   const insets = useSafeAreaInsets();
+  const { mode } = useLocalSearchParams<{ mode?: string }>();
   const [artist, setArtist] = React.useState('');
   const [title, setTitle] = React.useState('');
   const [sender, setSender] = React.useState('');
@@ -21,16 +26,20 @@ export default function RadioScreen() {
   const [formError, setFormError] = React.useState('');
   const [extraSearch, setExtraSearch] = React.useState('');
   const [debouncedExtraSearch, setDebouncedExtraSearch] = React.useState('');
+  const [viewMode, setViewMode] = React.useState<RadioView>(
+    mode === 'podcasts' ? 'podcasts' : 'radio',
+  );
   const request = useSongRequest();
   const {
     activeStation,
+    playbackKind,
     isPlaying,
     isBuffering,
     streamError,
     stations,
     selectedStationId,
     selectStation,
-    togglePlayback,
+    toggleRadioPlayback,
     retryPlayback,
     currentTrack,
     previousTracks,
@@ -41,8 +50,10 @@ export default function RadioScreen() {
     trackArtist,
     trackTitle,
   } = usePlayer();
-  const isRadio = selectedStationId === 'radio';
-  const extraSearchResults = useExtraSongSearch(debouncedExtraSearch, !isRadio);
+  const isRadio = viewMode === 'radio';
+  const isPodcasts = viewMode === 'podcasts';
+  const radioPlaying = playbackKind === 'radio' && isPlaying;
+  const extraSearchResults = useExtraSongSearch(debouncedExtraSearch, viewMode === 'extra');
   const extraRequest = useExtraSongRequest();
 
   React.useEffect(() => {
@@ -91,23 +102,28 @@ export default function RadioScreen() {
         <View style={styles.header}>
           <Text style={styles.eyebrow}>EJAZZ LIVE</Text>
           <Text style={styles.title}>Radio</Text>
-          <Pressable
-            onPress={() => Share.share({ message: `Listen live on ${activeStation.name} — EJazz Media App` })}
-            accessibilityRole="button"
-            accessibilityLabel="Share station"
-            style={styles.shareButton}
-          >
-            <Feather name="share-2" size={18} color={colors.foreground} />
-          </Pressable>
+          {!isPodcasts && (
+            <Pressable
+              onPress={() => Share.share({ message: `Listen live on ${activeStation.name} — EJazz Media App` })}
+              accessibilityRole="button"
+              accessibilityLabel="Share station"
+              style={styles.shareButton}
+            >
+              <Feather name="share-2" size={18} color={colors.foreground} />
+            </Pressable>
+          )}
         </View>
 
         <View style={styles.switcher}>
           {stations.map((station) => {
-            const selected = station.id === selectedStationId;
+            const selected = station.id === viewMode;
             return (
               <Pressable
                 key={station.id}
-                onPress={() => selectStation(station.id)}
+                onPress={() => {
+                  setViewMode(station.id);
+                  selectStation(station.id);
+                }}
                 style={[styles.switcherItem, selected && { backgroundColor: colors.primary }]}
               >
                 <View style={styles.switcherLogoChip}>
@@ -119,13 +135,26 @@ export default function RadioScreen() {
               </Pressable>
             );
           })}
+          <Pressable
+            onPress={() => setViewMode('podcasts')}
+            style={[styles.switcherItem, isPodcasts && { backgroundColor: colors.primary }]}
+          >
+            <View style={styles.podcastTabIcon}>
+              <Feather name="mic" size={15} color={isPodcasts ? colors.primary : colors.accent} />
+            </View>
+            <Text style={[styles.switcherText, isPodcasts && { color: colors.primaryForeground }]}>
+              Podcasts
+            </Text>
+          </Pressable>
         </View>
 
+        {isPodcasts ? (
+          <PodcastsPanel />
+        ) : (
+          <>
         <View style={styles.playerArtworkWrap}>
           <View style={styles.playerLogoFallback}>
-            <View style={styles.playerLogoCard}>
-              <Image source={activeStation.logo} contentFit="contain" style={styles.playerLogo} />
-            </View>
+            <Image source={activeStation.logo} contentFit="cover" style={styles.playerLogo} />
           </View>
           <LinearGradient colors={['transparent', 'rgba(7,8,11,0.72)']} style={StyleSheet.absoluteFill} />
           <View style={styles.artworkLive}>
@@ -145,7 +174,11 @@ export default function RadioScreen() {
             <Feather name="share-2" size={19} color={colors.mutedForeground} />
             <Text style={styles.controlText}>Share</Text>
           </Pressable>
-          <PlayButton playing={isPlaying} onPress={togglePlayback} loading={isBuffering} />
+          <PlayButton
+            playing={radioPlaying}
+            onPress={toggleRadioPlayback}
+            loading={playbackKind === 'radio' && isBuffering}
+          />
           <View style={styles.secondaryControl}>
             <Feather name="volume-2" size={19} color={colors.mutedForeground} />
             <Text style={styles.controlText}>Volume</Text>
@@ -155,7 +188,7 @@ export default function RadioScreen() {
         <View style={styles.trackBlock}>
           <View style={styles.onAirHeading}>
             <Text style={styles.trackEyebrow}>ON AIR</Text>
-            <PlayingEqualizer playing={isPlaying} />
+            <PlayingEqualizer playing={radioPlaying} />
           </View>
           {metadataLoading && isRadio && !currentTrack ? (
             <View style={styles.metadataLoading}>
@@ -401,6 +434,8 @@ export default function RadioScreen() {
             )}
           </View>
         )}
+          </>
+        )}
       </KeyboardAwareScrollViewCompat>
     </LinearGradient>
   );
@@ -413,15 +448,15 @@ const styles = StyleSheet.create({
   title: { color: '#F7F9FC', fontSize: 34, fontWeight: '700', letterSpacing: -1.2 },
   shareButton: { position: 'absolute', right: 20, bottom: 5, width: 42, height: 42, alignItems: 'center', justifyContent: 'center', borderWidth: 1, borderColor: '#2C4B75' },
   switcher: { flexDirection: 'row', gap: 8, paddingHorizontal: 20, marginBottom: 20 },
-  switcherItem: { flexDirection: 'row', alignItems: 'center', gap: 8, paddingHorizontal: 10, paddingVertical: 8, borderWidth: 1, borderColor: '#2C4B75' },
-  switcherLogoChip: { width: 28, height: 28, padding: 3, borderRadius: 6, backgroundColor: '#FFFFFF' },
+  switcherItem: { flex: 1, minWidth: 0, flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 5, paddingHorizontal: 5, paddingVertical: 7, borderWidth: 1, borderColor: '#2C4B75' },
+  switcherLogoChip: { width: 24, height: 24, padding: 3, borderRadius: 6, backgroundColor: '#FFFFFF' },
   switcherLogo: { width: '100%', height: '100%' },
-  switcherText: { color: '#A7B7CC', fontSize: 11, fontWeight: '700', letterSpacing: 0.6 },
+  podcastTabIcon: { width: 24, height: 24, borderRadius: 6, alignItems: 'center', justifyContent: 'center', backgroundColor: '#FFFFFF' },
+  switcherText: { flexShrink: 1, color: '#A7B7CC', fontSize: 9, fontWeight: '700', letterSpacing: 0.2 },
   playerArtworkWrap: { height: 370, marginHorizontal: 20, overflow: 'hidden', backgroundColor: '#13161E' },
   playerArtwork: { ...StyleSheet.absoluteFill },
-  playerLogoFallback: { ...StyleSheet.absoluteFill, alignItems: 'center', justifyContent: 'center', backgroundColor: '#102B55' },
-  playerLogoCard: { width: 190, height: 190, padding: 24, borderRadius: 24, backgroundColor: '#FFFFFF' },
-  playerLogo: { width: '100%', height: '100%' },
+  playerLogoFallback: { ...StyleSheet.absoluteFill, backgroundColor: '#FFFFFF' },
+  playerLogo: { ...StyleSheet.absoluteFill },
   artworkLive: { position: 'absolute', top: 16, left: 16, flexDirection: 'row', alignItems: 'center', gap: 7, paddingHorizontal: 10, paddingVertical: 7, backgroundColor: 'rgba(7,8,11,0.72)' },
   liveDot: { width: 7, height: 7, borderRadius: 4 },
   liveText: { color: '#F5F1E9', fontSize: 10, fontWeight: '700', letterSpacing: 1.4 },
