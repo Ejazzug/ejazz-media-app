@@ -11,7 +11,7 @@
       "supportsTablet": false
     },
     "android": {
-      "package": "com.ejazzmedia.app",
+      "package": "com.ejazzug.ejazzmedia",
       "permissions": ["FOREGROUND_SERVICE", "FOREGROUND_SERVICE_MEDIA_PLAYBACK"]
     },
     "web": {
