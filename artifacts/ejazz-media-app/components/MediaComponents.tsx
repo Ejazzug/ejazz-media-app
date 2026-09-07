@@ -169,7 +169,7 @@ export function StoryCard({ story, featured = false }: { story: Story; featured?
 }
 
 export function MiniPlayer() {
-  const { activeStation, isPlaying, isBuffering, togglePlayback } = usePlayer();
+  const { activeStation, isPlaying, isBuffering, togglePlayback, trackArtist, trackTitle } = usePlayer();
   const router = useRouter();
   const insets = useSafeAreaInsets();
   const colors = useColors();
@@ -183,7 +183,7 @@ export function MiniPlayer() {
             <Text style={styles.miniLive}>LIVE ON {activeStation.shortName.toUpperCase()}</Text>
           </View>
           <Text numberOfLines={1} style={styles.miniTrack}>
-            {activeStation.description} · EJazz live
+            {trackArtist} · {trackTitle}
           </Text>
         </View>
         <Pressable

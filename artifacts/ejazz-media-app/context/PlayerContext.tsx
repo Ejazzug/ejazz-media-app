@@ -13,6 +13,8 @@ import {
   useAudioPlayer,
   useAudioPlayerStatus,
 } from 'expo-audio';
+import { AppState } from 'react-native';
+import { RadioTrack, useExtraTrack, useRecentTracks } from '@/lib/radio';
 
 export type StationId = 'radio' | 'extra';
 
@@ -59,6 +61,11 @@ type PlayerContextValue = {
   streamError: boolean;
   trackTitle: string;
   trackArtist: string;
+  currentTrack: RadioTrack | null;
+  previousTracks: RadioTrack[];
+  metadataLoading: boolean;
+  metadataError: boolean;
+  refreshMetadata: () => void;
   selectStation: (stationId: StationId) => void;
   togglePlayback: () => void;
   retryPlayback: () => void;
@@ -70,6 +77,7 @@ export function PlayerProvider({ children }: PropsWithChildren) {
   const [selectedStationId, setSelectedStationId] = useState<StationId>('radio');
   const [isPlaying, setIsPlaying] = useState(false);
   const [streamError, setStreamError] = useState(false);
+  const [isAppActive, setIsAppActive] = useState(AppState.currentState === 'active');
   const activeStation = useMemo(
     () => stations.find((station) => station.id === selectedStationId) ?? stations[0],
     [selectedStationId],
@@ -79,6 +87,13 @@ export function PlayerProvider({ children }: PropsWithChildren) {
     keepAudioSessionActive: true,
   });
   const status = useAudioPlayerStatus(player);
+  const recentTracks = useRecentTracks(selectedStationId === 'radio' && isAppActive);
+  const extraTrack = useExtraTrack(selectedStationId === 'extra' && isAppActive);
+  const currentTrack = selectedStationId === 'radio'
+    ? recentTracks.data?.[0] ?? null
+    : extraTrack.data ?? null;
+  const previousTracks = selectedStationId === 'radio' ? recentTracks.data?.slice(1, 5) ?? [] : [];
+  const activeMetadataQuery = selectedStationId === 'radio' ? recentTracks : extraTrack;
 
   useEffect(() => {
     setAudioModeAsync({
@@ -88,6 +103,13 @@ export function PlayerProvider({ children }: PropsWithChildren) {
       shouldPlayInBackground: true,
       shouldRouteThroughEarpiece: false,
     }).catch(() => undefined);
+  }, []);
+
+  useEffect(() => {
+    const subscription = AppState.addEventListener('change', (state) => {
+      setIsAppActive(state === 'active');
+    });
+    return () => subscription.remove();
   }, []);
 
   useEffect(() => {
@@ -105,13 +127,22 @@ export function PlayerProvider({ children }: PropsWithChildren) {
     player.setActiveForLockScreen(
       true,
       {
-        title: 'EJazz live',
-        artist: activeStation.description,
+        title: currentTrack?.title ?? 'EJazz live',
+        artist: currentTrack?.artist ?? activeStation.description,
         albumTitle: activeStation.name,
+        artworkUrl: currentTrack?.imageUrl || undefined,
       },
       { isLiveStream: true, showSeekForward: false, showSeekBackward: false },
     );
-  }, [activeStation.description, activeStation.name, player, status.playing]);
+  }, [
+    activeStation.description,
+    activeStation.name,
+    currentTrack?.artist,
+    currentTrack?.imageUrl,
+    currentTrack?.title,
+    player,
+    status.playing,
+  ]);
 
   useEffect(() => {
     AsyncStorage.getItem('ejazz-selected-station')
@@ -170,15 +201,25 @@ export function PlayerProvider({ children }: PropsWithChildren) {
       isPlaying,
       isBuffering: status.isBuffering,
       streamError,
-      trackTitle: 'Live from EJazz',
-      trackArtist: activeStation.description,
+      trackTitle: currentTrack?.title ?? 'Live from EJazz',
+      trackArtist: currentTrack?.artist ?? activeStation.description,
+      currentTrack,
+      previousTracks,
+      metadataLoading: activeMetadataQuery.isLoading,
+      metadataError: activeMetadataQuery.isError,
+      refreshMetadata: activeMetadataQuery.refetch,
       selectStation,
       togglePlayback,
       retryPlayback,
     }),
     [
       activeStation,
+      activeMetadataQuery.isError,
+      activeMetadataQuery.isLoading,
+      activeMetadataQuery.refetch,
+      currentTrack,
       isPlaying,
+      previousTracks,
       retryPlayback,
       selectStation,
       selectedStationId,
