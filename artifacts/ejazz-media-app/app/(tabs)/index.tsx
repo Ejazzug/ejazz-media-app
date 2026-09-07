@@ -116,7 +116,7 @@ const styles = StyleSheet.create({
   iconButton: { width: 40, height: 40, alignItems: 'center', justifyContent: 'center' },
   hero: { paddingTop: 42, paddingBottom: 35 },
   heroKicker: { color: '#FF6B6B', fontSize: 10, fontWeight: '700', letterSpacing: 1.5, marginBottom: 15 },
-  heroTitle: { color: '#F7F9FC', fontSize: 48, lineHeight: 47, fontWeight: '700', letterSpacing: -2.4 },
+  heroTitle: { color: '#F7F9FC', fontSize: 40, lineHeight: 40, fontWeight: '700', letterSpacing: -1.6 },
   heroCopy: { color: '#A7B7CC', fontSize: 15, lineHeight: 22, marginTop: 18 },
   sectionHeading: { flexDirection: 'row', alignItems: 'baseline', justifyContent: 'space-between', marginBottom: 13 },
   sectionTitle: { color: '#F7F9FC', fontSize: 22, fontWeight: '700', letterSpacing: -0.5 },
