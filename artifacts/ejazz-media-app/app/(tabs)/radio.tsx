@@ -24,7 +24,7 @@ export default function RadioScreen() {
   } = usePlayer();
 
   return (
-    <View style={[styles.screen, { backgroundColor: colors.background }]}>
+    <LinearGradient colors={[colors.gradientStart, colors.background, colors.gradientEnd]} style={styles.screen}>
       <ScrollView
         showsVerticalScrollIndicator={false}
         contentContainerStyle={{ paddingTop: insets.top + 18, paddingBottom: 150 }}
@@ -111,40 +111,40 @@ export default function RadioScreen() {
           </View>
         </View>
       </ScrollView>
-    </View>
+    </LinearGradient>
   );
 }
 
 const styles = StyleSheet.create({
   screen: { flex: 1 },
   header: { paddingHorizontal: 20, paddingBottom: 22 },
-  eyebrow: { color: '#F2B86B', fontSize: 10, fontWeight: '700', letterSpacing: 1.6, marginBottom: 7 },
-  title: { color: '#F5F1E9', fontSize: 34, fontWeight: '700', letterSpacing: -1.2 },
-  shareButton: { position: 'absolute', right: 20, bottom: 5, width: 42, height: 42, alignItems: 'center', justifyContent: 'center', borderWidth: 1, borderColor: '#303643' },
+  eyebrow: { color: '#FF6B6B', fontSize: 10, fontWeight: '700', letterSpacing: 1.6, marginBottom: 7 },
+  title: { color: '#F7F9FC', fontSize: 34, fontWeight: '700', letterSpacing: -1.2 },
+  shareButton: { position: 'absolute', right: 20, bottom: 5, width: 42, height: 42, alignItems: 'center', justifyContent: 'center', borderWidth: 1, borderColor: '#2C4B75' },
   switcher: { flexDirection: 'row', gap: 8, paddingHorizontal: 20, marginBottom: 20 },
-  switcherItem: { paddingHorizontal: 14, paddingVertical: 11, borderWidth: 1, borderColor: '#303643' },
-  switcherText: { color: '#9298A6', fontSize: 11, fontWeight: '700', letterSpacing: 0.6 },
+  switcherItem: { paddingHorizontal: 14, paddingVertical: 11, borderWidth: 1, borderColor: '#2C4B75' },
+  switcherText: { color: '#A7B7CC', fontSize: 11, fontWeight: '700', letterSpacing: 0.6 },
   playerArtworkWrap: { height: 370, marginHorizontal: 20, overflow: 'hidden', backgroundColor: '#13161E' },
   playerArtwork: { ...StyleSheet.absoluteFill },
   artworkLive: { position: 'absolute', top: 16, left: 16, flexDirection: 'row', alignItems: 'center', gap: 7, paddingHorizontal: 10, paddingVertical: 7, backgroundColor: 'rgba(7,8,11,0.72)' },
   liveDot: { width: 7, height: 7, borderRadius: 4 },
   liveText: { color: '#F5F1E9', fontSize: 10, fontWeight: '700', letterSpacing: 1.4 },
   artworkStation: { position: 'absolute', bottom: 18, left: 18 },
-  artworkStationName: { color: '#F5F1E9', fontSize: 28, fontWeight: '700', letterSpacing: -1 },
-  artworkStationDescription: { color: '#F2B86B', fontSize: 11, fontWeight: '700', letterSpacing: 1.3, marginTop: 5 },
+  artworkStationName: { color: '#F7F9FC', fontSize: 28, fontWeight: '700', letterSpacing: -1 },
+  artworkStationDescription: { color: '#FF6B6B', fontSize: 11, fontWeight: '700', letterSpacing: 1.3, marginTop: 5 },
   trackBlock: { paddingHorizontal: 20, paddingTop: 25 },
   trackEyebrow: { color: '#3E79FF', fontSize: 10, fontWeight: '700', letterSpacing: 1.5 },
-  trackTitle: { color: '#F5F1E9', fontSize: 22, fontWeight: '700', marginTop: 8 },
-  trackArtist: { color: '#9298A6', fontSize: 14, marginTop: 5 },
-  errorBox: { flexDirection: 'row', alignItems: 'center', gap: 11, marginHorizontal: 20, marginTop: 20, padding: 14, borderWidth: 1, borderColor: '#4B3B2A', backgroundColor: '#211B16' },
+  trackTitle: { color: '#F7F9FC', fontSize: 22, fontWeight: '700', marginTop: 8 },
+  trackArtist: { color: '#A7B7CC', fontSize: 14, marginTop: 5 },
+  errorBox: { flexDirection: 'row', alignItems: 'center', gap: 11, marginHorizontal: 20, marginTop: 20, padding: 14, borderWidth: 1, borderColor: '#682B38', backgroundColor: '#2A1A2E' },
   errorCopy: { flex: 1, gap: 4 },
-  errorTitle: { color: '#F5F1E9', fontSize: 12, fontWeight: '600' },
-  errorSubtext: { color: '#9298A6', fontSize: 11 },
-  retry: { color: '#F2B86B', fontSize: 10, fontWeight: '700', letterSpacing: 1.1 },
+  errorTitle: { color: '#F7F9FC', fontSize: 12, fontWeight: '600' },
+  errorSubtext: { color: '#A7B7CC', fontSize: 11 },
+  retry: { color: '#FF6B6B', fontSize: 10, fontWeight: '700', letterSpacing: 1.1 },
   controls: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', paddingHorizontal: 52, paddingVertical: 30 },
   secondaryControl: { alignItems: 'center', gap: 6, minWidth: 50 },
-  controlText: { color: '#9298A6', fontSize: 10 },
-  backgroundNote: { flexDirection: 'row', alignItems: 'center', gap: 13, marginHorizontal: 20, padding: 16, borderTopWidth: 1, borderBottomWidth: 1, borderColor: '#282D38' },
-  noteTitle: { color: '#F5F1E9', fontSize: 13, fontWeight: '700', marginBottom: 4 },
-  noteText: { color: '#9298A6', fontSize: 12, lineHeight: 18 },
+  controlText: { color: '#A7B7CC', fontSize: 10 },
+  backgroundNote: { flexDirection: 'row', alignItems: 'center', gap: 13, marginHorizontal: 20, padding: 16, borderTopWidth: 1, borderBottomWidth: 1, borderColor: '#204570' },
+  noteTitle: { color: '#F7F9FC', fontSize: 13, fontWeight: '700', marginBottom: 4 },
+  noteText: { color: '#A7B7CC', fontSize: 12, lineHeight: 18 },
 });

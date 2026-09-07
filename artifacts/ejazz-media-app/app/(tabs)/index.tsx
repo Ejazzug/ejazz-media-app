@@ -1,4 +1,5 @@
 import { Feather } from '@expo/vector-icons';
+import { LinearGradient } from 'expo-linear-gradient';
 import { useRouter } from 'expo-router';
 import React from 'react';
 import { Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
@@ -14,7 +15,7 @@ export default function HomeScreen() {
   const { activeStation, isPlaying, stations, togglePlayback } = usePlayer();
 
   return (
-    <View style={[styles.screen, { backgroundColor: colors.background }]}>
+    <LinearGradient colors={[colors.gradientStart, colors.background, colors.gradientEnd]} style={styles.screen}>
       <ScrollView
         showsVerticalScrollIndicator={false}
         contentContainerStyle={[styles.content, { paddingTop: insets.top + 18 }]}
@@ -76,7 +77,7 @@ export default function HomeScreen() {
           <Text style={styles.footerSubtext}>AT40 • POP • INDIE • AFRICAN POP</Text>
         </View>
       </ScrollView>
-    </View>
+    </LinearGradient>
   );
 }
 
@@ -86,21 +87,21 @@ const styles = StyleSheet.create({
   topRow: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' },
   iconButton: { width: 40, height: 40, alignItems: 'center', justifyContent: 'center' },
   hero: { paddingTop: 42, paddingBottom: 35 },
-  heroKicker: { color: '#F2B86B', fontSize: 10, fontWeight: '700', letterSpacing: 1.5, marginBottom: 15 },
-  heroTitle: { color: '#F5F1E9', fontSize: 48, lineHeight: 47, fontWeight: '700', letterSpacing: -2.4 },
-  heroCopy: { color: '#9298A6', fontSize: 15, lineHeight: 22, marginTop: 18 },
+  heroKicker: { color: '#FF6B6B', fontSize: 10, fontWeight: '700', letterSpacing: 1.5, marginBottom: 15 },
+  heroTitle: { color: '#F7F9FC', fontSize: 48, lineHeight: 47, fontWeight: '700', letterSpacing: -2.4 },
+  heroCopy: { color: '#A7B7CC', fontSize: 15, lineHeight: 22, marginTop: 18 },
   sectionHeading: { flexDirection: 'row', alignItems: 'baseline', justifyContent: 'space-between', marginBottom: 13 },
-  sectionTitle: { color: '#F5F1E9', fontSize: 22, fontWeight: '700', letterSpacing: -0.5 },
-  sectionLink: { color: '#3E79FF', fontSize: 10, fontWeight: '700', letterSpacing: 1.2 },
+  sectionTitle: { color: '#F7F9FC', fontSize: 22, fontWeight: '700', letterSpacing: -0.5 },
+  sectionLink: { color: '#E43B48', fontSize: 10, fontWeight: '700', letterSpacing: 1.2 },
   stationList: { gap: 12 },
-  nowPlaying: { flexDirection: 'row', alignItems: 'center', gap: 11, paddingVertical: 18, borderBottomWidth: 1, borderBottomColor: '#282D38' },
+  nowPlaying: { flexDirection: 'row', alignItems: 'center', gap: 11, paddingVertical: 18, borderBottomWidth: 1, borderBottomColor: '#204570' },
   nowPlayingMark: { width: 4, height: 35 },
   nowPlayingCopy: { flex: 1 },
-  nowPlayingLabel: { color: '#9298A6', fontSize: 9, fontWeight: '700', letterSpacing: 1.5, marginBottom: 4 },
-  nowPlayingTitle: { color: '#F5F1E9', fontSize: 14, fontWeight: '600' },
+  nowPlayingLabel: { color: '#A7B7CC', fontSize: 9, fontWeight: '700', letterSpacing: 1.5, marginBottom: 4 },
+  nowPlayingTitle: { color: '#F7F9FC', fontSize: 14, fontWeight: '600' },
   latestHeading: { marginTop: 36 },
   storyList: { gap: 20, marginTop: 22 },
   footerNote: { alignItems: 'center', paddingTop: 46, gap: 7 },
-  footerText: { color: '#F5F1E9', fontSize: 12, fontWeight: '700', letterSpacing: 2.2 },
-  footerSubtext: { color: '#6F7685', fontSize: 9, fontWeight: '600', letterSpacing: 1.1 },
+  footerText: { color: '#F7F9FC', fontSize: 12, fontWeight: '700', letterSpacing: 2.2 },
+  footerSubtext: { color: '#7890AE', fontSize: 9, fontWeight: '600', letterSpacing: 1.1 },
 });

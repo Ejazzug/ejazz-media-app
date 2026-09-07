@@ -36,7 +36,7 @@ const stations: Station[] = [
     genre: 'AT40 • POP • INDIE',
     streamUrl: process.env.EXPO_PUBLIC_EJAZZ_RADIO_STREAM_URL ?? '',
     artwork: require('@/assets/images/editorial-vocalist.jpg'),
-    color: '#3E79FF',
+    color: '#E43B48',
   },
   {
     id: 'extra',
@@ -46,7 +46,7 @@ const stations: Station[] = [
     genre: 'AFRICAN POP',
     streamUrl: process.env.EXPO_PUBLIC_EJAZZ_EXTRA_STREAM_URL ?? '',
     artwork: require('@/assets/images/editorial-african-pop.jpg'),
-    color: '#F2B86B',
+    color: '#FF6B6B',
   },
 ];
 

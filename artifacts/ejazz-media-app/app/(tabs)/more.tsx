@@ -49,14 +49,14 @@ export default function MoreScreen() {
 
 const styles = StyleSheet.create({
   screen: { flex: 1 },
-  about: { marginHorizontal: 20, paddingVertical: 22, paddingHorizontal: 18, backgroundColor: '#13161E', borderLeftWidth: 3, borderLeftColor: '#3E79FF' },
-  aboutTitle: { color: '#F5F1E9', fontSize: 24, fontWeight: '700', letterSpacing: -0.7, marginTop: 25 },
-  aboutCopy: { color: '#9298A6', fontSize: 14, lineHeight: 21, marginTop: 10 },
-  menu: { marginHorizontal: 20, marginTop: 27, borderTopWidth: 1, borderTopColor: '#282D38' },
-  menuItem: { minHeight: 62, flexDirection: 'row', alignItems: 'center', borderBottomWidth: 1, borderBottomColor: '#282D38', gap: 13 },
+  about: { marginHorizontal: 20, paddingVertical: 22, paddingHorizontal: 18, backgroundColor: '#0D2A57', borderLeftWidth: 3, borderLeftColor: '#E43B48' },
+  aboutTitle: { color: '#F7F9FC', fontSize: 24, fontWeight: '700', letterSpacing: -0.7, marginTop: 25 },
+  aboutCopy: { color: '#A7B7CC', fontSize: 14, lineHeight: 21, marginTop: 10 },
+  menu: { marginHorizontal: 20, marginTop: 27, borderTopWidth: 1, borderTopColor: '#204570' },
+  menuItem: { minHeight: 62, flexDirection: 'row', alignItems: 'center', borderBottomWidth: 1, borderBottomColor: '#204570', gap: 13 },
   menuIcon: { width: 32, alignItems: 'center' },
-  menuLabel: { color: '#F5F1E9', fontSize: 15, fontWeight: '600', flex: 1 },
+  menuLabel: { color: '#F7F9FC', fontSize: 15, fontWeight: '600', flex: 1 },
   version: { alignItems: 'center', paddingTop: 48, gap: 8 },
-  versionText: { color: '#F5F1E9', fontSize: 10, fontWeight: '700', letterSpacing: 1.8 },
-  versionSubtext: { color: '#6F7685', fontSize: 9, letterSpacing: 1.2 },
+  versionText: { color: '#F7F9FC', fontSize: 10, fontWeight: '700', letterSpacing: 1.8 },
+  versionSubtext: { color: '#7890AE', fontSize: 9, letterSpacing: 1.2 },
 });

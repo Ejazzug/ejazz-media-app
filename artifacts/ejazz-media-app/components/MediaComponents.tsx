@@ -123,7 +123,7 @@ export function StationCard({ station }: { station: Station }) {
     >
       <Image source={station.artwork} contentFit="cover" style={styles.stationArtwork} />
       <LinearGradient
-        colors={['transparent', 'rgba(7,8,11,0.96)']}
+        colors={['rgba(52,21,46,0.08)', 'rgba(4,17,39,0.97)']}
         style={StyleSheet.absoluteFill}
       />
       <View style={styles.stationCardContent}>
@@ -227,38 +227,38 @@ export function ScreenHeader({ eyebrow, title }: { eyebrow?: string; title: stri
 const styles = StyleSheet.create({
   wordmark: { flexDirection: 'row', alignItems: 'center', gap: 9 },
   mark: { width: 22, height: 22, transform: [{ skewX: '-16deg' }], justifyContent: 'center' },
-  markCut: { width: 13, height: 3, backgroundColor: '#0A0B0F', alignSelf: 'center' },
-  wordmarkText: { color: '#F5F1E9', fontSize: 18, fontWeight: '700', letterSpacing: 3.4 },
+  markCut: { width: 13, height: 3, backgroundColor: '#071B3A', alignSelf: 'center' },
+  wordmarkText: { color: '#F7F9FC', fontSize: 18, fontWeight: '700', letterSpacing: 3.4 },
   wordmarkCompact: { fontSize: 14, letterSpacing: 2.4 },
   playButton: { alignItems: 'center', justifyContent: 'center' },
-  stationCard: { height: 220, borderWidth: 1, overflow: 'hidden', backgroundColor: '#13161E' },
+  stationCard: { height: 220, borderWidth: 1, overflow: 'hidden', backgroundColor: '#0D2A57' },
   stationArtwork: { ...StyleSheet.absoluteFill, opacity: 0.75 },
   stationCardContent: { flex: 1, justifyContent: 'space-between', padding: 16 },
   livePill: { alignSelf: 'flex-start', flexDirection: 'row', alignItems: 'center', gap: 6, paddingHorizontal: 9, paddingVertical: 6, backgroundColor: 'rgba(7,8,11,0.7)' },
   liveDot: { width: 6, height: 6, borderRadius: 3 },
-  liveText: { color: '#F5F1E9', fontSize: 10, fontWeight: '700', letterSpacing: 1.3 },
+  liveText: { color: '#F7F9FC', fontSize: 10, fontWeight: '700', letterSpacing: 1.3 },
   stationCardBottom: { flexDirection: 'row', alignItems: 'flex-end', justifyContent: 'space-between' },
   stationCopy: { flex: 1, paddingRight: 12 },
-  stationName: { color: '#F5F1E9', fontSize: 23, fontWeight: '700', letterSpacing: -0.7 },
-  stationDescription: { color: '#F2B86B', fontSize: 11, fontWeight: '700', letterSpacing: 1.4, marginTop: 6 },
+  stationName: { color: '#F7F9FC', fontSize: 23, fontWeight: '700', letterSpacing: -0.7 },
+  stationDescription: { color: '#FF6B6B', fontSize: 11, fontWeight: '700', letterSpacing: 1.4, marginTop: 6 },
   storyPressable: { flexDirection: 'row', gap: 14 },
-  storyImage: { width: 104, height: 104, backgroundColor: '#1D222D' },
+  storyImage: { width: 104, height: 104, backgroundColor: '#163761' },
   storyImageFeatured: { width: '100%', height: 222 },
   storyMeta: { flex: 1, justifyContent: 'center' },
   storyCategory: { fontSize: 10, fontWeight: '700', letterSpacing: 1.5, marginBottom: 7 },
-  storyTitle: { color: '#F5F1E9', fontSize: 16, lineHeight: 21, fontWeight: '700' },
+  storyTitle: { color: '#F7F9FC', fontSize: 16, lineHeight: 21, fontWeight: '700' },
   storyTitleFeatured: { fontSize: 24, lineHeight: 29, letterSpacing: -0.5 },
-  storyExcerpt: { color: '#9298A6', fontSize: 13, lineHeight: 19, marginTop: 9 },
-  storyTime: { color: '#6F7685', fontSize: 10, fontWeight: '600', letterSpacing: 1.1, marginTop: 10 },
+  storyExcerpt: { color: '#A7B7CC', fontSize: 13, lineHeight: 19, marginTop: 9 },
+  storyTime: { color: '#7890AE', fontSize: 10, fontWeight: '600', letterSpacing: 1.1, marginTop: 10 },
   miniPlayerWrap: { position: 'absolute', left: 12, right: 12, zIndex: 20 },
-  miniPlayer: { flexDirection: 'row', alignItems: 'center', gap: 11, padding: 8, paddingRight: 12, backgroundColor: '#171B24', borderWidth: 1, borderColor: '#303643' },
+  miniPlayer: { flexDirection: 'row', alignItems: 'center', gap: 11, padding: 8, paddingRight: 12, backgroundColor: '#102B55', borderWidth: 1, borderColor: '#2C4B75' },
   miniArtwork: { width: 42, height: 42 },
   miniCopy: { flex: 1, gap: 3 },
   miniTitleRow: { flexDirection: 'row', alignItems: 'center', gap: 5 },
-  miniLive: { color: '#F2B86B', fontSize: 9, fontWeight: '700', letterSpacing: 0.8 },
-  miniTrack: { color: '#F5F1E9', fontSize: 12, fontWeight: '600' },
+  miniLive: { color: '#FF6B6B', fontSize: 9, fontWeight: '700', letterSpacing: 0.8 },
+  miniTrack: { color: '#F7F9FC', fontSize: 12, fontWeight: '600' },
   miniPlay: { width: 34, height: 34, alignItems: 'center', justifyContent: 'center' },
   screenHeader: { paddingHorizontal: 20, paddingBottom: 18, gap: 21 },
-  headerEyebrow: { color: '#F2B86B', fontSize: 10, fontWeight: '700', letterSpacing: 1.6, marginBottom: 5 },
-  headerTitle: { color: '#F5F1E9', fontSize: 32, fontWeight: '700', letterSpacing: -1.2 },
+  headerEyebrow: { color: '#FF6B6B', fontSize: 10, fontWeight: '700', letterSpacing: 1.6, marginBottom: 5 },
+  headerTitle: { color: '#F7F9FC', fontSize: 32, fontWeight: '700', letterSpacing: -1.2 },
 });
