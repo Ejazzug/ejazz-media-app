@@ -37,7 +37,6 @@ export default function RadioScreen() {
     isBuffering,
     streamError,
     stations,
-    selectedStationId,
     selectStation,
     toggleRadioPlayback,
     retryPlayback,

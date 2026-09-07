@@ -1,2 +1,3 @@
 - [WordPress media hotlinking](wordpress-media-hotlinking.md) — use original EJazz attachments with no-referrer browser requests; Jetpack variants return 403.
 - [Centova recent-track cap](centova-recent-track-cap.md) — EJazz Radio history is capped at 10 and ignores pagination; preserve clean tracks across polls to backfill jingles.
+- [Expo lint compatibility](expo-lint-compatibility.md) — Expo’s lint preset hit a pnpm nested-export conflict; keep the lightweight TypeScript ESLint setup unless upstream changes.

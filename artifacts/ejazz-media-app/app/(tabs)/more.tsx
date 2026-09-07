@@ -1,7 +1,6 @@
 import { Feather } from '@expo/vector-icons';
 import React from 'react';
 import { Linking, Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
-import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { EJazzWordmark, ScreenHeader } from '@/components/MediaComponents';
 import { useColors } from '@/hooks/useColors';
 
@@ -15,7 +14,6 @@ const items = [
 
 export default function MoreScreen() {
   const colors = useColors();
-  const insets = useSafeAreaInsets();
   return (
     <View style={[styles.screen, { backgroundColor: colors.background }]}>
       <ScrollView showsVerticalScrollIndicator={false} contentContainerStyle={{ paddingBottom: 150 }}>

@@ -7,17 +7,15 @@
     "icon": "./assets/images/ejazz-app-icon.png",
     "scheme": "ejazz-media-app",
     "userInterfaceStyle": "dark",
-    "splash": {
-      "image": "./assets/images/ejazz-app-icon.png",
-      "resizeMode": "contain",
-      "backgroundColor": "#F2F2F2"
-    },
     "ios": {
       "supportsTablet": false
     },
     "android": {
       "package": "com.ejazzug.ejazzmedia",
-      "permissions": ["FOREGROUND_SERVICE", "FOREGROUND_SERVICE_MEDIA_PLAYBACK"]
+      "permissions": [
+        "FOREGROUND_SERVICE",
+        "FOREGROUND_SERVICE_MEDIA_PLAYBACK"
+      ]
     },
     "web": {
       "favicon": "./assets/images/ejazz-app-icon.png"
@@ -30,7 +28,16 @@
           "enableBackgroundPlayback": true,
           "enableLockScreenControls": true
         }
-      ]
+      ],
+      [
+        "expo-splash-screen",
+        {
+          "image": "./assets/images/ejazz-app-icon.png",
+          "resizeMode": "contain",
+          "backgroundColor": "#F2F2F2"
+        }
+      ],
+      "expo-asset"
     ],
     "experiments": {
       "typedRoutes": true,
