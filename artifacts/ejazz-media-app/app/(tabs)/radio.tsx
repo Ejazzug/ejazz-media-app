@@ -8,7 +8,7 @@ import { PlayButton } from '@/components/MediaComponents';
 import { KeyboardAwareScrollViewCompat } from '@/components/KeyboardAwareScrollViewCompat';
 import { useColors } from '@/hooks/useColors';
 import { usePlayer } from '@/context/PlayerContext';
-import { useSongRequest } from '@/lib/radio';
+import { useExtraSongRequest, useExtraSongSearch, useSongRequest } from '@/lib/radio';
 
 export default function RadioScreen() {
   const colors = useColors();
@@ -19,6 +19,8 @@ export default function RadioScreen() {
   const [email, setEmail] = React.useState('');
   const [dedication, setDedication] = React.useState('');
   const [formError, setFormError] = React.useState('');
+  const [extraSearch, setExtraSearch] = React.useState('');
+  const [debouncedExtraSearch, setDebouncedExtraSearch] = React.useState('');
   const request = useSongRequest();
   const {
     activeStation,
@@ -32,6 +34,7 @@ export default function RadioScreen() {
     retryPlayback,
     currentTrack,
     previousTracks,
+    nextTrack,
     metadataLoading,
     metadataError,
     refreshMetadata,
@@ -39,6 +42,13 @@ export default function RadioScreen() {
     trackTitle,
   } = usePlayer();
   const isRadio = selectedStationId === 'radio';
+  const extraSearchResults = useExtraSongSearch(debouncedExtraSearch, !isRadio);
+  const extraRequest = useExtraSongRequest();
+
+  React.useEffect(() => {
+    const timeout = setTimeout(() => setDebouncedExtraSearch(extraSearch.trim()), 500);
+    return () => clearTimeout(timeout);
+  }, [extraSearch]);
 
   const submitRequest = () => {
     const cleanArtist = artist.trim();
@@ -109,7 +119,11 @@ export default function RadioScreen() {
         </View>
 
         <View style={styles.playerArtworkWrap}>
-          <Image source={activeStation.artwork} contentFit="cover" style={styles.playerArtwork} />
+          <Image
+            source={currentTrack?.imageUrl || activeStation.artwork}
+            contentFit="cover"
+            style={styles.playerArtwork}
+          />
           <LinearGradient colors={['transparent', 'rgba(7,8,11,0.72)']} style={StyleSheet.absoluteFill} />
           <View style={styles.artworkLive}>
             <View style={[styles.liveDot, { backgroundColor: colors.accent }]} />
@@ -141,7 +155,28 @@ export default function RadioScreen() {
           )}
         </View>
 
-        {isRadio && previousTracks.length > 0 && (
+        {!isRadio && nextTrack && (
+          <View style={styles.nextTrackSection}>
+            <Text style={styles.sectionEyebrow}>NEXT UP</Text>
+            <View style={styles.nextTrackRow}>
+              {nextTrack.imageUrl ? (
+                <Image source={nextTrack.imageUrl} contentFit="cover" style={styles.nextTrackArtwork} />
+              ) : (
+                <View style={styles.nextTrackArtworkFallback}>
+                  <Feather name="music" size={20} color={colors.accent} />
+                </View>
+              )}
+              <View style={styles.historyCopy}>
+                <Text numberOfLines={1} style={styles.nextTrackTitle}>{nextTrack.title}</Text>
+                {!!nextTrack.artist && (
+                  <Text numberOfLines={1} style={styles.historyArtist}>{nextTrack.artist}</Text>
+                )}
+              </View>
+            </View>
+          </View>
+        )}
+
+        {previousTracks.length > 0 && (
           <View style={styles.historySection}>
             <Text style={styles.sectionEyebrow}>PREVIOUS TRACKS</Text>
             {previousTracks.map((track, index) => (
@@ -283,6 +318,81 @@ export default function RadioScreen() {
             </Pressable>
           </View>
         )}
+
+        {!isRadio && (
+          <View style={styles.requestSection}>
+            <Text style={styles.sectionEyebrow}>FIND IT. REQUEST IT.</Text>
+            <Text style={styles.requestTitle}>Request on EJazz Xtra</Text>
+            <Text style={styles.requestIntro}>Search the station library, then request the track you want.</Text>
+            <View style={styles.searchInputWrap}>
+              <Feather name="search" size={17} color={colors.mutedForeground} />
+              <TextInput
+                value={extraSearch}
+                onChangeText={(value) => {
+                  setExtraSearch(value);
+                  extraRequest.reset();
+                }}
+                placeholder="Search artist or song"
+                placeholderTextColor={colors.mutedForeground}
+                style={styles.searchInput}
+                autoCapitalize="none"
+                autoCorrect={false}
+              />
+              {extraSearchResults.isFetching && (
+                <ActivityIndicator size="small" color={colors.primary} />
+              )}
+            </View>
+
+            {extraSearch.length > 0 && extraSearch.trim().length < 3 && (
+              <Text style={styles.searchHint}>Type at least 3 characters to search.</Text>
+            )}
+            {extraSearchResults.isError && (
+              <View style={styles.requestMessageError}>
+                <Feather name="wifi-off" size={16} color={colors.destructive} />
+                <Text style={styles.requestMessageText}>Search is unavailable right now. Please try again.</Text>
+              </View>
+            )}
+            {!!extraSearchResults.data?.message && (
+              <Text style={styles.searchHint}>{extraSearchResults.data.message}</Text>
+            )}
+            {extraSearchResults.data?.tracks.map((track) => (
+              <View key={track.id} style={styles.searchResultRow}>
+                <Text numberOfLines={2} style={styles.searchResultTitle}>{track.title}</Text>
+                <Pressable
+                  onPress={() => extraRequest.mutate(track.id)}
+                  disabled={extraRequest.isPending}
+                  style={({ pressed }) => [
+                    styles.resultRequestButton,
+                    { opacity: pressed || extraRequest.isPending ? 0.6 : 1 },
+                  ]}
+                >
+                  {extraRequest.isPending && extraRequest.variables === track.id ? (
+                    <ActivityIndicator size="small" color={colors.primary} />
+                  ) : (
+                    <Text style={styles.resultRequestText}>REQUEST</Text>
+                  )}
+                </Pressable>
+              </View>
+            ))}
+
+            {extraRequest.isError && (
+              <View style={styles.requestMessageError}>
+                <Feather name="wifi-off" size={16} color={colors.destructive} />
+                <Text style={styles.requestMessageText}>The request could not be sent. Please try again.</Text>
+              </View>
+            )}
+            {extraRequest.data && (
+              <View style={extraRequest.data.success ? styles.requestMessageSuccess : styles.requestMessageError}>
+                <Feather
+                  name={extraRequest.data.success ? 'check-circle' : 'info'}
+                  size={16}
+                  color={extraRequest.data.success ? colors.success : colors.destructive}
+                />
+                <Text style={styles.requestMessageText}>{extraRequest.data.message}</Text>
+              </View>
+            )}
+          </View>
+        )}
       </KeyboardAwareScrollViewCompat>
     </LinearGradient>
   );
@@ -313,6 +423,11 @@ const styles = StyleSheet.create({
   metadataRetry: { alignSelf: 'flex-start', marginTop: 12, borderBottomWidth: 1, borderBottomColor: '#E43B48' },
   metadataRetryText: { color: '#FF6B6B', fontSize: 10, fontWeight: '700', letterSpacing: 0.8 },
   historySection: { marginHorizontal: 20, marginTop: 26, borderTopWidth: 1, borderTopColor: '#204570', paddingTop: 18 },
+  nextTrackSection: { marginHorizontal: 20, marginTop: 22, padding: 14, borderLeftWidth: 2, borderLeftColor: '#E43B48', backgroundColor: '#0D2A57' },
+  nextTrackRow: { flexDirection: 'row', alignItems: 'center' },
+  nextTrackArtwork: { width: 54, height: 54, backgroundColor: '#123363' },
+  nextTrackArtworkFallback: { width: 54, height: 54, alignItems: 'center', justifyContent: 'center', backgroundColor: '#123363' },
+  nextTrackTitle: { color: '#F7F9FC', fontSize: 14, fontWeight: '700' },
   sectionEyebrow: { color: '#FF6B6B', fontSize: 10, fontWeight: '700', letterSpacing: 1.5, marginBottom: 12 },
   historyRow: { flexDirection: 'row', alignItems: 'center', minHeight: 58, borderBottomWidth: 1, borderBottomColor: '#17365E', paddingVertical: 8 },
   historyArtwork: { width: 42, height: 42, backgroundColor: '#123363' },
@@ -344,4 +459,11 @@ const styles = StyleSheet.create({
   requestMessageText: { flex: 1, color: '#F7F9FC', fontSize: 12, lineHeight: 18 },
   requestButton: { height: 50, flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 9 },
   requestButtonText: { color: '#FFFFFF', fontSize: 11, fontWeight: '700', letterSpacing: 1.2 },
+  searchInputWrap: { minHeight: 50, flexDirection: 'row', alignItems: 'center', gap: 10, paddingHorizontal: 13, marginBottom: 12, borderWidth: 1, borderColor: '#2C4B75', backgroundColor: '#071B3A' },
+  searchInput: { flex: 1, minWidth: 0, color: '#F7F9FC', fontSize: 13 },
+  searchHint: { color: '#A7B7CC', fontSize: 12, lineHeight: 18, marginBottom: 12 },
+  searchResultRow: { minHeight: 58, flexDirection: 'row', alignItems: 'center', gap: 12, borderBottomWidth: 1, borderBottomColor: '#204570', paddingVertical: 10 },
+  searchResultTitle: { flex: 1, color: '#F7F9FC', fontSize: 12, lineHeight: 17, fontWeight: '600' },
+  resultRequestButton: { minWidth: 76, minHeight: 36, alignItems: 'center', justifyContent: 'center', borderWidth: 1, borderColor: '#E43B48' },
+  resultRequestText: { color: '#FF6B6B', fontSize: 9, fontWeight: '700', letterSpacing: 1 },
 });

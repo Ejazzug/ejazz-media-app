@@ -1,7 +1,8 @@
 import { useMutation, useQuery } from '@tanstack/react-query';
 
 const RADIO_RPC_URL = 'https://eu1.reliastream.com:2199/external/rpc.php';
-const EXTRA_STATUS_URL = 'https://c32.radioboss.fm:8320/status-json.xsl';
+const EXTRA_API_URL = 'https://c32.radioboss.fm/w';
+const EXTRA_STATION_ID = '320';
 const RADIO_USERNAME = 'ejazzug';
 const REQUEST_TIMEOUT_MS = 10_000;
 
@@ -29,6 +30,21 @@ export type SongRequestInput = {
 export type SongRequestResult = {
   message: string;
   success: boolean;
+};
+
+export type ExtraNowPlaying = {
+  currentTrack: RadioTrack | null;
+  nextTrack: RadioTrack | null;
+};
+
+export type ExtraSearchTrack = {
+  id: string;
+  title: string;
+};
+
+export type ExtraSearchResult = {
+  tracks: ExtraSearchTrack[];
+  message: string;
 };
 
 function rpcUrl(method: string, params: Record<string, string>) {
@@ -92,45 +108,121 @@ async function fetchRecentTracks() {
     .filter((track): track is RadioTrack => track !== null);
 }
 
-function parseExtraTitle(value: unknown): RadioTrack | null {
-  if (typeof value !== 'string' || !value.trim()) return null;
-  const rawTitle = value.trim();
-  const separatorIndex = rawTitle.lastIndexOf(' - ');
-  if (separatorIndex < 1 || separatorIndex >= rawTitle.length - 3) {
-    return { artist: '', title: rawTitle, album: '', imageUrl: '', time: '' };
-  }
-
-  const artist = rawTitle
-    .slice(0, separatorIndex)
-    .trim()
-    .replace(/\s*\([^()]+\)\s*$/, '')
-    .trim();
-  const title = rawTitle.slice(separatorIndex + 3).trim();
-  if (!artist || !title) {
-    return { artist: '', title: rawTitle, album: '', imageUrl: '', time: '' };
-  }
-  return { artist, title, album: '', imageUrl: '', time: '' };
+function extraArtworkUrl(kind: 'current' | 'next', timestamp: unknown) {
+  const path = kind === 'current' ? 'artwork' : 'artwork_next';
+  const cacheKey = typeof timestamp === 'string' || typeof timestamp === 'number'
+    ? `?${encodeURIComponent(String(timestamp))}`
+    : '';
+  return `${EXTRA_API_URL}/${path}/${EXTRA_STATION_ID}.jpg${cacheKey}`;
 }
 
-async function fetchExtraTrack() {
-  const payload = await requestJson(EXTRA_STATUS_URL);
+function normalizeExtraTrack(
+  artistValue: unknown,
+  titleValue: unknown,
+  imageUrl: string,
+): RadioTrack | null {
+  const artist = typeof artistValue === 'string' ? artistValue.trim() : '';
+  const title = typeof titleValue === 'string' ? titleValue.trim() : '';
+  if (!artist && !title) return null;
+  return { artist, title: title || artist, album: '', imageUrl, time: '' };
+}
+
+async function fetchExtraNowPlaying(): Promise<ExtraNowPlaying> {
+  const payload = await requestJson(
+    `${EXTRA_API_URL}/nowplayinginfo?u=${EXTRA_STATION_ID}`,
+  );
   if (!payload || typeof payload !== 'object') {
-    throw new Error('Unexpected eXTRA metadata response');
+    throw new Error('Unexpected EJazz Xtra metadata response');
   }
 
-  const icecast = payload as Record<string, unknown>;
-  const icestats = icecast.icestats;
-  if (!icestats || typeof icestats !== 'object') {
-    throw new Error('Unexpected eXTRA metadata response');
+  const data = payload as Record<string, unknown>;
+  return {
+    currentTrack: normalizeExtraTrack(
+      data.currenttrack_artist,
+      data.currenttrack_title,
+      extraArtworkUrl('current', data.artwork_ts),
+    ),
+    nextTrack: normalizeExtraTrack(
+      data.nexttrack_artist,
+      data.nexttrack_title,
+      extraArtworkUrl('next', data.artwork_next_ts),
+    ),
+  };
+}
+
+async function fetchExtraRecentTracks(): Promise<RadioTrack[]> {
+  const payload = await requestJson(
+    `${EXTRA_API_URL}/recenttrackslist?u=${EXTRA_STATION_ID}`,
+  );
+  if (!Array.isArray(payload)) throw new Error('Unexpected EJazz Xtra history response');
+
+  return payload
+    .slice(1, 7)
+    .map((value): RadioTrack | null => {
+      if (!value || typeof value !== 'object') return null;
+      const item = value as Record<string, unknown>;
+      const artist = typeof item.trackartist === 'string' ? item.trackartist.trim() : '';
+      const title = typeof item.tracktitle === 'string' ? item.tracktitle.trim() : '';
+      if (!artist && !title) return null;
+      const artworkId = typeof item.artworkid === 'string' || typeof item.artworkid === 'number'
+        ? String(item.artworkid)
+        : '';
+      return {
+        artist,
+        title: title || artist,
+        album: '',
+        imageUrl: artworkId
+          ? `${EXTRA_API_URL}/artwork_recent_${encodeURIComponent(artworkId)}/${EXTRA_STATION_ID}.jpg`
+          : '',
+        time: typeof item.started === 'string' ? item.started : '',
+      };
+    })
+    .filter((track): track is RadioTrack => track !== null);
+}
+
+async function searchExtraSongs(query: string): Promise<ExtraSearchResult> {
+  const payload = await requestJson(
+    `${EXTRA_API_URL}/songrequestsearch?u=${EXTRA_STATION_ID}&q=${encodeURIComponent(query)}`,
+  );
+  if (!payload || typeof payload !== 'object') {
+    throw new Error('Unexpected EJazz Xtra search response');
   }
-  const sourceValue = (icestats as Record<string, unknown>).source;
-  const source = Array.isArray(sourceValue) ? sourceValue[0] : sourceValue;
-  if (!source || typeof source !== 'object') {
-    throw new Error('Unexpected eXTRA metadata response');
+  const data = payload as Record<string, unknown>;
+  const message = [data.message, data.errdetail]
+    .find((value): value is string => typeof value === 'string' && value.trim().length > 0)
+    ?.trim() ?? '';
+  if (data.error === true) return { tracks: [], message: message || 'No matching tracks found.' };
+  if (!Array.isArray(data.tracks)) throw new Error('Unexpected EJazz Xtra search response');
+
+  const tracks = data.tracks
+    .map((value): ExtraSearchTrack | null => {
+      if (!value || typeof value !== 'object') return null;
+      const item = value as Record<string, unknown>;
+      const id = typeof item.id === 'string' || typeof item.id === 'number' ? String(item.id) : '';
+      const title = typeof item.title === 'string' ? item.title.trim() : '';
+      return id && title ? { id, title } : null;
+    })
+    .filter((track): track is ExtraSearchTrack => track !== null);
+  return { tracks, message: tracks.length ? '' : 'No matching tracks found.' };
+}
+
+async function requestExtraSong(trackId: string): Promise<SongRequestResult> {
+  const payload = await requestJson(
+    `${EXTRA_API_URL}/songrequestmake?u=${EXTRA_STATION_ID}&id=${encodeURIComponent(trackId)}`,
+  );
+  if (!payload || typeof payload !== 'object') {
+    throw new Error('Unexpected EJazz Xtra request response');
   }
-  const track = parseExtraTitle((source as Record<string, unknown>).title);
-  if (!track) throw new Error('No eXTRA track metadata available');
-  return track;
+  const data = payload as Record<string, unknown>;
+  const serverMessage = [data.message, data.errdetail]
+    .find((value): value is string => typeof value === 'string' && value.trim().length > 0)
+    ?.trim();
+  return {
+    success: data.error === false,
+    message: serverMessage ?? (data.error === false
+      ? 'Your request was sent to EJazz Xtra.'
+      : 'This track could not be requested right now.'),
+  };
 }
 
 async function submitSongRequest(input: SongRequestInput): Promise<SongRequestResult> {
@@ -167,17 +259,42 @@ export function useRecentTracks(enabled: boolean) {
   });
 }
 
-export function useExtraTrack(enabled: boolean) {
+export function useExtraNowPlaying(enabled: boolean) {
   return useQuery({
-    queryKey: ['radio', 'extra', 'current-track'],
-    queryFn: fetchExtraTrack,
+    queryKey: ['radio', 'extra', 'now-playing'],
+    queryFn: fetchExtraNowPlaying,
     enabled,
-    staleTime: 60_000,
-    refetchInterval: enabled ? 75_000 : false,
+    staleTime: 4_000,
+    refetchInterval: enabled ? 5_000 : false,
+    retry: 1,
+  });
+}
+
+export function useExtraRecentTracks(enabled: boolean) {
+  return useQuery({
+    queryKey: ['radio', 'extra', 'recent-tracks'],
+    queryFn: fetchExtraRecentTracks,
+    enabled,
+    staleTime: 8_000,
+    refetchInterval: enabled ? 10_000 : false,
     retry: 1,
   });
 }
 
 export function useSongRequest() {
   return useMutation({ mutationFn: submitSongRequest });
+}
+
+export function useExtraSongSearch(query: string, enabled: boolean) {
+  return useQuery({
+    queryKey: ['radio', 'extra', 'song-search', query],
+    queryFn: () => searchExtraSongs(query),
+    enabled: enabled && query.length >= 3,
+    staleTime: 60_000,
+    retry: 1,
+  });
+}
+
+export function useExtraSongRequest() {
+  return useMutation({ mutationFn: requestExtraSong });
 }

@@ -14,7 +14,12 @@ import {
   useAudioPlayerStatus,
 } from 'expo-audio';
 import { AppState } from 'react-native';
-import { RadioTrack, useExtraTrack, useRecentTracks } from '@/lib/radio';
+import {
+  RadioTrack,
+  useExtraNowPlaying,
+  useExtraRecentTracks,
+  useRecentTracks,
+} from '@/lib/radio';
 
 export type StationId = 'radio' | 'extra';
 
@@ -63,6 +68,7 @@ type PlayerContextValue = {
   trackArtist: string;
   currentTrack: RadioTrack | null;
   previousTracks: RadioTrack[];
+  nextTrack: RadioTrack | null;
   metadataLoading: boolean;
   metadataError: boolean;
   refreshMetadata: () => void;
@@ -88,12 +94,31 @@ export function PlayerProvider({ children }: PropsWithChildren) {
   });
   const status = useAudioPlayerStatus(player);
   const recentTracks = useRecentTracks(selectedStationId === 'radio' && isAppActive);
-  const extraTrack = useExtraTrack(selectedStationId === 'extra' && isAppActive);
+  const extraNowPlaying = useExtraNowPlaying(selectedStationId === 'extra' && isAppActive);
+  const extraRecentTracks = useExtraRecentTracks(selectedStationId === 'extra' && isAppActive);
   const currentTrack = selectedStationId === 'radio'
     ? recentTracks.data?.[0] ?? null
-    : extraTrack.data ?? null;
-  const previousTracks = selectedStationId === 'radio' ? recentTracks.data?.slice(1, 5) ?? [] : [];
-  const activeMetadataQuery = selectedStationId === 'radio' ? recentTracks : extraTrack;
+    : extraNowPlaying.data?.currentTrack ?? null;
+  const previousTracks = selectedStationId === 'radio'
+    ? recentTracks.data?.slice(1, 5) ?? []
+    : extraRecentTracks.data ?? [];
+  const nextTrack = selectedStationId === 'extra'
+    ? extraNowPlaying.data?.nextTrack ?? null
+    : null;
+  const metadataLoading = selectedStationId === 'radio'
+    ? recentTracks.isLoading
+    : extraNowPlaying.isLoading || extraRecentTracks.isLoading;
+  const metadataError = selectedStationId === 'radio'
+    ? recentTracks.isError
+    : extraNowPlaying.isError && extraRecentTracks.isError;
+  const refreshMetadata = useCallback(() => {
+    if (selectedStationId === 'radio') {
+      void recentTracks.refetch();
+      return;
+    }
+    void extraNowPlaying.refetch();
+    void extraRecentTracks.refetch();
+  }, [extraNowPlaying, extraRecentTracks, recentTracks, selectedStationId]);
 
   useEffect(() => {
     setAudioModeAsync({
@@ -205,21 +230,23 @@ export function PlayerProvider({ children }: PropsWithChildren) {
       trackArtist: currentTrack?.artist ?? activeStation.description,
       currentTrack,
       previousTracks,
-      metadataLoading: activeMetadataQuery.isLoading,
-      metadataError: activeMetadataQuery.isError,
-      refreshMetadata: activeMetadataQuery.refetch,
+      nextTrack,
+      metadataLoading,
+      metadataError,
+      refreshMetadata,
       selectStation,
       togglePlayback,
       retryPlayback,
     }),
     [
       activeStation,
-      activeMetadataQuery.isError,
-      activeMetadataQuery.isLoading,
-      activeMetadataQuery.refetch,
       currentTrack,
       isPlaying,
+      metadataError,
+      metadataLoading,
+      nextTrack,
       previousTracks,
+      refreshMetadata,
       retryPlayback,
       selectStation,
       selectedStationId,
