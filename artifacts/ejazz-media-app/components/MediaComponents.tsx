@@ -6,14 +6,37 @@ import React from 'react';
 import {
   ActivityIndicator,
   Pressable,
+  StyleProp,
   StyleSheet,
   Text,
   View,
+  ViewStyle,
 } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useColors } from '@/hooks/useColors';
 import { Station, usePlayer } from '@/context/PlayerContext';
 import { Story } from '@/lib/news';
+
+export function EditorialPlaceholder({
+  style,
+  label = 'EJAZZ NEWS',
+}: {
+  style?: StyleProp<ViewStyle>;
+  label?: string;
+}) {
+  return (
+    <LinearGradient colors={['#173A68', '#091B3A', '#3A132C']} style={[styles.editorialPlaceholder, style]}>
+      <View style={styles.placeholderMark}>
+        <View style={styles.placeholderCut} />
+      </View>
+      <View>
+        <Text style={styles.placeholderLabel}>{label}</Text>
+        <Text style={styles.placeholderTitle}>STORIES{'\n'}THAT MOVE</Text>
+      </View>
+      <View style={styles.placeholderRule} />
+    </LinearGradient>
+  );
+}
 
 export function EJazzWordmark({ compact = false }: { compact?: boolean }) {
   const colors = useColors();
@@ -130,15 +153,16 @@ export function StoryCard({ story, featured = false }: { story: Story; featured?
           style={[styles.storyImage, featured && styles.storyImageFeatured]}
         />
       ) : (
-        <View style={[styles.storyImage, styles.storyImageFallback, featured && styles.storyImageFeatured]}>
-          <Feather name="file-text" size={featured ? 34 : 24} color={colors.mutedForeground} />
-        </View>
+        <EditorialPlaceholder
+          label={story.category}
+          style={[styles.storyImage, featured && styles.storyImageFeatured]}
+        />
       )}
       <View style={styles.storyMeta}>
         <Text style={[styles.storyCategory, { color: colors.accent }]}>{story.category}</Text>
         <Text style={[styles.storyTitle, featured && styles.storyTitleFeatured]}>{story.title}</Text>
         {featured && <Text style={styles.storyExcerpt}>{story.excerpt}</Text>}
-        <Text style={styles.storyTime}>{story.time}</Text>
+        <Text style={styles.storyTime}>{[story.dateLabel, story.time].filter(Boolean).join('  •  ')}</Text>
       </View>
     </Pressable>
   );
@@ -213,8 +237,13 @@ const styles = StyleSheet.create({
   stationDescription: { color: '#FF6B6B', fontSize: 11, fontWeight: '700', letterSpacing: 1.4, marginTop: 6 },
   storyPressable: { flexDirection: 'row', gap: 14 },
   storyImage: { width: 104, height: 104, backgroundColor: '#163761' },
-  storyImageFallback: { alignItems: 'center', justifyContent: 'center' },
   storyImageFeatured: { width: '100%', height: 222 },
+  editorialPlaceholder: { overflow: 'hidden', padding: 14, justifyContent: 'space-between' },
+  placeholderMark: { width: 28, height: 28, backgroundColor: '#E43B48', transform: [{ skewX: '-16deg' }], justifyContent: 'center' },
+  placeholderCut: { width: 16, height: 3, backgroundColor: '#091B3A', alignSelf: 'center' },
+  placeholderLabel: { color: '#FF6B6B', fontSize: 8, fontWeight: '700', letterSpacing: 1.2, marginBottom: 4 },
+  placeholderTitle: { color: '#F7F9FC', fontSize: 14, lineHeight: 15, fontWeight: '700', letterSpacing: -0.4 },
+  placeholderRule: { width: '42%', height: 2, backgroundColor: '#E43B48' },
   storyMeta: { flex: 1, justifyContent: 'center' },
   storyCategory: { fontSize: 10, fontWeight: '700', letterSpacing: 1.5, marginBottom: 7 },
   storyTitle: { color: '#F7F9FC', fontSize: 16, lineHeight: 21, fontWeight: '700' },

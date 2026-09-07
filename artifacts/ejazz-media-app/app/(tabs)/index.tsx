@@ -7,14 +7,25 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { EJazzWordmark, PlayButton, StationCard, StoryCard } from '@/components/MediaComponents';
 import { usePlayer } from '@/context/PlayerContext';
 import { useColors } from '@/hooks/useColors';
-import { useNews } from '@/lib/news';
+import { useFeaturedNews, useLatestNews } from '@/lib/news';
 
 export default function HomeScreen() {
   const colors = useColors();
   const insets = useSafeAreaInsets();
   const router = useRouter();
   const { activeStation, isPlaying, stations, togglePlayback } = usePlayer();
-  const { data: stories = [], isLoading, isError, refetch } = useNews();
+  const featured = useFeaturedNews();
+  const latest = useLatestNews();
+  const stories = [
+    ...(featured.data ?? []),
+    ...(latest.data?.pages.flatMap((page) => page.stories) ?? []),
+  ].filter((story, index, all) => all.findIndex((item) => item.id === story.id) === index);
+  const isLoading = featured.isLoading || latest.isLoading;
+  const isError = featured.isError && latest.isError;
+  const retryNews = () => {
+    featured.refetch();
+    latest.refetch();
+  };
 
   return (
     <LinearGradient colors={[colors.gradientStart, colors.background, colors.gradientEnd]} style={styles.screen}>
@@ -74,8 +85,8 @@ export default function HomeScreen() {
             <Text style={styles.newsStatusText}>Loading the latest stories…</Text>
           </View>
         ) : isError ? (
-          <Pressable onPress={() => refetch()} style={styles.newsStatus}>
-            <Text style={styles.newsStatusTitle}>News is temporarily unavailable.</Text>
+          <Pressable onPress={retryNews} style={styles.newsStatus}>
+            <Text style={styles.newsStatusTitle}>Couldn’t load stories right now.</Text>
             <Text style={styles.sectionLink}>TAP TO RETRY</Text>
           </Pressable>
         ) : stories.length > 0 ? (
