@@ -41,7 +41,10 @@
           "backgroundColor": "#F2F2F2"
         }
       ],
-      "expo-asset"
+      "expo-asset",
+      "expo-notifications",
+      "@react-native-firebase/app",
+      "@react-native-firebase/analytics"
     ],
     "experiments": {
       "typedRoutes": true,

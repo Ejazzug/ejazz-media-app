@@ -47,3 +47,7 @@ Thumbs.db
 # Replit
 .cache/
 .local/
+
+# Generated Firebase credentials/config
+artifacts/ejazz-media-app/.firebase/
+artifacts/ejazz-media-app/google-services.json

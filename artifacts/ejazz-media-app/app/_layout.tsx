@@ -17,6 +17,8 @@ import Head from 'expo-router/head';
 import * as SplashScreen from 'expo-splash-screen';
 import { PlayerProvider } from '@/context/PlayerContext';
 import { MiniPlayer } from '@/components/MediaComponents';
+import { initializeFirebaseAnalytics } from '@/lib/firebase';
+import { usePushNotifications } from '@/lib/notifications';
 
 // Prevent the splash screen from auto-hiding before asset loading is complete.
 SplashScreen.preventAutoHideAsync();
@@ -38,12 +40,19 @@ export default function RootLayout() {
     Inter_600SemiBold,
     Inter_700Bold,
   });
+  usePushNotifications();
 
   useEffect(() => {
     if (fontsLoaded || fontError) {
       SplashScreen.hideAsync();
     }
   }, [fontsLoaded, fontError]);
+
+  useEffect(() => {
+    initializeFirebaseAnalytics().catch((error: unknown) => {
+      console.warn('Firebase Analytics initialization failed.', error);
+    });
+  }, []);
 
   if (!fontsLoaded && !fontError) return null;
 
