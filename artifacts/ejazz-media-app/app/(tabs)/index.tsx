@@ -129,7 +129,7 @@ const styles = StyleSheet.create({
   nowPlayingTitle: { color: '#F7F9FC', fontSize: 14, fontWeight: '600' },
   latestHeading: { marginTop: 20 },
   storyList: { gap: 20, marginTop: 22 },
-  newsStatus: { minHeight: 120, alignItems: 'center', justifyContent: 'center', gap: 12, paddingHorizontal: 20 },
+  newsStatus: { alignItems: 'center', justifyContent: 'center', gap: 12, paddingHorizontal: 20, paddingVertical: 24 },
   newsStatusTitle: { color: '#F7F9FC', fontSize: 16, fontWeight: '600', textAlign: 'center' },
   newsStatusText: { color: '#A7B7CC', fontSize: 14, lineHeight: 20, textAlign: 'center' },
   footerNote: { alignItems: 'center', paddingTop: 46, gap: 7 },
