@@ -122,15 +122,11 @@ export default function RadioScreen() {
         </View>
 
         <View style={styles.playerArtworkWrap}>
-          {currentTrack?.imageUrl ? (
-            <Image source={currentTrack.imageUrl} contentFit="cover" style={styles.playerArtwork} />
-          ) : (
-            <View style={styles.playerLogoFallback}>
-              <View style={styles.playerLogoCard}>
-                <Image source={activeStation.logo} contentFit="contain" style={styles.playerLogo} />
-              </View>
+          <View style={styles.playerLogoFallback}>
+            <View style={styles.playerLogoCard}>
+              <Image source={activeStation.logo} contentFit="contain" style={styles.playerLogo} />
             </View>
-          )}
+          </View>
           <LinearGradient colors={['transparent', 'rgba(7,8,11,0.72)']} style={StyleSheet.absoluteFill} />
           <View style={styles.artworkLive}>
             <View style={[styles.liveDot, { backgroundColor: colors.accent }]} />
