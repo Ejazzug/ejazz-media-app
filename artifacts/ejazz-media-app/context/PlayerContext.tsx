@@ -31,6 +31,7 @@ export type Station = {
   genre: string;
   streamUrl: string;
   artwork: number;
+  logo: number;
   color: string;
 };
 
@@ -43,6 +44,7 @@ const stations: Station[] = [
     genre: 'AT40 • POP • INDIE',
     streamUrl: process.env.EXPO_PUBLIC_EJAZZ_RADIO_STREAM_URL ?? '',
     artwork: require('@/assets/images/editorial-vocalist.jpg'),
+    logo: require('@/assets/images/ejazz-radio-logo.png'),
     color: '#E43B48',
   },
   {
@@ -53,6 +55,7 @@ const stations: Station[] = [
     genre: 'AFRICAN POP',
     streamUrl: process.env.EXPO_PUBLIC_EJAZZ_EXTRA_STREAM_URL ?? '',
     artwork: require('@/assets/images/editorial-african-pop.jpg'),
+    logo: require('@/assets/images/ejazz-xtra-logo.png'),
     color: '#FF6B6B',
   },
 ];

@@ -2,73 +2,13 @@ import { Feather } from '@expo/vector-icons';
 import { Image } from 'expo-image';
 import { LinearGradient } from 'expo-linear-gradient';
 import React from 'react';
-import {
-  ActivityIndicator,
-  Animated,
-  Easing,
-  Pressable,
-  Share,
-  StyleSheet,
-  Text,
-  TextInput,
-  View,
-} from 'react-native';
+import { ActivityIndicator, Pressable, Share, StyleSheet, Text, TextInput, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
-import { PlayButton } from '@/components/MediaComponents';
+import { PlayButton, PlayingEqualizer } from '@/components/MediaComponents';
 import { KeyboardAwareScrollViewCompat } from '@/components/KeyboardAwareScrollViewCompat';
 import { useColors } from '@/hooks/useColors';
 import { usePlayer } from '@/context/PlayerContext';
 import { useExtraSongRequest, useExtraSongSearch, useSongRequest } from '@/lib/radio';
-
-function PlayingEqualizer({ playing }: { playing: boolean }) {
-  const bars = React.useRef([
-    new Animated.Value(0.35),
-    new Animated.Value(0.7),
-    new Animated.Value(0.45),
-    new Animated.Value(0.8),
-  ]).current;
-
-  React.useEffect(() => {
-    if (!playing) {
-      bars.forEach((bar) => {
-        bar.stopAnimation();
-        bar.setValue(0.35);
-      });
-      return;
-    }
-
-    const loops = bars.map((bar, index) => Animated.loop(
-      Animated.sequence([
-        Animated.timing(bar, {
-          toValue: index % 2 === 0 ? 1 : 0.65,
-          duration: 280 + index * 65,
-          easing: Easing.inOut(Easing.quad),
-          useNativeDriver: true,
-        }),
-        Animated.timing(bar, {
-          toValue: index % 2 === 0 ? 0.4 : 0.25,
-          duration: 320 + index * 55,
-          easing: Easing.inOut(Easing.quad),
-          useNativeDriver: true,
-        }),
-      ]),
-    ));
-    loops.forEach((loop) => loop.start());
-    return () => loops.forEach((loop) => loop.stop());
-  }, [bars, playing]);
-
-  if (!playing) return null;
-  return (
-    <View accessibilityLabel="Live audio playing" style={styles.equalizer}>
-      {bars.map((bar, index) => (
-        <Animated.View
-          key={index}
-          style={[styles.equalizerBar, { transform: [{ scaleY: bar }] }]}
-        />
-      ))}
-    </View>
-  );
-}
 
 export default function RadioScreen() {
   const colors = useColors();
@@ -170,6 +110,9 @@ export default function RadioScreen() {
                 onPress={() => selectStation(station.id)}
                 style={[styles.switcherItem, selected && { backgroundColor: colors.primary }]}
               >
+                <View style={styles.switcherLogoChip}>
+                  <Image source={station.logo} contentFit="contain" style={styles.switcherLogo} />
+                </View>
                 <Text style={[styles.switcherText, selected && { color: colors.primaryForeground }]}>
                   {station.shortName}
                 </Text>
@@ -179,19 +122,40 @@ export default function RadioScreen() {
         </View>
 
         <View style={styles.playerArtworkWrap}>
-          <Image
-            source={currentTrack?.imageUrl || activeStation.artwork}
-            contentFit="cover"
-            style={styles.playerArtwork}
-          />
+          {currentTrack?.imageUrl ? (
+            <Image source={currentTrack.imageUrl} contentFit="cover" style={styles.playerArtwork} />
+          ) : (
+            <View style={styles.playerLogoFallback}>
+              <View style={styles.playerLogoCard}>
+                <Image source={activeStation.logo} contentFit="contain" style={styles.playerLogo} />
+              </View>
+            </View>
+          )}
           <LinearGradient colors={['transparent', 'rgba(7,8,11,0.72)']} style={StyleSheet.absoluteFill} />
           <View style={styles.artworkLive}>
             <View style={[styles.liveDot, { backgroundColor: colors.accent }]} />
             <Text style={styles.liveText}>LIVE NOW</Text>
           </View>
           <View style={styles.artworkStation}>
-            <Text style={styles.artworkStationName}>{activeStation.name}</Text>
-            <Text style={styles.artworkStationDescription}>{activeStation.genre}</Text>
+            <View style={styles.artworkStationLogoChip}>
+              <Image source={activeStation.logo} contentFit="contain" style={styles.artworkStationLogo} />
+            </View>
+            <View>
+              <Text style={styles.artworkStationName}>{activeStation.name}</Text>
+              <Text style={styles.artworkStationDescription}>{activeStation.genre}</Text>
+            </View>
+          </View>
+        </View>
+
+        <View style={styles.controls}>
+          <Pressable style={styles.secondaryControl} onPress={() => Share.share({ message: `Listen to ${activeStation.name}` })}>
+            <Feather name="share-2" size={19} color={colors.mutedForeground} />
+            <Text style={styles.controlText}>Share</Text>
+          </Pressable>
+          <PlayButton playing={isPlaying} onPress={togglePlayback} loading={isBuffering} />
+          <View style={styles.secondaryControl}>
+            <Feather name="volume-2" size={19} color={colors.mutedForeground} />
+            <Text style={styles.controlText}>Volume</Text>
           </View>
         </View>
 
@@ -272,18 +236,6 @@ export default function RadioScreen() {
             </Pressable>
           </View>
         )}
-
-        <View style={styles.controls}>
-          <Pressable style={styles.secondaryControl} onPress={() => Share.share({ message: `Listen to ${activeStation.name}` })}>
-            <Feather name="share-2" size={19} color={colors.mutedForeground} />
-            <Text style={styles.controlText}>Share</Text>
-          </Pressable>
-          <PlayButton playing={isPlaying} onPress={togglePlayback} loading={isBuffering} />
-          <View style={styles.secondaryControl}>
-            <Feather name="volume-2" size={19} color={colors.mutedForeground} />
-            <Text style={styles.controlText}>Volume</Text>
-          </View>
-        </View>
 
         <View style={styles.backgroundNote}>
           <Feather name="headphones" size={18} color={colors.primary} />
@@ -468,21 +420,26 @@ const styles = StyleSheet.create({
   title: { color: '#F7F9FC', fontSize: 34, fontWeight: '700', letterSpacing: -1.2 },
   shareButton: { position: 'absolute', right: 20, bottom: 5, width: 42, height: 42, alignItems: 'center', justifyContent: 'center', borderWidth: 1, borderColor: '#2C4B75' },
   switcher: { flexDirection: 'row', gap: 8, paddingHorizontal: 20, marginBottom: 20 },
-  switcherItem: { paddingHorizontal: 14, paddingVertical: 11, borderWidth: 1, borderColor: '#2C4B75' },
+  switcherItem: { flexDirection: 'row', alignItems: 'center', gap: 8, paddingHorizontal: 10, paddingVertical: 8, borderWidth: 1, borderColor: '#2C4B75' },
+  switcherLogoChip: { width: 28, height: 28, padding: 3, borderRadius: 6, backgroundColor: '#FFFFFF' },
+  switcherLogo: { width: '100%', height: '100%' },
   switcherText: { color: '#A7B7CC', fontSize: 11, fontWeight: '700', letterSpacing: 0.6 },
   playerArtworkWrap: { height: 370, marginHorizontal: 20, overflow: 'hidden', backgroundColor: '#13161E' },
   playerArtwork: { ...StyleSheet.absoluteFill },
+  playerLogoFallback: { ...StyleSheet.absoluteFill, alignItems: 'center', justifyContent: 'center', backgroundColor: '#102B55' },
+  playerLogoCard: { width: 190, height: 190, padding: 24, borderRadius: 24, backgroundColor: '#FFFFFF' },
+  playerLogo: { width: '100%', height: '100%' },
   artworkLive: { position: 'absolute', top: 16, left: 16, flexDirection: 'row', alignItems: 'center', gap: 7, paddingHorizontal: 10, paddingVertical: 7, backgroundColor: 'rgba(7,8,11,0.72)' },
   liveDot: { width: 7, height: 7, borderRadius: 4 },
   liveText: { color: '#F5F1E9', fontSize: 10, fontWeight: '700', letterSpacing: 1.4 },
-  artworkStation: { position: 'absolute', bottom: 18, left: 18 },
+  artworkStation: { position: 'absolute', bottom: 18, left: 18, right: 18, flexDirection: 'row', alignItems: 'center', gap: 12 },
+  artworkStationLogoChip: { width: 48, height: 48, padding: 5, borderRadius: 9, backgroundColor: '#FFFFFF' },
+  artworkStationLogo: { width: '100%', height: '100%' },
   artworkStationName: { color: '#F7F9FC', fontSize: 28, fontWeight: '700', letterSpacing: -1 },
   artworkStationDescription: { color: '#FF6B6B', fontSize: 11, fontWeight: '700', letterSpacing: 1.3, marginTop: 5 },
   trackBlock: { paddingHorizontal: 20, paddingTop: 25 },
   onAirHeading: { flexDirection: 'row', alignItems: 'center', gap: 10 },
   trackEyebrow: { color: '#3E79FF', fontSize: 10, fontWeight: '700', letterSpacing: 1.5 },
-  equalizer: { height: 16, flexDirection: 'row', alignItems: 'center', gap: 3 },
-  equalizerBar: { width: 2, height: 14, borderRadius: 1, backgroundColor: '#FF6B6B' },
   trackTitle: { color: '#F7F9FC', fontSize: 22, fontWeight: '700', marginTop: 8 },
   trackArtist: { color: '#A7B7CC', fontSize: 14, marginTop: 5 },
   metadataLoading: { flexDirection: 'row', alignItems: 'center', gap: 9, marginTop: 10 },

@@ -127,7 +127,7 @@ const styles = StyleSheet.create({
   nowPlayingCopy: { flex: 1 },
   nowPlayingLabel: { color: '#A7B7CC', fontSize: 9, fontWeight: '700', letterSpacing: 1.5, marginBottom: 4 },
   nowPlayingTitle: { color: '#F7F9FC', fontSize: 14, fontWeight: '600' },
-  latestHeading: { marginTop: 36 },
+  latestHeading: { marginTop: 20 },
   storyList: { gap: 20, marginTop: 22 },
   newsStatus: { minHeight: 120, alignItems: 'center', justifyContent: 'center', gap: 12, paddingHorizontal: 20 },
   newsStatusTitle: { color: '#F7F9FC', fontSize: 16, fontWeight: '600', textAlign: 'center' },

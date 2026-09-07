@@ -1,10 +1,13 @@
 import { Feather } from '@expo/vector-icons';
 import { Image } from 'expo-image';
 import { LinearGradient } from 'expo-linear-gradient';
-import { useRouter } from 'expo-router';
+import { usePathname, useRouter } from 'expo-router';
 import React from 'react';
 import {
   ActivityIndicator,
+  Animated,
+  Easing,
+  Platform,
   Pressable,
   StyleProp,
   StyleSheet,
@@ -16,6 +19,68 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useColors } from '@/hooks/useColors';
 import { Station, usePlayer } from '@/context/PlayerContext';
 import { Story } from '@/lib/news';
+
+export function PlayingEqualizer({
+  playing,
+  compact = false,
+}: {
+  playing: boolean;
+  compact?: boolean;
+}) {
+  const bars = React.useRef([
+    new Animated.Value(0.35),
+    new Animated.Value(0.7),
+    new Animated.Value(0.45),
+    new Animated.Value(0.8),
+  ]).current;
+
+  React.useEffect(() => {
+    if (!playing) {
+      bars.forEach((bar) => {
+        bar.stopAnimation();
+        bar.setValue(0.35);
+      });
+      return;
+    }
+    const loops = bars.map((bar, index) => Animated.loop(
+      Animated.sequence([
+        Animated.timing(bar, {
+          toValue: index % 2 === 0 ? 1 : 0.65,
+          duration: 280 + index * 65,
+          easing: Easing.inOut(Easing.quad),
+          useNativeDriver: Platform.OS !== 'web',
+        }),
+        Animated.timing(bar, {
+          toValue: index % 2 === 0 ? 0.4 : 0.25,
+          duration: 320 + index * 55,
+          easing: Easing.inOut(Easing.quad),
+          useNativeDriver: Platform.OS !== 'web',
+        }),
+      ]),
+    ));
+    loops.forEach((loop) => loop.start());
+    return () => loops.forEach((loop) => loop.stop());
+  }, [bars, playing]);
+
+  if (!playing) return null;
+  return (
+    <View
+      accessibilityLabel="Live audio playing"
+      style={[styles.equalizer, compact && styles.equalizerCompact]}
+    >
+      {bars.map((bar, index) => (
+        <Animated.View
+          key={index}
+          style={[
+            styles.equalizerBar,
+            compact && styles.equalizerBarCompact,
+            { transform: [{ scaleY: bar }] },
+          ]}
+        />
+      ))}
+    </View>
+  );
+}
 
 export function EditorialPlaceholder({
   style,
@@ -114,9 +179,14 @@ export function StationCard({ station }: { station: Station }) {
         style={StyleSheet.absoluteFill}
       />
       <View style={styles.stationCardContent}>
-        <View style={styles.livePill}>
-          <View style={[styles.liveDot, { backgroundColor: colors.accent }]} />
-          <Text style={styles.liveText}>LIVE</Text>
+        <View style={styles.stationTopRow}>
+          <View style={styles.livePill}>
+            <View style={[styles.liveDot, { backgroundColor: colors.accent }]} />
+            <Text style={styles.liveText}>LIVE</Text>
+          </View>
+          <View style={styles.stationLogoChip}>
+            <Image source={station.logo} contentFit="contain" style={styles.stationLogo} />
+          </View>
         </View>
         <View style={styles.stationCardBottom}>
           <View style={styles.stationCopy}>
@@ -173,14 +243,19 @@ export function MiniPlayer() {
   const router = useRouter();
   const insets = useSafeAreaInsets();
   const colors = useColors();
+  const pathname = usePathname();
+  if (pathname === '/podcasts') return null;
   return (
     <View style={[styles.miniPlayerWrap, { bottom: 76 + Math.max(insets.bottom, 0) }]}>
       <Pressable onPress={() => router.push('/radio')} style={styles.miniPlayer}>
-        <Image source={activeStation.artwork} contentFit="cover" style={styles.miniArtwork} />
+        <View style={styles.miniLogoChip}>
+          <Image source={activeStation.logo} contentFit="contain" style={styles.miniLogo} />
+        </View>
         <View style={styles.miniCopy}>
           <View style={styles.miniTitleRow}>
             <View style={[styles.liveDot, { backgroundColor: colors.accent }]} />
             <Text style={styles.miniLive}>LIVE ON {activeStation.shortName}</Text>
+            <PlayingEqualizer playing={isPlaying} compact />
           </View>
           <Text numberOfLines={1} style={styles.miniTrack}>
             {trackArtist} · {trackTitle}
@@ -219,6 +294,10 @@ export function ScreenHeader({ eyebrow, title }: { eyebrow?: string; title: stri
 }
 
 const styles = StyleSheet.create({
+  equalizer: { height: 16, flexDirection: 'row', alignItems: 'center', gap: 3 },
+  equalizerCompact: { height: 10, gap: 2, marginLeft: 2 },
+  equalizerBar: { width: 2, height: 14, borderRadius: 1, backgroundColor: '#FF6B6B' },
+  equalizerBarCompact: { width: 1.5, height: 9 },
   wordmark: { flexDirection: 'row', alignItems: 'center', gap: 9 },
   mark: { width: 22, height: 22, transform: [{ skewX: '-16deg' }], justifyContent: 'center' },
   markCut: { width: 13, height: 3, backgroundColor: '#071B3A', alignSelf: 'center' },
@@ -228,7 +307,10 @@ const styles = StyleSheet.create({
   stationCard: { height: 220, borderWidth: 1, overflow: 'hidden', backgroundColor: '#0D2A57' },
   stationArtwork: { ...StyleSheet.absoluteFill, opacity: 0.75 },
   stationCardContent: { flex: 1, justifyContent: 'space-between', padding: 16 },
+  stationTopRow: { flexDirection: 'row', alignItems: 'flex-start', justifyContent: 'space-between' },
   livePill: { alignSelf: 'flex-start', flexDirection: 'row', alignItems: 'center', gap: 6, paddingHorizontal: 9, paddingVertical: 6, backgroundColor: 'rgba(7,8,11,0.7)' },
+  stationLogoChip: { width: 54, height: 42, padding: 5, borderRadius: 8, backgroundColor: '#FFFFFF' },
+  stationLogo: { width: '100%', height: '100%' },
   liveDot: { width: 6, height: 6, borderRadius: 3 },
   liveText: { color: '#F7F9FC', fontSize: 10, fontWeight: '700', letterSpacing: 1.3 },
   stationCardBottom: { flexDirection: 'row', alignItems: 'flex-end', justifyContent: 'space-between' },
@@ -252,7 +334,8 @@ const styles = StyleSheet.create({
   storyTime: { color: '#7890AE', fontSize: 10, fontWeight: '600', letterSpacing: 1.1, marginTop: 10 },
   miniPlayerWrap: { position: 'absolute', left: 12, right: 12, zIndex: 20 },
   miniPlayer: { flexDirection: 'row', alignItems: 'center', gap: 11, padding: 8, paddingRight: 12, backgroundColor: '#102B55', borderWidth: 1, borderColor: '#2C4B75' },
-  miniArtwork: { width: 42, height: 42 },
+  miniLogoChip: { width: 42, height: 42, padding: 4, borderRadius: 8, backgroundColor: '#FFFFFF' },
+  miniLogo: { width: '100%', height: '100%' },
   miniCopy: { flex: 1, gap: 3 },
   miniTitleRow: { flexDirection: 'row', alignItems: 'center', gap: 5 },
   miniLive: { color: '#FF6B6B', fontSize: 9, fontWeight: '700', letterSpacing: 0.8 },

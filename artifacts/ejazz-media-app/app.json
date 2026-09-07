@@ -4,9 +4,14 @@
     "slug": "ejazz-media-app",
     "version": "1.0.0",
     "orientation": "portrait",
-    "icon": "./assets/images/icon.png",
+    "icon": "./assets/images/ejazz-app-icon.png",
     "scheme": "ejazz-media-app",
     "userInterfaceStyle": "dark",
+    "splash": {
+      "image": "./assets/images/ejazz-app-icon.png",
+      "resizeMode": "contain",
+      "backgroundColor": "#F2F2F2"
+    },
     "ios": {
       "supportsTablet": false
     },
@@ -15,7 +20,7 @@
       "permissions": ["FOREGROUND_SERVICE", "FOREGROUND_SERVICE_MEDIA_PLAYBACK"]
     },
     "web": {
-      "favicon": "./assets/images/icon.png"
+      "favicon": "./assets/images/ejazz-app-icon.png"
     },
     "plugins": [
       "expo-router",

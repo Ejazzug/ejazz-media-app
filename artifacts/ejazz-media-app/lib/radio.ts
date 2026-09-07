@@ -6,6 +6,9 @@ const EXTRA_STATION_ID = '320';
 const RADIO_USERNAME = 'ejazzug';
 const REQUEST_TIMEOUT_MS = 10_000;
 let radioHistoryBackfill: RadioTrack[] = [];
+const STYLIZED_WORDS = new Map([
+  ['wstrn', 'WSTRN'],
+]);
 
 type RpcEnvelope = {
   type?: unknown;
@@ -81,8 +84,8 @@ async function requestJson(url: string) {
 function normalizeTrack(value: unknown): RadioTrack | null {
   if (!value || typeof value !== 'object') return null;
   const track = value as Record<string, unknown>;
-  const artist = typeof track.artist === 'string' ? track.artist.trim() : '';
-  const title = typeof track.title === 'string' ? track.title.trim() : '';
+  const artist = typeof track.artist === 'string' ? smartTitleCase(track.artist) : '';
+  const title = typeof track.title === 'string' ? smartTitleCase(track.title) : '';
   if (!artist && !title) return null;
 
   return {
@@ -98,9 +101,29 @@ function normalizeTrack(value: unknown): RadioTrack | null {
   };
 }
 
+function smartTitleCase(value: string) {
+  return value
+    .trim()
+    .split(/(\s+)/)
+    .map((word) => {
+      if (!word.trim()) return word;
+      const letters = word.replace(/[^A-Za-z]/g, '');
+      if (!letters) return word;
+      const knownStyle = STYLIZED_WORDS.get(letters.toLocaleLowerCase());
+      if (knownStyle) return word.replace(letters, knownStyle);
+      const isUniformCase = letters === letters.toLocaleUpperCase()
+        || letters === letters.toLocaleLowerCase();
+      if (!isUniformCase) return word;
+      return word.toLocaleLowerCase().replace(/[a-z]/, (letter) => letter.toLocaleUpperCase());
+    })
+    .join('');
+}
+
 function isStationJingle(track: RadioTrack) {
   const artist = track.artist.trim().toLocaleLowerCase();
-  return artist === 'ejazz media' || artist === 'ejazz xtra';
+  return artist === 'ejazz media'
+    || artist === 'ejazz xtra'
+    || artist === 'ejazz production';
 }
 
 function trackIdentity(track: RadioTrack) {
@@ -143,8 +166,8 @@ function normalizeExtraTrack(
   titleValue: unknown,
   imageUrl: string,
 ): RadioTrack | null {
-  const artist = typeof artistValue === 'string' ? artistValue.trim() : '';
-  const title = typeof titleValue === 'string' ? titleValue.trim() : '';
+  const artist = typeof artistValue === 'string' ? smartTitleCase(artistValue) : '';
+  const title = typeof titleValue === 'string' ? smartTitleCase(titleValue) : '';
   if (!artist && !title) return null;
   return { artist, title: title || artist, album: '', imageUrl, time: '' };
 }
@@ -183,8 +206,8 @@ async function fetchExtraRecentTracks(): Promise<RadioTrack[]> {
     .map((value): RadioTrack | null => {
       if (!value || typeof value !== 'object') return null;
       const item = value as Record<string, unknown>;
-      const artist = typeof item.trackartist === 'string' ? item.trackartist.trim() : '';
-      const title = typeof item.tracktitle === 'string' ? item.tracktitle.trim() : '';
+      const artist = typeof item.trackartist === 'string' ? smartTitleCase(item.trackartist) : '';
+      const title = typeof item.tracktitle === 'string' ? smartTitleCase(item.tracktitle) : '';
       if (!artist && !title) return null;
       const artworkId = typeof item.artworkid === 'string' || typeof item.artworkid === 'number'
         ? String(item.artworkid)
@@ -222,7 +245,7 @@ async function searchExtraSongs(query: string): Promise<ExtraSearchResult> {
       if (!value || typeof value !== 'object') return null;
       const item = value as Record<string, unknown>;
       const id = typeof item.id === 'string' || typeof item.id === 'number' ? String(item.id) : '';
-      const title = typeof item.title === 'string' ? item.title.trim() : '';
+      const title = typeof item.title === 'string' ? smartTitleCase(item.title) : '';
       return id && title ? { id, title } : null;
     })
     .filter((track): track is ExtraSearchTrack => track !== null);

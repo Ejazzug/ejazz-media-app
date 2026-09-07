@@ -1,4 +1,5 @@
 import { Feather } from '@expo/vector-icons';
+import { useRouter } from 'expo-router';
 import React from 'react';
 import { Linking, Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
@@ -6,6 +7,7 @@ import { EJazzWordmark, ScreenHeader } from '@/components/MediaComponents';
 import { useColors } from '@/hooks/useColors';
 
 const items = [
+  { label: 'Podcasts', icon: 'mic' as const, route: '/podcasts' as const },
   { label: 'About EJazz', icon: 'info' as const, action: undefined },
   { label: 'Contact EJazz', icon: 'mail' as const, action: 'mailto:hello@ejazzmedia.com' },
   { label: 'Instagram', icon: 'instagram' as const, action: 'https://instagram.com' },
@@ -16,6 +18,7 @@ const items = [
 export default function MoreScreen() {
   const colors = useColors();
   const insets = useSafeAreaInsets();
+  const router = useRouter();
   return (
     <View style={[styles.screen, { backgroundColor: colors.background }]}>
       <ScrollView showsVerticalScrollIndicator={false} contentContainerStyle={{ paddingBottom: 150 }}>
@@ -29,7 +32,10 @@ export default function MoreScreen() {
           {items.map((item) => (
             <Pressable
               key={item.label}
-              onPress={() => item.action && Linking.openURL(item.action)}
+              onPress={() => {
+                if ('route' in item && item.route) router.push(item.route);
+                else if ('action' in item && item.action) Linking.openURL(item.action);
+              }}
               style={({ pressed }) => [styles.menuItem, { opacity: pressed ? 0.65 : 1 }]}
             >
               <View style={styles.menuIcon}><Feather name={item.icon} size={18} color={colors.primary} /></View>
