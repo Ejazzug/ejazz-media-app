@@ -2,7 +2,7 @@
   "expo": {
     "name": "EJazz Media App",
     "slug": "ejazz-media-app",
-    "version": "1.0.0",
+    "version": "0.1.0",
     "orientation": "portrait",
     "icon": "./assets/images/ejazz-app-icon.png",
     "scheme": "ejazz-media-app",
