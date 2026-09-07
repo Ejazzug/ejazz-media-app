@@ -47,8 +47,8 @@ export default function HomeScreen() {
 
         <View style={styles.hero}>
           <Text style={styles.heroKicker}>THE OFFICIAL APP OF EJAZZ MEDIA</Text>
-          <Text style={styles.heroTitle}>Listen.{'\n'}Read.{'\n'}Discover.</Text>
-          <Text style={styles.heroCopy}>Radio, stories and culture — in one place.</Text>
+          <Text style={styles.heroTitle}>Your Vibe.{'\n'}Your News.{'\n'}Your EJazz.</Text>
+          <Text style={styles.heroCopy}>Radio, culture &amp; the stories that matter - all in one app.</Text>
         </View>
 
         <View style={styles.sectionHeading}>

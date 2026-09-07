@@ -1,6 +1,6 @@
 # EJazz Media App
 
-The official EJazz Media Android app: live EJazz Radio, EJazz eXTRA, and an editorial EJazz News reading experience designed around one promise — **Listen. Read. Discover.**
+The official EJazz Media Android app: live EJazz Radio, EJazz Xtra, and an editorial EJazz News reading experience designed around one promise — **Your Vibe. Your News. Your EJazz.**
 
 ## Run locally
 

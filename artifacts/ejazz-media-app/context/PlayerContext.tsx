@@ -32,8 +32,8 @@ export type Station = {
 const stations: Station[] = [
   {
     id: 'radio',
-    name: 'EJAZZ RADIO',
-    shortName: 'EJAZZ Radio',
+    name: 'EJazz Radio',
+    shortName: 'EJazz Radio',
     description: 'AT40, Pop & Indie',
     genre: 'AT40 • POP • INDIE',
     streamUrl: process.env.EXPO_PUBLIC_EJAZZ_RADIO_STREAM_URL ?? '',
@@ -42,8 +42,8 @@ const stations: Station[] = [
   },
   {
     id: 'extra',
-    name: 'EJAZZ eXTRA',
-    shortName: 'EJAZZ eXTRA',
+    name: 'EJazz Xtra',
+    shortName: 'EJazz Xtra',
     description: 'African Pop',
     genre: 'AFRICAN POP',
     streamUrl: process.env.EXPO_PUBLIC_EJAZZ_EXTRA_STREAM_URL ?? '',

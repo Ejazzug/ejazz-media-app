@@ -180,7 +180,7 @@ export function MiniPlayer() {
         <View style={styles.miniCopy}>
           <View style={styles.miniTitleRow}>
             <View style={[styles.liveDot, { backgroundColor: colors.accent }]} />
-            <Text style={styles.miniLive}>LIVE ON {activeStation.shortName.toUpperCase()}</Text>
+            <Text style={styles.miniLive}>LIVE ON {activeStation.shortName}</Text>
           </View>
           <Text numberOfLines={1} style={styles.miniTrack}>
             {trackArtist} · {trackTitle}
