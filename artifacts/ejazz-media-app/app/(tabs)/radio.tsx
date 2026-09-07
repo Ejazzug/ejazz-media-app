@@ -137,9 +137,6 @@ export default function RadioScreen() {
             <Text style={styles.liveText}>LIVE NOW</Text>
           </View>
           <View style={styles.artworkStation}>
-            <View style={styles.artworkStationLogoChip}>
-              <Image source={activeStation.logo} contentFit="contain" style={styles.artworkStationLogo} />
-            </View>
             <View>
               <Text style={styles.artworkStationName}>{activeStation.name}</Text>
               <Text style={styles.artworkStationDescription}>{activeStation.genre}</Text>
@@ -432,9 +429,7 @@ const styles = StyleSheet.create({
   artworkLive: { position: 'absolute', top: 16, left: 16, flexDirection: 'row', alignItems: 'center', gap: 7, paddingHorizontal: 10, paddingVertical: 7, backgroundColor: 'rgba(7,8,11,0.72)' },
   liveDot: { width: 7, height: 7, borderRadius: 4 },
   liveText: { color: '#F5F1E9', fontSize: 10, fontWeight: '700', letterSpacing: 1.4 },
-  artworkStation: { position: 'absolute', bottom: 18, left: 18, right: 18, flexDirection: 'row', alignItems: 'center', gap: 12 },
-  artworkStationLogoChip: { width: 48, height: 48, padding: 5, borderRadius: 9, backgroundColor: '#FFFFFF' },
-  artworkStationLogo: { width: '100%', height: '100%' },
+  artworkStation: { position: 'absolute', bottom: 18, left: 18, right: 18 },
   artworkStationName: { color: '#F7F9FC', fontSize: 28, fontWeight: '700', letterSpacing: -1 },
   artworkStationDescription: { color: '#FF6B6B', fontSize: 11, fontWeight: '700', letterSpacing: 1.3, marginTop: 5 },
   trackBlock: { paddingHorizontal: 20, paddingTop: 25 },

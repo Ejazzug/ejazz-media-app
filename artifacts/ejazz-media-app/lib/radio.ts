@@ -92,7 +92,9 @@ function normalizeTrack(value: unknown): RadioTrack | null {
     artist: artist || 'EJazz Radio',
     title: title || 'Live broadcast',
     album: typeof track.album === 'string' ? track.album.trim() : '',
-    imageUrl: typeof track.image === 'string' ? track.image.trim() : '',
+    imageUrl: typeof track.image === 'string' && !/\/nocover\.png(?:[?#]|$)/i.test(track.image.trim())
+      ? track.image.trim()
+      : '',
     time: typeof track.localtime === 'string'
       ? track.localtime.trim()
       : typeof track.time === 'string'
