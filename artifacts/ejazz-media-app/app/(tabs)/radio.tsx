@@ -2,13 +2,73 @@ import { Feather } from '@expo/vector-icons';
 import { Image } from 'expo-image';
 import { LinearGradient } from 'expo-linear-gradient';
 import React from 'react';
-import { ActivityIndicator, Pressable, Share, StyleSheet, Text, TextInput, View } from 'react-native';
+import {
+  ActivityIndicator,
+  Animated,
+  Easing,
+  Pressable,
+  Share,
+  StyleSheet,
+  Text,
+  TextInput,
+  View,
+} from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { PlayButton } from '@/components/MediaComponents';
 import { KeyboardAwareScrollViewCompat } from '@/components/KeyboardAwareScrollViewCompat';
 import { useColors } from '@/hooks/useColors';
 import { usePlayer } from '@/context/PlayerContext';
 import { useExtraSongRequest, useExtraSongSearch, useSongRequest } from '@/lib/radio';
+
+function PlayingEqualizer({ playing }: { playing: boolean }) {
+  const bars = React.useRef([
+    new Animated.Value(0.35),
+    new Animated.Value(0.7),
+    new Animated.Value(0.45),
+    new Animated.Value(0.8),
+  ]).current;
+
+  React.useEffect(() => {
+    if (!playing) {
+      bars.forEach((bar) => {
+        bar.stopAnimation();
+        bar.setValue(0.35);
+      });
+      return;
+    }
+
+    const loops = bars.map((bar, index) => Animated.loop(
+      Animated.sequence([
+        Animated.timing(bar, {
+          toValue: index % 2 === 0 ? 1 : 0.65,
+          duration: 280 + index * 65,
+          easing: Easing.inOut(Easing.quad),
+          useNativeDriver: true,
+        }),
+        Animated.timing(bar, {
+          toValue: index % 2 === 0 ? 0.4 : 0.25,
+          duration: 320 + index * 55,
+          easing: Easing.inOut(Easing.quad),
+          useNativeDriver: true,
+        }),
+      ]),
+    ));
+    loops.forEach((loop) => loop.start());
+    return () => loops.forEach((loop) => loop.stop());
+  }, [bars, playing]);
+
+  if (!playing) return null;
+  return (
+    <View accessibilityLabel="Live audio playing" style={styles.equalizer}>
+      {bars.map((bar, index) => (
+        <Animated.View
+          key={index}
+          style={[styles.equalizerBar, { transform: [{ scaleY: bar }] }]}
+        />
+      ))}
+    </View>
+  );
+}
 
 export default function RadioScreen() {
   const colors = useColors();
@@ -136,7 +196,10 @@ export default function RadioScreen() {
         </View>
 
         <View style={styles.trackBlock}>
-          <Text style={styles.trackEyebrow}>ON AIR</Text>
+          <View style={styles.onAirHeading}>
+            <Text style={styles.trackEyebrow}>ON AIR</Text>
+            <PlayingEqualizer playing={isPlaying} />
+          </View>
           {metadataLoading && isRadio && !currentTrack ? (
             <View style={styles.metadataLoading}>
               <ActivityIndicator size="small" color={colors.primary} />
@@ -416,7 +479,10 @@ const styles = StyleSheet.create({
   artworkStationName: { color: '#F7F9FC', fontSize: 28, fontWeight: '700', letterSpacing: -1 },
   artworkStationDescription: { color: '#FF6B6B', fontSize: 11, fontWeight: '700', letterSpacing: 1.3, marginTop: 5 },
   trackBlock: { paddingHorizontal: 20, paddingTop: 25 },
+  onAirHeading: { flexDirection: 'row', alignItems: 'center', gap: 10 },
   trackEyebrow: { color: '#3E79FF', fontSize: 10, fontWeight: '700', letterSpacing: 1.5 },
+  equalizer: { height: 16, flexDirection: 'row', alignItems: 'center', gap: 3 },
+  equalizerBar: { width: 2, height: 14, borderRadius: 1, backgroundColor: '#FF6B6B' },
   trackTitle: { color: '#F7F9FC', fontSize: 22, fontWeight: '700', marginTop: 8 },
   trackArtist: { color: '#A7B7CC', fontSize: 14, marginTop: 5 },
   metadataLoading: { flexDirection: 'row', alignItems: 'center', gap: 9, marginTop: 10 },

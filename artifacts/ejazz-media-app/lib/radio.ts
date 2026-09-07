@@ -5,6 +5,7 @@ const EXTRA_API_URL = 'https://c32.radioboss.fm/w';
 const EXTRA_STATION_ID = '320';
 const RADIO_USERNAME = 'ejazzug';
 const REQUEST_TIMEOUT_MS = 10_000;
+let radioHistoryBackfill: RadioTrack[] = [];
 
 type RpcEnvelope = {
   type?: unknown;
@@ -97,15 +98,36 @@ function normalizeTrack(value: unknown): RadioTrack | null {
   };
 }
 
+function isStationJingle(track: RadioTrack) {
+  const artist = track.artist.trim().toLocaleLowerCase();
+  return artist === 'ejazz media' || artist === 'ejazz xtra';
+}
+
+function trackIdentity(track: RadioTrack) {
+  return `${track.artist.trim().toLocaleLowerCase()}|${track.title.trim().toLocaleLowerCase()}|${track.time}`;
+}
+
 async function fetchRecentTracks() {
   const payload = await requestJson(rpcUrl('recenttracks.get', { limit: '10' }));
   if (payload.type !== 'result' || !Array.isArray(payload.data) || !Array.isArray(payload.data[0])) {
     throw new Error('Unexpected radio metadata response');
   }
 
-  return payload.data[0]
+  const currentTrack = normalizeTrack(payload.data[0][0]);
+  const previousTracks = payload.data[0]
+    .slice(1)
     .map(normalizeTrack)
-    .filter((track): track is RadioTrack => track !== null);
+    .filter((track): track is RadioTrack => track !== null && !isStationJingle(track));
+  const seen = new Set<string>();
+  radioHistoryBackfill = [...previousTracks, ...radioHistoryBackfill]
+    .filter((track) => {
+      const identity = trackIdentity(track);
+      if (seen.has(identity)) return false;
+      seen.add(identity);
+      return true;
+    })
+    .slice(0, 9);
+  return currentTrack ? [currentTrack, ...radioHistoryBackfill] : radioHistoryBackfill;
 }
 
 function extraArtworkUrl(kind: 'current' | 'next', timestamp: unknown) {
@@ -157,7 +179,7 @@ async function fetchExtraRecentTracks(): Promise<RadioTrack[]> {
   if (!Array.isArray(payload)) throw new Error('Unexpected EJazz Xtra history response');
 
   return payload
-    .slice(1, 7)
+    .slice(1)
     .map((value): RadioTrack | null => {
       if (!value || typeof value !== 'object') return null;
       const item = value as Record<string, unknown>;
@@ -177,7 +199,8 @@ async function fetchExtraRecentTracks(): Promise<RadioTrack[]> {
         time: typeof item.started === 'string' ? item.started : '',
       };
     })
-    .filter((track): track is RadioTrack => track !== null);
+    .filter((track): track is RadioTrack => track !== null && !isStationJingle(track))
+    .slice(0, 6);
 }
 
 async function searchExtraSongs(query: string): Promise<ExtraSearchResult> {

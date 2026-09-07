@@ -22,8 +22,8 @@ export default function MoreScreen() {
         <ScreenHeader eyebrow="THE HOUSE OF EJAZZ" title="More" />
         <View style={styles.about}>
           <EJazzWordmark />
-          <Text style={styles.aboutTitle}>Listen. Read. Discover.</Text>
-          <Text style={styles.aboutCopy}>EJazz Media brings live radio and the stories behind the sound into one place.</Text>
+          <Text style={styles.aboutTitle}>Your Vibe. Your News. Your EJazz.</Text>
+          <Text style={styles.aboutCopy}>Radio, culture &amp; the stories that matter - all in one app.</Text>
         </View>
         <View style={styles.menu}>
           {items.map((item) => (
