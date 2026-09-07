@@ -213,7 +213,11 @@ export function StoryCard({ story, featured = false }: { story: Story; featured?
   return (
     <Pressable
       onPress={() => router.push(`/article?id=${story.id}`)}
-      style={({ pressed }) => [styles.storyPressable, { opacity: pressed ? 0.88 : 1 }]}
+      style={({ pressed }) => [
+        styles.storyPressable,
+        featured && styles.storyPressableFeatured,
+        { opacity: pressed ? 0.88 : 1 },
+      ]}
     >
       {story.imageUrl ? (
         <Image
@@ -365,6 +369,7 @@ const styles = StyleSheet.create({
   stationName: { color: '#F7F9FC', fontSize: 23, fontWeight: '700', letterSpacing: -0.7 },
   stationDescription: { color: '#FF6B6B', fontSize: 11, fontWeight: '700', letterSpacing: 1.4, marginTop: 6 },
   storyPressable: { flexDirection: 'row', gap: 14 },
+  storyPressableFeatured: { flexDirection: 'column' },
   storyImage: { width: 104, height: 104, backgroundColor: '#163761' },
   storyImageFeatured: { width: '100%', height: 222 },
   editorialPlaceholder: { overflow: 'hidden', padding: 14, justifyContent: 'space-between' },

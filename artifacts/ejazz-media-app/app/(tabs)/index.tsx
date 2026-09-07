@@ -111,7 +111,7 @@ export default function HomeScreen() {
 
 const styles = StyleSheet.create({
   screen: { flex: 1 },
-  content: { paddingHorizontal: 20, paddingBottom: 150 },
+  content: { paddingHorizontal: 20, paddingBottom: 144 },
   topRow: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' },
   iconButton: { width: 40, height: 40, alignItems: 'center', justifyContent: 'center' },
   hero: { paddingTop: 42, paddingBottom: 35 },
