@@ -2,20 +2,22 @@ import { Feather } from '@expo/vector-icons';
 import { Image } from 'expo-image';
 import { useRouter } from 'expo-router';
 import React, { useMemo, useState } from 'react';
-import { Pressable, ScrollView, StyleSheet, Text, TextInput, View } from 'react-native';
-import { useSafeAreaInsets } from 'react-native-safe-area-context';
-import { ScreenHeader, StoryCard, stories } from '@/components/MediaComponents';
+import { ActivityIndicator, Pressable, RefreshControl, ScrollView, StyleSheet, Text, TextInput, View } from 'react-native';
+import { ScreenHeader, StoryCard } from '@/components/MediaComponents';
 import { useColors } from '@/hooks/useColors';
-
-const categories = ['ALL', 'MUSIC', 'CULTURE', 'ENTERTAINMENT'];
+import { useNews } from '@/lib/news';
 
 export default function NewsScreen() {
   const colors = useColors();
-  const insets = useSafeAreaInsets();
   const router = useRouter();
   const [category, setCategory] = useState('ALL');
   const [searchOpen, setSearchOpen] = useState(false);
   const [query, setQuery] = useState('');
+  const { data: stories = [], isLoading, isError, isRefetching, refetch } = useNews();
+  const categories = useMemo(
+    () => ['ALL', ...Array.from(new Set(stories.map((story) => story.category)))],
+    [stories],
+  );
   const filteredStories = useMemo(
     () =>
       stories.filter(
@@ -25,10 +27,16 @@ export default function NewsScreen() {
       ),
     [category, query],
   );
+  const featuredStory = filteredStories[0];
+  const remainingStories = filteredStories.slice(1);
 
   return (
     <View style={[styles.screen, { backgroundColor: colors.background }]}>
-      <ScrollView showsVerticalScrollIndicator={false} contentContainerStyle={{ paddingBottom: 150 }}>
+      <ScrollView
+        showsVerticalScrollIndicator={false}
+        contentContainerStyle={{ paddingBottom: 150 }}
+        refreshControl={<RefreshControl refreshing={isRefetching} onRefresh={refetch} tintColor={colors.primary} />}
+      >
         <ScreenHeader eyebrow="EJAZZ EDITORIAL" title="News" />
         <View style={styles.toolbar}>
           <Text style={styles.intro}>Music, entertainment, celebrity and culture.</Text>
@@ -49,26 +57,65 @@ export default function NewsScreen() {
             />
           </View>
         )}
-        <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.categoryRow}>
-          {categories.map((item) => (
-            <Pressable key={item} onPress={() => setCategory(item)} style={[styles.category, category === item && { backgroundColor: colors.accent }]}>
-              <Text style={[styles.categoryText, category === item && { color: colors.accentForeground }]}>{item}</Text>
-            </Pressable>
-          ))}
-        </ScrollView>
-        <Pressable onPress={() => router.push(`/article?id=${stories[0].id}`)} style={styles.featured}>
-          <Image source={stories[0].image} contentFit="cover" style={styles.featuredImage} />
-          <View style={styles.featuredMeta}>
-            <Text style={styles.featuredCategory}>EDITOR'S PICK</Text>
-            <Text style={styles.featuredTitle}>{stories[0].title}</Text>
-            <Text style={styles.featuredLink}>READ STORY <Feather name="arrow-up-right" size={13} color={colors.primary} /></Text>
+        {isLoading ? (
+          <View style={styles.status}>
+            <ActivityIndicator color={colors.primary} />
+            <Text style={styles.statusText}>Loading EJazz News…</Text>
           </View>
-        </Pressable>
-        <Text style={styles.latestLabel}>LATEST STORIES</Text>
-        <View style={styles.list}>
-          {filteredStories.slice(1).map((story) => <StoryCard key={story.id} story={story} />)}
-        </View>
-        {filteredStories.length <= 1 && <Text style={styles.empty}>No stories in this category yet.</Text>}
+        ) : isError ? (
+          <View style={styles.status}>
+            <Feather name="wifi-off" size={24} color={colors.accent} />
+            <Text style={styles.statusTitle}>Unable to load the latest stories.</Text>
+            <Pressable onPress={() => refetch()}><Text style={styles.retry}>TRY AGAIN</Text></Pressable>
+          </View>
+        ) : stories.length === 0 ? (
+          <View style={styles.status}>
+            <Feather name="file-text" size={24} color={colors.mutedForeground} />
+            <Text style={styles.statusText}>No stories have been published yet.</Text>
+          </View>
+        ) : filteredStories.length === 0 ? (
+          <>
+            <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.categoryRow}>
+              {categories.map((item) => (
+                <Pressable key={item} onPress={() => setCategory(item)} style={[styles.category, category === item && { backgroundColor: colors.accent }]}>
+                  <Text style={[styles.categoryText, category === item && { color: colors.accentForeground }]}>{item}</Text>
+                </Pressable>
+              ))}
+            </ScrollView>
+            <Text style={styles.empty}>No stories match this filter.</Text>
+          </>
+        ) : (
+          <>
+            <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.categoryRow}>
+              {categories.map((item) => (
+                <Pressable key={item} onPress={() => setCategory(item)} style={[styles.category, category === item && { backgroundColor: colors.accent }]}>
+                  <Text style={[styles.categoryText, category === item && { color: colors.accentForeground }]}>{item}</Text>
+                </Pressable>
+              ))}
+            </ScrollView>
+            <Pressable onPress={() => router.push(`/article?id=${featuredStory.id}`)} style={styles.featured}>
+              {featuredStory.imageUrl ? (
+                <Image source={featuredStory.imageUrl} contentFit="cover" style={styles.featuredImage} />
+              ) : (
+                <View style={[styles.featuredImage, styles.featuredFallback]}>
+                  <Feather name="file-text" size={36} color={colors.mutedForeground} />
+                </View>
+              )}
+              <View style={styles.featuredMeta}>
+                <Text style={styles.featuredCategory}>{featuredStory.category}</Text>
+                <Text style={styles.featuredTitle}>{featuredStory.title}</Text>
+                <Text style={styles.featuredLink}>READ STORY <Feather name="arrow-up-right" size={13} color={colors.primary} /></Text>
+              </View>
+            </Pressable>
+            <Text style={styles.latestLabel}>LATEST STORIES</Text>
+            <View style={styles.list}>
+              {remainingStories.map((story) => <StoryCard key={story.id} story={story} />)}
+            </View>
+            {remainingStories.length === 0 && (
+              <Text style={styles.empty}>No other stories match this filter.</Text>
+            )}
+          </>
+        )}
       </ScrollView>
     </View>
   );
@@ -86,6 +133,7 @@ const styles = StyleSheet.create({
   categoryText: { color: '#A7B7CC', fontSize: 10, fontWeight: '700', letterSpacing: 1 },
   featured: { marginHorizontal: 20, backgroundColor: '#0D2A57' },
   featuredImage: { width: '100%', height: 210 },
+  featuredFallback: { alignItems: 'center', justifyContent: 'center', backgroundColor: '#163761' },
   featuredMeta: { padding: 16 },
   featuredCategory: { color: '#FF6B6B', fontSize: 10, fontWeight: '700', letterSpacing: 1.4 },
   featuredTitle: { color: '#F7F9FC', fontSize: 23, lineHeight: 28, fontWeight: '700', letterSpacing: -0.5, marginTop: 9 },
@@ -93,4 +141,8 @@ const styles = StyleSheet.create({
   latestLabel: { color: '#A7B7CC', fontSize: 10, fontWeight: '700', letterSpacing: 1.6, marginHorizontal: 20, marginTop: 33, marginBottom: 17 },
   list: { gap: 20, marginHorizontal: 20 },
   empty: { color: '#A7B7CC', fontSize: 14, marginHorizontal: 20, paddingVertical: 30 },
+  status: { minHeight: 280, alignItems: 'center', justifyContent: 'center', gap: 13, paddingHorizontal: 30 },
+  statusTitle: { color: '#F7F9FC', fontSize: 17, fontWeight: '600', textAlign: 'center' },
+  statusText: { color: '#A7B7CC', fontSize: 14, lineHeight: 20, textAlign: 'center' },
+  retry: { color: '#E43B48', fontSize: 11, fontWeight: '700', letterSpacing: 1.2, padding: 10 },
 });

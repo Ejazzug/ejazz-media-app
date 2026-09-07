@@ -1,0 +1,1 @@
+- [WordPress media hotlinking](wordpress-media-hotlinking.md) — use original EJazz attachments with no-referrer browser requests; Jetpack variants return 403.

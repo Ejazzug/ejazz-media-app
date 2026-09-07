@@ -2,17 +2,19 @@ import { Feather } from '@expo/vector-icons';
 import { LinearGradient } from 'expo-linear-gradient';
 import { useRouter } from 'expo-router';
 import React from 'react';
-import { Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
+import { ActivityIndicator, Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
-import { EJazzWordmark, PlayButton, StationCard, StoryCard, stories } from '@/components/MediaComponents';
+import { EJazzWordmark, PlayButton, StationCard, StoryCard } from '@/components/MediaComponents';
 import { usePlayer } from '@/context/PlayerContext';
 import { useColors } from '@/hooks/useColors';
+import { useNews } from '@/lib/news';
 
 export default function HomeScreen() {
   const colors = useColors();
   const insets = useSafeAreaInsets();
   const router = useRouter();
   const { activeStation, isPlaying, stations, togglePlayback } = usePlayer();
+  const { data: stories = [], isLoading, isError, refetch } = useNews();
 
   return (
     <LinearGradient colors={[colors.gradientStart, colors.background, colors.gradientEnd]} style={styles.screen}>
@@ -66,11 +68,26 @@ export default function HomeScreen() {
           </Pressable>
         </View>
 
-        <StoryCard story={stories[0]} featured />
-        <View style={styles.storyList}>
-          <StoryCard story={stories[1]} />
-          <StoryCard story={stories[2]} />
-        </View>
+        {isLoading ? (
+          <View style={styles.newsStatus}>
+            <ActivityIndicator color={colors.primary} />
+            <Text style={styles.newsStatusText}>Loading the latest stories…</Text>
+          </View>
+        ) : isError ? (
+          <Pressable onPress={() => refetch()} style={styles.newsStatus}>
+            <Text style={styles.newsStatusTitle}>News is temporarily unavailable.</Text>
+            <Text style={styles.sectionLink}>TAP TO RETRY</Text>
+          </Pressable>
+        ) : stories.length > 0 ? (
+          <>
+            <StoryCard story={stories[0]} featured />
+            <View style={styles.storyList}>
+              {stories.slice(1, 3).map((story) => <StoryCard key={story.id} story={story} />)}
+            </View>
+          </>
+        ) : (
+          <Text style={styles.newsStatusText}>No stories have been published yet.</Text>
+        )}
 
         <View style={styles.footerNote}>
           <Text style={styles.footerText}>EJAZZ MEDIA</Text>
@@ -101,6 +118,9 @@ const styles = StyleSheet.create({
   nowPlayingTitle: { color: '#F7F9FC', fontSize: 14, fontWeight: '600' },
   latestHeading: { marginTop: 36 },
   storyList: { gap: 20, marginTop: 22 },
+  newsStatus: { minHeight: 120, alignItems: 'center', justifyContent: 'center', gap: 12, paddingHorizontal: 20 },
+  newsStatusTitle: { color: '#F7F9FC', fontSize: 16, fontWeight: '600', textAlign: 'center' },
+  newsStatusText: { color: '#A7B7CC', fontSize: 14, lineHeight: 20, textAlign: 'center' },
   footerNote: { alignItems: 'center', paddingTop: 46, gap: 7 },
   footerText: { color: '#F7F9FC', fontSize: 12, fontWeight: '700', letterSpacing: 2.2 },
   footerSubtext: { color: '#7890AE', fontSize: 9, fontWeight: '600', letterSpacing: 1.1 },

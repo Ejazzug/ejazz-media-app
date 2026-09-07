@@ -5,7 +5,6 @@ import { useRouter } from 'expo-router';
 import React from 'react';
 import {
   ActivityIndicator,
-  ImageSourcePropType,
   Pressable,
   StyleSheet,
   Text,
@@ -14,42 +13,7 @@ import {
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useColors } from '@/hooks/useColors';
 import { Station, usePlayer } from '@/context/PlayerContext';
-
-export type Story = {
-  id: string;
-  category: string;
-  title: string;
-  excerpt: string;
-  time: string;
-  image: ImageSourcePropType;
-};
-
-export const stories: Story[] = [
-  {
-    id: 'sound-of-the-week',
-    category: 'MUSIC',
-    title: 'The new voices shaping the sound of now',
-    excerpt: 'A closer listen to the artists turning late nights into something brighter.',
-    time: '8 MIN READ',
-    image: require('@/assets/images/editorial-vocalist.jpg'),
-  },
-  {
-    id: 'african-pop-now',
-    category: 'CULTURE',
-    title: 'African pop is moving at its own frequency',
-    excerpt: 'The scenes, sounds and stories finding a bigger audience beyond the expected.',
-    time: '6 MIN READ',
-    image: require('@/assets/images/editorial-african-pop.jpg'),
-  },
-  {
-    id: 'behind-the-curtain',
-    category: 'ENTERTAINMENT',
-    title: 'Behind the curtain with the people making the moment',
-    excerpt: 'Inside the work, ritual and joy behind a great performance.',
-    time: '5 MIN READ',
-    image: require('@/assets/images/editorial-backstage.jpg'),
-  },
-];
+import { Story } from '@/lib/news';
 
 export function EJazzWordmark({ compact = false }: { compact?: boolean }) {
   const colors = useColors();
@@ -158,12 +122,18 @@ export function StoryCard({ story, featured = false }: { story: Story; featured?
       onPress={() => router.push(`/article?id=${story.id}`)}
       style={({ pressed }) => [styles.storyPressable, { opacity: pressed ? 0.88 : 1 }]}
     >
-      <Image
-        source={story.image}
-        contentFit="cover"
-        transition={180}
-        style={[styles.storyImage, featured && styles.storyImageFeatured]}
-      />
+      {story.imageUrl ? (
+        <Image
+          source={story.imageUrl}
+          contentFit="cover"
+          transition={180}
+          style={[styles.storyImage, featured && styles.storyImageFeatured]}
+        />
+      ) : (
+        <View style={[styles.storyImage, styles.storyImageFallback, featured && styles.storyImageFeatured]}>
+          <Feather name="file-text" size={featured ? 34 : 24} color={colors.mutedForeground} />
+        </View>
+      )}
       <View style={styles.storyMeta}>
         <Text style={[styles.storyCategory, { color: colors.accent }]}>{story.category}</Text>
         <Text style={[styles.storyTitle, featured && styles.storyTitleFeatured]}>{story.title}</Text>
@@ -243,6 +213,7 @@ const styles = StyleSheet.create({
   stationDescription: { color: '#FF6B6B', fontSize: 11, fontWeight: '700', letterSpacing: 1.4, marginTop: 6 },
   storyPressable: { flexDirection: 'row', gap: 14 },
   storyImage: { width: 104, height: 104, backgroundColor: '#163761' },
+  storyImageFallback: { alignItems: 'center', justifyContent: 'center' },
   storyImageFeatured: { width: '100%', height: 222 },
   storyMeta: { flex: 1, justifyContent: 'center' },
   storyCategory: { fontSize: 10, fontWeight: '700', letterSpacing: 1.5, marginBottom: 7 },

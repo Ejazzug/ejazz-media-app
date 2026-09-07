@@ -13,6 +13,7 @@ import {
   useFonts,
 } from '@expo-google-fonts/inter';
 import { Stack } from 'expo-router';
+import Head from 'expo-router/head';
 import * as SplashScreen from 'expo-splash-screen';
 import { PlayerProvider } from '@/context/PlayerContext';
 import { MiniPlayer } from '@/components/MediaComponents';
@@ -54,6 +55,9 @@ export default function RootLayout() {
             <KeyboardProvider>
               <PlayerProvider>
                 <View style={{ flex: 1 }}>
+                  <Head>
+                    <meta name="referrer" content="no-referrer" />
+                  </Head>
                   <RootLayoutNav />
                   <MiniPlayer />
                 </View>
