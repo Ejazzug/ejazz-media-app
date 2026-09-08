@@ -9,7 +9,6 @@
     "serve": "node server/serve.js",
     "lint": "eslint .",
     "typecheck": "tsc -p tsconfig.json --noEmit",
-    "eas-build-pre-install": "node scripts/firebase-config.cjs client",
     "firebase:prepare": "node scripts/firebase-config.cjs client",
     "firebase:prepare:credentials": "node scripts/firebase-config.cjs credentials",
     "firebase:clean": "node scripts/firebase-config.cjs clean"
