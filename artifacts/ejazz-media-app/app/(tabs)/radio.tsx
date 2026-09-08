@@ -36,6 +36,7 @@ export default function RadioScreen() {
     isPlaying,
     isBuffering,
     streamError,
+    streamErrorMessage,
     stations,
     selectStation,
     toggleRadioPlayback,
@@ -254,7 +255,9 @@ export default function RadioScreen() {
             <Feather name="wifi-off" size={17} color={colors.accent} />
             <View style={styles.errorCopy}>
               <Text style={styles.errorTitle}>Unable to connect to the live stream.</Text>
-              <Text style={styles.errorSubtext}>Trying again when you are ready.</Text>
+              <Text style={styles.errorSubtext}>
+                {streamErrorMessage || 'Trying again when you are ready.'}
+              </Text>
             </View>
             <Pressable onPress={retryPlayback} hitSlop={10}>
               <Text style={styles.retry}>RETRY</Text>

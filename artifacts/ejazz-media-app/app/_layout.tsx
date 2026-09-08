@@ -25,6 +25,15 @@ SplashScreen.preventAutoHideAsync();
 
 const queryClient = new QueryClient();
 
+console.log('[EJazz Startup] Resolved public runtime URLs.', {
+  EXPO_PUBLIC_EJAZZ_RADIO_STREAM_URL:
+    process.env.EXPO_PUBLIC_EJAZZ_RADIO_STREAM_URL ?? '(undefined)',
+  EXPO_PUBLIC_EJAZZ_NEWS_API_URL:
+    process.env.EXPO_PUBLIC_EJAZZ_NEWS_API_URL ?? '(undefined)',
+  EXPO_PUBLIC_EJAZZ_EXTRA_STREAM_URL:
+    process.env.EXPO_PUBLIC_EJAZZ_EXTRA_STREAM_URL ?? '(undefined)',
+});
+
 function RootLayoutNav() {
   return (
     <Stack screenOptions={{ headerBackTitle: 'Back' }}>

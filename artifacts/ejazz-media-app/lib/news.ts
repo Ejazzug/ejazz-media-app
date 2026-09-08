@@ -15,6 +15,10 @@ const NEWS_API_URL = process.env.EXPO_PUBLIC_EJAZZ_NEWS_API_URL?.trim() ?? '';
 const NEWS_REQUEST_TIMEOUT_MS = 10_000;
 const NEWS_CACHE_TTL_MS = 5 * 60 * 1000;
 
+function describeError(error: unknown) {
+  return error instanceof Error ? error.message : String(error);
+}
+
 export type Story = {
   id: string;
   slug: string;
@@ -80,7 +84,11 @@ function decodeHtml(value: string) {
 }
 
 function apiUrl(path: string, params: Record<string, string>) {
-  if (!NEWS_API_URL) throw new Error('news-unavailable');
+  if (!NEWS_API_URL) {
+    const error = new Error('The News API URL is empty or undefined in this app build.');
+    console.error('[EJazz News] Cannot start News API request.', error);
+    throw error;
+  }
   const base = NEWS_API_URL.replace(/\/+$/, '');
   const postsBase = /\/posts(?:\?|$)/.test(base)
     ? base.replace(/\/posts(?:\?.*)?$/, '/posts')
@@ -135,6 +143,7 @@ async function requestJson(url: string) {
   const timeout = setTimeout(() => controller.abort(), NEWS_REQUEST_TIMEOUT_MS);
 
   try {
+    console.log('[EJazz News] Fetching News API.', { url, platform: Platform.OS });
     const response = await fetch(url, {
       headers: {
         Accept: 'application/json',
@@ -142,73 +151,85 @@ async function requestJson(url: string) {
       },
       signal: controller.signal,
     });
-    if (!response.ok) throw new Error('news-unavailable');
-    const data: unknown = await response.json();
+    if (!response.ok) {
+      const responseText = await response.text().catch(() => '');
+      throw new Error(
+        `News API returned HTTP ${response.status}${responseText ? `: ${responseText.slice(0, 160)}` : ''}`,
+      );
+    }
+    let data: unknown;
+    try {
+      data = await response.json();
+    } catch (error: unknown) {
+      throw new Error(`News API returned invalid JSON: ${describeError(error)}`);
+    }
+    console.log('[EJazz News] News API request succeeded.', { url, status: response.status });
     return { data, response };
-  } catch {
-    throw new Error('news-unavailable');
+  } catch (error: unknown) {
+    const message = error instanceof Error && error.name === 'AbortError'
+      ? `News API request timed out after ${NEWS_REQUEST_TIMEOUT_MS}ms.`
+      : describeError(error);
+    console.error('[EJazz News] News API request failed.', { url, error: message });
+    throw new Error(message);
   } finally {
     clearTimeout(timeout);
   }
 }
 
 async function requestPostsPage(page: number, categoryId?: number): Promise<PostsPage> {
-  try {
-    const categories = categoryId ? String(categoryId) : ALLOWED_CATEGORY_IDS.join(',');
-    const { data, response } = await requestJson(apiUrl('', {
-      categories,
-      per_page: '10',
-      _embed: '1',
-      page: String(page),
-    }));
-    if (!Array.isArray(data) || !data.every(isWordPressPost)) throw new Error('news-unavailable');
-    const totalPages = Number(response.headers.get('x-wp-totalpages') ?? page);
-    return {
-      stories: data.map(mapPost),
-      nextPage: page < totalPages ? page + 1 : undefined,
-    };
-  } catch {
-    throw new Error('news-unavailable');
+  const categories = categoryId ? String(categoryId) : ALLOWED_CATEGORY_IDS.join(',');
+  const { data, response } = await requestJson(apiUrl('', {
+    categories,
+    per_page: '10',
+    _embed: '1',
+    page: String(page),
+  }));
+  if (!Array.isArray(data) || !data.every(isWordPressPost)) {
+    const error = new Error('News API response did not contain a valid WordPress posts array.');
+    console.error('[EJazz News] Invalid posts response.', { page, categoryId, data });
+    throw error;
   }
+  const totalPages = Number(response.headers.get('x-wp-totalpages') ?? page);
+  return {
+    stories: data.map(mapPost),
+    nextPage: page < totalPages ? page + 1 : undefined,
+  };
 }
 
 async function requestFeaturedStories() {
-  try {
-    const { data } = await requestJson(apiUrl('', {
-      categories: '12',
-      per_page: '5',
-      _embed: '1',
-    }));
-    if (!Array.isArray(data) || !data.every(isWordPressPost)) throw new Error('news-unavailable');
-    return data.map(mapPost);
-  } catch {
-    throw new Error('news-unavailable');
+  const { data } = await requestJson(apiUrl('', {
+    categories: '12',
+    per_page: '5',
+    _embed: '1',
+  }));
+  if (!Array.isArray(data) || !data.every(isWordPressPost)) {
+    console.error('[EJazz News] Invalid featured stories response.', data);
+    throw new Error('News API response did not contain valid featured stories.');
   }
+  return data.map(mapPost);
 }
 
 async function requestPost(id: string) {
-  try {
-    const { data } = await requestJson(apiUrl(encodeURIComponent(id), { _embed: '1' }));
-    if (!isWordPressPost(data)) throw new Error('news-unavailable');
-    return mapPost(data);
-  } catch {
-    throw new Error('news-unavailable');
+  const { data } = await requestJson(apiUrl(encodeURIComponent(id), { _embed: '1' }));
+  if (!isWordPressPost(data)) {
+    console.error('[EJazz News] Invalid article response.', { id, data });
+    throw new Error('News API response did not contain a valid article.');
   }
+  return mapPost(data);
 }
 
 async function requestRelatedStories(categoryId: number, postId: string) {
-  try {
-    const { data } = await requestJson(apiUrl('', {
-      categories: String(categoryId),
-      exclude: postId,
-      per_page: '4',
-      _embed: '1',
-    }));
-    if (!Array.isArray(data) || !data.every(isWordPressPost)) throw new Error('news-unavailable');
-    return data.map(mapPost);
-  } catch {
-    throw new Error('news-unavailable');
+  const { data } = await requestJson(apiUrl('', {
+    categories: String(categoryId),
+    exclude: postId,
+    per_page: '4',
+    _embed: '1',
+  }));
+  if (!Array.isArray(data) || !data.every(isWordPressPost)) {
+    console.error('[EJazz News] Invalid related stories response.', { categoryId, postId, data });
+    throw new Error('News API response did not contain valid related stories.');
   }
+  return data.map(mapPost);
 }
 
 export function useLatestNews(categoryId?: number) {

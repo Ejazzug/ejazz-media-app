@@ -89,6 +89,7 @@ type PlayerContextValue = {
   isPlaying: boolean;
   isBuffering: boolean;
   streamError: boolean;
+  streamErrorMessage: string;
   playbackError: boolean;
   trackTitle: string;
   trackArtist: string;
@@ -121,6 +122,7 @@ export function PlayerProvider({ children }: PropsWithChildren) {
   const [playbackKind, setPlaybackKind] = useState<PlaybackKind>('radio');
   const [isPlaying, setIsPlaying] = useState(false);
   const [streamError, setStreamError] = useState(false);
+  const [streamErrorMessage, setStreamErrorMessage] = useState('');
   const [isAppActive, setIsAppActive] = useState(AppState.currentState === 'active');
   const [currentPodcast, setCurrentPodcast] = useState<PodcastPlaybackItem | null>(null);
   const [podcastQueue, setPodcastQueue] = useState<PodcastPlaybackItem[]>([]);
@@ -170,7 +172,11 @@ export function PlayerProvider({ children }: PropsWithChildren) {
       allowsRecording: false,
       shouldPlayInBackground: true,
       shouldRouteThroughEarpiece: false,
-    }).catch(() => undefined);
+    }).catch((error: unknown) => {
+      console.error('[EJazz Radio] Failed to configure the audio session.', error);
+      setStreamErrorMessage('Audio could not be configured on this device.');
+      setStreamError(true);
+    });
   }, []);
 
   useEffect(() => {
@@ -183,7 +189,11 @@ export function PlayerProvider({ children }: PropsWithChildren) {
   useEffect(() => {
     if (status.playing !== isPlaying) setIsPlaying(status.playing);
     if (status.error) {
-      if (playbackKind === 'radio') setStreamError(true);
+      if (playbackKind === 'radio') {
+        console.error('[EJazz Radio] Audio player reported a runtime error.', status.error);
+        setStreamErrorMessage(`Live stream error: ${String(status.error)}`);
+        setStreamError(true);
+      }
       setIsPlaying(false);
     }
   }, [isPlaying, playbackKind, status.error, status.playing]);
@@ -267,7 +277,15 @@ export function PlayerProvider({ children }: PropsWithChildren) {
 
   const toggleRadioPlayback = useCallback(() => {
     setStreamError(false);
+    setStreamErrorMessage('');
+    console.log('[EJazz Radio] Play handler invoked.', {
+      station: activeStation.id,
+      streamUrl: activeStation.streamUrl || '(empty)',
+    });
     if (!activeStation.streamUrl) {
+      const message = 'The live stream URL is empty or undefined in this app build.';
+      console.error('[EJazz Radio]', message);
+      setStreamErrorMessage(message);
       setStreamError(true);
       setIsPlaying(false);
       return;
@@ -277,12 +295,21 @@ export function PlayerProvider({ children }: PropsWithChildren) {
       setIsPlaying(false);
       return;
     }
-    player.pause();
-    player.replace(activeStation.streamUrl);
-    setPlaybackKind('radio');
-    setCurrentPodcast(null);
-    player.play();
-    setIsPlaying(true);
+    try {
+      player.pause();
+      player.replace(activeStation.streamUrl);
+      setPlaybackKind('radio');
+      setCurrentPodcast(null);
+      player.play();
+      setIsPlaying(true);
+      console.log('[EJazz Radio] play() dispatched to the shared audio player.');
+    } catch (error: unknown) {
+      const message = error instanceof Error ? error.message : String(error);
+      console.error('[EJazz Radio] Failed to start the live stream.', error);
+      setStreamErrorMessage(`Could not start the live stream: ${message}`);
+      setStreamError(true);
+      setIsPlaying(false);
+    }
   }, [activeStation.streamUrl, isPlaying, playbackKind, player, status.playing]);
 
   const togglePlayback = useCallback(() => {
@@ -301,15 +328,32 @@ export function PlayerProvider({ children }: PropsWithChildren) {
 
   const retryPlayback = useCallback(() => {
     setStreamError(false);
+    setStreamErrorMessage('');
     if (!activeStation.streamUrl) {
+      const message = 'The live stream URL is empty or undefined in this app build.';
+      console.error('[EJazz Radio]', message);
+      setStreamErrorMessage(message);
       setStreamError(true);
       return;
     }
-    player.replace(activeStation.streamUrl);
-    setPlaybackKind('radio');
-    setCurrentPodcast(null);
-    player.play();
-    setIsPlaying(true);
+    try {
+      console.log('[EJazz Radio] Retry handler invoked.', {
+        station: activeStation.id,
+        streamUrl: activeStation.streamUrl,
+      });
+      player.replace(activeStation.streamUrl);
+      setPlaybackKind('radio');
+      setCurrentPodcast(null);
+      player.play();
+      setIsPlaying(true);
+      console.log('[EJazz Radio] retry play() dispatched to the shared audio player.');
+    } catch (error: unknown) {
+      const message = error instanceof Error ? error.message : String(error);
+      console.error('[EJazz Radio] Retry failed.', error);
+      setStreamErrorMessage(`Could not start the live stream: ${message}`);
+      setStreamError(true);
+      setIsPlaying(false);
+    }
   }, [activeStation.streamUrl, player]);
 
   const playPodcast = useCallback((episode: PodcastEpisode, show: PodcastShow) => {
@@ -376,6 +420,7 @@ export function PlayerProvider({ children }: PropsWithChildren) {
       isPlaying,
       isBuffering: status.isBuffering,
       streamError,
+      streamErrorMessage,
       playbackError,
       trackTitle: currentTrack?.title ?? 'Live from EJazz',
       trackArtist: currentTrack?.artist ?? activeStation.description,
@@ -427,6 +472,7 @@ export function PlayerProvider({ children }: PropsWithChildren) {
       status.duration,
       status.isBuffering,
       streamError,
+      streamErrorMessage,
       togglePlayback,
       toggleRadioPlayback,
     ],

@@ -29,6 +29,11 @@ export default function NewsScreen() {
     featured.refetch();
     latest.refetch();
   };
+  const newsError = latest.error instanceof Error
+    ? latest.error.message
+    : featured.error instanceof Error
+      ? featured.error.message
+      : 'Unknown News API error.';
 
   return (
     <View style={[styles.screen, { backgroundColor: colors.background }]}>
@@ -111,11 +116,11 @@ export default function NewsScreen() {
             <ActivityIndicator color={colors.primary} />
             <Text style={styles.statusText}>Loading EJazz News…</Text>
           </View>
-        ) : latest.isError ? (
+        ) : latest.isError || featured.isError ? (
           <View style={styles.status}>
             <Feather name="wifi-off" size={24} color={colors.accent} />
             <Text style={styles.statusTitle}>Couldn’t load stories right now.</Text>
-            <Text style={styles.statusText}>Check your connection and try again.</Text>
+            <Text style={styles.statusText}>{newsError}</Text>
             <Pressable onPress={() => latest.refetch()}><Text style={styles.retry}>TRY AGAIN</Text></Pressable>
           </View>
         ) : filteredStories.length === 0 ? (
