@@ -120,6 +120,14 @@ function mapPost(post: WordPressPost): Story {
   const contentText = decodeHtml(post.content?.rendered ?? '');
   const excerpt = decodeHtml(post.excerpt?.rendered ?? '');
   const wordCount = contentText.split(/\s+/).filter(Boolean).length;
+  const contentParagraphs = contentText.split(/\n{2,}/).filter(Boolean);
+  const excerptCore = excerpt.slice(0, 60).trim().toLowerCase();
+  const firstParagraphCore = (contentParagraphs[0] ?? '').slice(0, 60).trim().toLowerCase();
+  const isLeadParagraphDuplicateOfExcerpt =
+    excerptCore.length > 0 && firstParagraphCore.length > 0 && firstParagraphCore.startsWith(excerptCore.slice(0, 40));
+  const dedupedContentParagraphs = isLeadParagraphDuplicateOfExcerpt
+    ? contentParagraphs.slice(1)
+    : contentParagraphs;
 
   return {
     id: String(post.id),
@@ -133,7 +141,7 @@ function mapPost(post: WordPressPost): Story {
     imageUrl: post._embedded?.['wp:featuredmedia']?.[0]?.source_url ?? null,
     publishedAt: post.date ?? '',
     author: post._embedded?.author?.[0]?.name?.trim() || 'EJAZZ EDITORIAL',
-    content: contentText.split(/\n{2,}/).filter(Boolean),
+    content: dedupedContentParagraphs,
     link: post.link ?? '',
   };
 }

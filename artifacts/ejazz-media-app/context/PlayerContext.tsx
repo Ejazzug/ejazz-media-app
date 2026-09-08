@@ -107,6 +107,7 @@ type PlayerContextValue = {
   togglePlayback: () => void;
   toggleRadioPlayback: () => void;
   retryPlayback: () => void;
+  stopPlayback: () => void;
   playPodcast: (episode: PodcastEpisode, show: PodcastShow) => void;
   enqueuePodcast: (episode: PodcastEpisode, show: PodcastShow) => void;
   removeQueuedPodcast: (episodeId: string) => void;
@@ -127,6 +128,35 @@ export function PlayerProvider({ children }: PropsWithChildren) {
   const [currentPodcast, setCurrentPodcast] = useState<PodcastPlaybackItem | null>(null);
   const [podcastQueue, setPodcastQueue] = useState<PodcastPlaybackItem[]>([]);
   const wasFinished = useRef(false);
+  const autoRetryTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const autoRetryingRef = useRef(false);
+  const retryStartedAtRef = useRef<number | null>(null);
+
+  const clearAutoRetry = useCallback(() => {
+    if (autoRetryTimerRef.current) {
+      clearTimeout(autoRetryTimerRef.current);
+      autoRetryTimerRef.current = null;
+    }
+    autoRetryingRef.current = false;
+    retryStartedAtRef.current = null;
+  }, []);
+
+  const scheduleAutoRetry = useCallback(() => {
+    if (autoRetryTimerRef.current) return;
+    if (retryStartedAtRef.current === null) retryStartedAtRef.current = Date.now();
+    const elapsed = Date.now() - retryStartedAtRef.current;
+    if (elapsed >= 3 * 60 * 1000) {
+      console.log('[EJazz Radio] Auto-retry window elapsed (3 min). Giving up.');
+      clearAutoRetry();
+      return;
+    }
+    autoRetryingRef.current = true;
+    autoRetryTimerRef.current = setTimeout(() => {
+      autoRetryTimerRef.current = null;
+      console.log('[EJazz Radio] Auto-retry attempting reconnect...');
+      retryPlayback();
+    }, 6000);
+  }, [clearAutoRetry]);
   const activeStation = useMemo(
     () => stations.find((station) => station.id === selectedStationId) ?? stations[0],
     [selectedStationId],
@@ -193,10 +223,17 @@ export function PlayerProvider({ children }: PropsWithChildren) {
         console.error('[EJazz Radio] Audio player reported a runtime error.', status.error);
         setStreamErrorMessage(`Live stream error: ${String(status.error)}`);
         setStreamError(true);
+        scheduleAutoRetry();
       }
       setIsPlaying(false);
     }
-  }, [isPlaying, playbackKind, status.error, status.playing]);
+  }, [isPlaying, playbackKind, scheduleAutoRetry, status.error, status.playing]);
+
+  useEffect(() => {
+    return () => {
+      if (autoRetryTimerRef.current) clearTimeout(autoRetryTimerRef.current);
+    };
+  }, []);
 
   useEffect(() => {
     if (!status.playing) return;
@@ -268,6 +305,7 @@ export function PlayerProvider({ children }: PropsWithChildren) {
         player.pause();
         setIsPlaying(false);
       }
+      clearAutoRetry();
       setStreamError(false);
       setSelectedStationId(stationId);
       AsyncStorage.setItem('ejazz-selected-station', stationId).catch(() => undefined);
@@ -296,6 +334,7 @@ export function PlayerProvider({ children }: PropsWithChildren) {
       return;
     }
     try {
+      clearAutoRetry();
       player.pause();
       player.replace(activeStation.streamUrl);
       setPlaybackKind('radio');
@@ -309,8 +348,9 @@ export function PlayerProvider({ children }: PropsWithChildren) {
       setStreamErrorMessage(`Could not start the live stream: ${message}`);
       setStreamError(true);
       setIsPlaying(false);
+      scheduleAutoRetry();
     }
-  }, [activeStation.streamUrl, isPlaying, playbackKind, player, status.playing]);
+  }, [activeStation.streamUrl, isPlaying, playbackKind, player, scheduleAutoRetry, status.playing]);
 
   const togglePlayback = useCallback(() => {
     if (playbackKind === 'radio') {
@@ -347,14 +387,24 @@ export function PlayerProvider({ children }: PropsWithChildren) {
       player.play();
       setIsPlaying(true);
       console.log('[EJazz Radio] retry play() dispatched to the shared audio player.');
+      clearAutoRetry();
     } catch (error: unknown) {
       const message = error instanceof Error ? error.message : String(error);
       console.error('[EJazz Radio] Retry failed.', error);
       setStreamErrorMessage(`Could not start the live stream: ${message}`);
       setStreamError(true);
       setIsPlaying(false);
+      scheduleAutoRetry();
     }
-  }, [activeStation.streamUrl, player]);
+  }, [activeStation.streamUrl, player, scheduleAutoRetry]);
+
+  const stopPlayback = useCallback(() => {
+    clearAutoRetry();
+    player.pause();
+    setIsPlaying(false);
+    setStreamError(false);
+    setStreamErrorMessage('');
+  }, [clearAutoRetry, player]);
 
   const playPodcast = useCallback((episode: PodcastEpisode, show: PodcastShow) => {
     const item = podcastItem(episode, show);
@@ -438,6 +488,7 @@ export function PlayerProvider({ children }: PropsWithChildren) {
       togglePlayback,
       toggleRadioPlayback,
       retryPlayback,
+      stopPlayback,
       playPodcast,
       enqueuePodcast,
       removeQueuedPodcast,
@@ -471,6 +522,7 @@ export function PlayerProvider({ children }: PropsWithChildren) {
       status.currentTime,
       status.duration,
       status.isBuffering,
+      stopPlayback,
       streamError,
       streamErrorMessage,
       togglePlayback,

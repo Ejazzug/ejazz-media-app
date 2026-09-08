@@ -41,6 +41,7 @@ export default function RadioScreen() {
     selectStation,
     toggleRadioPlayback,
     retryPlayback,
+    stopPlayback,
     currentTrack,
     previousTracks,
     nextTrack,
@@ -179,10 +180,10 @@ export default function RadioScreen() {
             onPress={toggleRadioPlayback}
             loading={playbackKind === 'radio' && isBuffering}
           />
-          <View style={styles.secondaryControl}>
-            <Feather name="volume-2" size={19} color={colors.mutedForeground} />
-            <Text style={styles.controlText}>Volume</Text>
-          </View>
+          <Pressable style={styles.secondaryControl} onPress={stopPlayback}>
+            <Feather name="square" size={19} color={colors.mutedForeground} />
+            <Text style={styles.controlText}>Stop</Text>
+          </Pressable>
         </View>
 
         <View style={styles.trackBlock}>

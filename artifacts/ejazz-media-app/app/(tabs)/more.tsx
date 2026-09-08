@@ -3,6 +3,7 @@ import React from 'react';
 import { Linking, Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
 import { EJazzWordmark, ScreenHeader } from '@/components/MediaComponents';
 import { useColors } from '@/hooks/useColors';
+import { usePushNotifications } from '@/lib/notifications';
 
 const items = [
   { label: 'About EJazz', icon: 'info' as const, action: undefined },
@@ -14,6 +15,7 @@ const items = [
 
 export default function MoreScreen() {
   const colors = useColors();
+  const { expoPushToken } = usePushNotifications();
   return (
     <View style={[styles.screen, { backgroundColor: colors.background }]}>
       <ScrollView showsVerticalScrollIndicator={false} contentContainerStyle={{ paddingBottom: 150 }}>
@@ -41,6 +43,11 @@ export default function MoreScreen() {
         <View style={styles.version}>
           <Text style={styles.versionText}>EJAZZ MEDIA APP</Text>
           <Text style={styles.versionSubtext}>VERSION 1.0.0</Text>
+          {expoPushToken ? (
+            <Text style={styles.versionSubtext} selectable>
+              PUSH ID: {expoPushToken}
+            </Text>
+          ) : null}
         </View>
       </ScrollView>
     </View>
