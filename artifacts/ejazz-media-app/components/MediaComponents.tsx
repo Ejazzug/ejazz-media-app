@@ -19,6 +19,7 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useColors } from '@/hooks/useColors';
 import { Station, usePlayer } from '@/context/PlayerContext';
 import { Story } from '@/lib/news';
+import { PodcastScrubber } from '@/components/PodcastScrubber';
 
 export function PlayingEqualizer({
   playing,
@@ -252,6 +253,10 @@ export function MiniPlayer() {
     isBuffering,
     togglePlayback,
     skipPodcast,
+    seekPodcastForward,
+    seekPodcastTo,
+    podcastPosition,
+    podcastDuration,
     trackArtist,
     trackTitle,
   } = usePlayer();
@@ -267,7 +272,7 @@ export function MiniPlayer() {
             ? { pathname: '/radio', params: { mode: 'podcasts' } }
             : '/radio',
         )}
-        style={styles.miniPlayer}
+        style={[styles.miniPlayer, isPodcast && styles.miniPlayerPodcast]}
       >
         {isPodcast ? (
           currentPodcast.artworkUrl ? (
@@ -297,12 +302,28 @@ export function MiniPlayer() {
           </Text>
         </View>
         <View style={styles.miniActions}>
+          {isPodcast && (
+            <Pressable
+              onPress={(event) => {
+                event.stopPropagation();
+                seekPodcastForward(30);
+              }}
+              accessibilityRole="button"
+              accessibilityLabel="Skip podcast forward 30 seconds"
+              hitSlop={8}
+              style={styles.miniNext}
+            >
+              <Feather name="rotate-cw" size={15} color={colors.mutedForeground} />
+              <Text style={styles.miniQueueCount}>30</Text>
+            </Pressable>
+          )}
           {isPodcast && podcastQueue.length > 0 && (
             <Pressable
               onPress={(event) => {
                 event.stopPropagation();
                 skipPodcast();
               }}
+              accessibilityRole="button"
               accessibilityLabel={`Play next episode. ${podcastQueue.length} queued`}
               hitSlop={8}
               style={styles.miniNext}
@@ -316,6 +337,8 @@ export function MiniPlayer() {
               event.stopPropagation();
               togglePlayback();
             }}
+            accessibilityRole="button"
+            accessibilityLabel={isPlaying ? 'Pause playback' : 'Play playback'}
             hitSlop={10}
             style={styles.miniPlay}
           >
@@ -326,6 +349,16 @@ export function MiniPlayer() {
             )}
           </Pressable>
         </View>
+        {isPodcast && (
+          <View style={styles.miniScrubber}>
+            <PodcastScrubber
+              compact
+              position={podcastPosition}
+              duration={podcastDuration}
+              onSeek={seekPodcastTo}
+            />
+          </View>
+        )}
       </Pressable>
     </View>
   );
@@ -386,6 +419,8 @@ const styles = StyleSheet.create({
   storyTime: { color: '#7890AE', fontSize: 10, fontWeight: '600', letterSpacing: 1.1, marginTop: 10 },
   miniPlayerWrap: { position: 'absolute', left: 12, right: 12, zIndex: 20 },
   miniPlayer: { flexDirection: 'row', alignItems: 'center', gap: 11, padding: 8, paddingRight: 12, backgroundColor: '#102B55', borderWidth: 1, borderColor: '#2C4B75' },
+  miniPlayerPodcast: { paddingBottom: 32 },
+  miniScrubber: { position: 'absolute', left: 8, right: 8, bottom: 2 },
   miniLogoChip: { width: 42, height: 42, padding: 4, borderRadius: 8, backgroundColor: '#FFFFFF' },
   miniLogo: { width: '100%', height: '100%' },
   miniPodcastArtwork: { width: 42, height: 42, borderRadius: 7, backgroundColor: '#123363' },

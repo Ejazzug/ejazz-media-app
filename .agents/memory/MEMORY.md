@@ -2,3 +2,4 @@
 - [Centova recent-track cap](centova-recent-track-cap.md) — EJazz Radio history is capped at 10 and ignores pagination; preserve clean tracks across polls to backfill jingles.
 - [Expo lint compatibility](expo-lint-compatibility.md) — Expo’s lint preset hit a pnpm nested-export conflict; keep the lightweight TypeScript ESLint setup unless upstream changes.
 - [GitHub integration boundaries](github-integration-boundaries.md) — OAuth API access and an Active Source Control panel may still leave Agent-shell Git unauthenticated.
+- [EAS preview public configuration](eas-preview-public-configuration.md) — Replit secrets are not inherited by EAS; explicitly sync public runtime URLs into the preview environment.

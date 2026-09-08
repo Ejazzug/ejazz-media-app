@@ -99,6 +99,8 @@ type PlayerContextValue = {
   metadataError: boolean;
   currentPodcast: PodcastPlaybackItem | null;
   podcastQueue: PodcastPlaybackItem[];
+  podcastPosition: number;
+  podcastDuration: number;
   refreshMetadata: () => void;
   selectStation: (stationId: StationId) => void;
   togglePlayback: () => void;
@@ -108,6 +110,8 @@ type PlayerContextValue = {
   enqueuePodcast: (episode: PodcastEpisode, show: PodcastShow) => void;
   removeQueuedPodcast: (episodeId: string) => void;
   skipPodcast: () => void;
+  seekPodcastForward: (seconds?: number) => void;
+  seekPodcastTo: (seconds: number) => void;
 };
 
 const PlayerContext = createContext<PlayerContextValue | null>(null);
@@ -346,6 +350,23 @@ export function PlayerProvider({ children }: PropsWithChildren) {
     setIsPlaying(true);
   }, [player, podcastQueue]);
 
+  const seekPodcastForward = useCallback((seconds = 30) => {
+    if (playbackKind !== 'podcast' || !currentPodcast) return;
+    const duration = Number.isFinite(status.duration) ? status.duration : 0;
+    const currentTime = player.currentTime;
+    const target = duration > 0
+      ? Math.min(currentTime + seconds, duration)
+      : currentTime + seconds;
+    void player.seekTo(Math.max(0, target));
+  }, [currentPodcast, playbackKind, player, status.duration]);
+
+  const seekPodcastTo = useCallback((seconds: number) => {
+    if (playbackKind !== 'podcast' || !currentPodcast) return;
+    const duration = Number.isFinite(status.duration) ? status.duration : 0;
+    const target = duration > 0 ? Math.min(seconds, duration) : seconds;
+    void player.seekTo(Math.max(0, target));
+  }, [currentPodcast, playbackKind, player, status.duration]);
+
   const value = useMemo<PlayerContextValue>(
     () => ({
       stations,
@@ -365,6 +386,8 @@ export function PlayerProvider({ children }: PropsWithChildren) {
       metadataError,
       currentPodcast,
       podcastQueue,
+      podcastPosition: playbackKind === 'podcast' ? status.currentTime : 0,
+      podcastDuration: playbackKind === 'podcast' ? status.duration : 0,
       refreshMetadata,
       selectStation,
       togglePlayback,
@@ -374,6 +397,8 @@ export function PlayerProvider({ children }: PropsWithChildren) {
       enqueuePodcast,
       removeQueuedPodcast,
       skipPodcast,
+      seekPodcastForward,
+      seekPodcastTo,
     }),
     [
       activeStation,
@@ -388,13 +413,18 @@ export function PlayerProvider({ children }: PropsWithChildren) {
       playbackKind,
       playPodcast,
       podcastQueue,
+      playbackKind,
       previousTracks,
       refreshMetadata,
       removeQueuedPodcast,
       retryPlayback,
       selectStation,
       selectedStationId,
+      seekPodcastForward,
+      seekPodcastTo,
       skipPodcast,
+      status.currentTime,
+      status.duration,
       status.isBuffering,
       streamError,
       togglePlayback,

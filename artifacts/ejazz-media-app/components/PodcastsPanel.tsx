@@ -9,6 +9,53 @@ import {
   PodcastSlug,
   usePodcastFeed,
 } from '@/lib/podcasts';
+import { PodcastScrubber } from '@/components/PodcastScrubber';
+
+function ExpandableDescription({
+  children,
+  collapsedLines = 3,
+  textStyle,
+}: {
+  children: string;
+  collapsedLines?: number;
+  textStyle: object;
+}) {
+  const [expanded, setExpanded] = React.useState(false);
+  const [canExpand, setCanExpand] = React.useState(false);
+  const [measureWidth, setMeasureWidth] = React.useState(0);
+  const showToggle = canExpand || children.trim().length > (collapsedLines <= 3 ? 100 : 180);
+
+  return (
+    <View onLayout={(event) => setMeasureWidth(event.nativeEvent.layout.width)}>
+      {measureWidth > 0 && (
+        <Text
+          accessible={false}
+          onTextLayout={(event) => setCanExpand(event.nativeEvent.lines.length > collapsedLines)}
+          style={[textStyle, styles.descriptionMeasure, { width: measureWidth }]}
+        >
+          {children}
+        </Text>
+      )}
+      <Text
+        numberOfLines={expanded ? undefined : collapsedLines}
+        style={textStyle}
+      >
+        {children}
+      </Text>
+      {(showToggle || expanded) && (
+        <Pressable
+          accessibilityRole="button"
+          accessibilityLabel={expanded ? 'Show less description' : 'Show full description'}
+          hitSlop={8}
+          onPress={() => setExpanded((value) => !value)}
+          style={styles.descriptionToggle}
+        >
+          <Text style={styles.descriptionToggleText}>{expanded ? 'Show less' : 'Show more'}</Text>
+        </Pressable>
+      )}
+    </View>
+  );
+}
 
 export function PodcastsPanel() {
   const colors = useColors();
@@ -27,6 +74,10 @@ export function PodcastsPanel() {
     enqueuePodcast,
     removeQueuedPodcast,
     skipPodcast,
+    seekPodcastForward,
+    seekPodcastTo,
+    podcastPosition,
+    podcastDuration,
   } = usePlayer();
   const selectedQuery = selectedShow === 'xtreme-bpm'
     ? xtreme
@@ -60,7 +111,9 @@ export function PodcastsPanel() {
                   <Text style={styles.showTitle}>{config.name}</Text>
                   {query.data && (
                     <>
-                      <Text numberOfLines={3} style={styles.showDescription}>{query.data.description}</Text>
+                      <ExpandableDescription textStyle={styles.showDescription}>
+                        {query.data.description}
+                      </ExpandableDescription>
                       <Text style={styles.episodeCount}>{query.data.episodes.length} LATEST EPISODES</Text>
                     </>
                   )}
@@ -125,8 +178,46 @@ export function PodcastsPanel() {
         )}
         <Text style={styles.eyebrow}>EJAZZ PODCASTS</Text>
         <Text style={styles.showHeroTitle}>{show.name}</Text>
-        <Text style={styles.showHeroDescription}>{show.description}</Text>
+        <ExpandableDescription collapsedLines={4} textStyle={styles.showHeroDescription}>
+          {show.description}
+        </ExpandableDescription>
       </View>
+
+      {playbackKind === 'podcast' && currentPodcast && (
+        <View style={styles.nowPlayingCard}>
+          <View style={styles.nowPlayingTop}>
+            <View style={styles.nowPlayingCopy}>
+              <Text style={styles.eyebrow}>NOW PLAYING</Text>
+              <Text numberOfLines={1} style={styles.nowPlayingTitle}>{currentPodcast.title}</Text>
+              <Text numberOfLines={1} style={styles.nowPlayingShow}>{currentPodcast.showName}</Text>
+            </View>
+            <Pressable
+              onPress={() => seekPodcastForward(30)}
+              accessibilityRole="button"
+              accessibilityLabel="Skip podcast forward 30 seconds"
+              style={styles.transportButton}
+            >
+              <Feather name="rotate-cw" size={17} color={colors.primary} />
+              <Text style={styles.forwardSeconds}>30</Text>
+            </Pressable>
+            <Pressable
+              onPress={togglePlayback}
+              accessibilityRole="button"
+              accessibilityLabel={isPlaying ? 'Pause podcast' : 'Play podcast'}
+              style={styles.transportButton}
+            >
+              {isBuffering
+                ? <ActivityIndicator size="small" color={colors.primary} />
+                : <Feather name={isPlaying ? 'pause' : 'play'} size={18} color={colors.primary} />}
+            </Pressable>
+          </View>
+          <PodcastScrubber
+            position={podcastPosition}
+            duration={podcastDuration}
+            onSeek={seekPodcastTo}
+          />
+        </View>
+      )}
 
       {podcastQueue.length > 0 && (
         <View style={styles.queueCard}>
@@ -218,6 +309,9 @@ const styles = StyleSheet.create({
   showCopy: { padding: 17 },
   showTitle: { color: '#F7F9FC', fontSize: 22, fontWeight: '700', letterSpacing: -0.6 },
   showDescription: { color: '#A7B7CC', fontSize: 12, lineHeight: 18, marginTop: 8 },
+  descriptionToggle: { alignSelf: 'flex-start', minHeight: 32, justifyContent: 'center' },
+  descriptionToggleText: { color: '#FF6B6B', fontSize: 11, fontWeight: '700' },
+  descriptionMeasure: { position: 'absolute', opacity: 0, pointerEvents: 'none' },
   episodeCount: { color: '#7890AE', fontSize: 9, fontWeight: '700', letterSpacing: 1.1, marginTop: 12 },
   openShow: { minHeight: 42, flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', marginTop: 14, borderTopWidth: 1, borderTopColor: '#204570' },
   openShowText: { color: '#FF6B6B', fontSize: 10, fontWeight: '700', letterSpacing: 1.1 },
@@ -232,6 +326,13 @@ const styles = StyleSheet.create({
   heroArtworkFallback: { width: '100%', height: 280, alignItems: 'center', justifyContent: 'center', marginBottom: 20, backgroundColor: '#123363' },
   showHeroTitle: { color: '#F7F9FC', fontSize: 29, fontWeight: '700', letterSpacing: -1 },
   showHeroDescription: { color: '#A7B7CC', fontSize: 13, lineHeight: 20, marginTop: 10 },
+  nowPlayingCard: { marginHorizontal: 20, marginBottom: 20, padding: 14, minHeight: 112, borderWidth: 1, borderColor: '#2C4B75', backgroundColor: '#0D2A57' },
+  nowPlayingTop: { flexDirection: 'row', alignItems: 'center', gap: 10 },
+  nowPlayingCopy: { flex: 1 },
+  nowPlayingTitle: { color: '#F7F9FC', fontSize: 14, fontWeight: '700' },
+  nowPlayingShow: { color: '#A7B7CC', fontSize: 11, marginTop: 4 },
+  transportButton: { width: 44, height: 44, borderRadius: 22, alignItems: 'center', justifyContent: 'center', borderWidth: 1, borderColor: '#E43B48' },
+  forwardSeconds: { position: 'absolute', color: '#FF6B6B', fontSize: 8, fontWeight: '800' },
   queueCard: { marginHorizontal: 20, marginBottom: 20, padding: 15, borderWidth: 1, borderColor: '#2C4B75', backgroundColor: '#0D2A57' },
   queueHeading: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', marginBottom: 8 },
   queueTitle: { color: '#F7F9FC', fontSize: 18, fontWeight: '700' },

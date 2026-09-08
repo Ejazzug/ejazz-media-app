@@ -13,6 +13,7 @@
     "android": {
       "package": "com.ejazzug.ejazzmedia",
       "permissions": [
+        "android.permission.INTERNET",
         "FOREGROUND_SERVICE",
         "FOREGROUND_SERVICE_MEDIA_PLAYBACK",
         "android.permission.RECORD_AUDIO",

@@ -1,4 +1,5 @@
 import { useInfiniteQuery, useQuery } from '@tanstack/react-query';
+import { Platform } from 'react-native';
 
 export const NEWS_CATEGORIES = [
   { id: 12, label: 'Top Stories' },
@@ -135,7 +136,10 @@ async function requestJson(url: string) {
 
   try {
     const response = await fetch(url, {
-      headers: { Accept: 'application/json' },
+      headers: {
+        Accept: 'application/json',
+        ...(Platform.OS === 'web' ? {} : { 'User-Agent': 'EJazzMediaApp/0.1.0' }),
+      },
       signal: controller.signal,
     });
     if (!response.ok) throw new Error('news-unavailable');
