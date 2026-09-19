@@ -20,14 +20,6 @@ workflows:
           pnpm install --frozen-lockfile
       - name: Install eas-cli
         script: npm install -g eas-cli
-      - name: Build signed AAB with eas build --local
-        script: |
-          cd artifacts/ejazz-media-app
-          eas build --local \
-            --platform android \
-            --profile production \
-            --non-interactive \
-            --output app-release.aab
       - name: Build matching signed APK with eas build --local
         script: |
           cd artifacts/ejazz-media-app
@@ -37,7 +29,6 @@ workflows:
             --non-interactive \
             --output app-release.apk
     artifacts:
-      - artifacts/ejazz-media-app/app-release.aab
       - artifacts/ejazz-media-app/app-release.apk
     publishing:
       email:
