@@ -28,13 +28,17 @@ workflows:
             --profile production \
             --non-interactive \
             --output app-release.aab
-      - name: Build matching signed APK from the same prebuilt project
+      - name: Build matching signed APK with eas build --local
         script: |
-          cd artifacts/ejazz-media-app/android
-          ./gradlew assembleRelease
+          cd artifacts/ejazz-media-app
+          eas build --local \
+            --platform android \
+            --profile production-apk \
+            --non-interactive \
+            --output app-release.apk
     artifacts:
       - artifacts/ejazz-media-app/app-release.aab
-      - artifacts/ejazz-media-app/android/app/build/outputs/apk/release/app-release.apk
+      - artifacts/ejazz-media-app/app-release.apk
     publishing:
       email:
         recipients:
