@@ -39,3 +39,8 @@ yarn-error.*
 .vercel
 
 .env
+
+# Local EAS/Android signing credentials - never commit real keystore secrets
+credentials.json
+credentials/
+keystore_base64.txt

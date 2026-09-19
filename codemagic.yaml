@@ -1,0 +1,41 @@
+workflows:
+  ejazz-android-release:
+    name: EJazz Media - Android Release (AAB + APK)
+    max_build_duration: 90
+    environment:
+      node: 20
+      java: 17
+      groups:
+        - ejazz_eas
+    cache:
+      cache_paths:
+        - ~/.pnpm-store
+    scripts:
+      - name: Enable pnpm (matches project's pinned version)
+        script: |
+          corepack enable
+          corepack prepare pnpm@10.26.1 --activate
+      - name: Install workspace dependencies
+        script: |
+          pnpm install --frozen-lockfile
+      - name: Install eas-cli
+        script: npm install -g eas-cli
+      - name: Build signed AAB with eas build --local
+        script: |
+          cd artifacts/ejazz-media-app
+          eas build --local \
+            --platform android \
+            --profile production \
+            --non-interactive \
+            --output app-release.aab
+      - name: Build matching signed APK from the same prebuilt project
+        script: |
+          cd artifacts/ejazz-media-app/android
+          ./gradlew assembleRelease
+    artifacts:
+      - artifacts/ejazz-media-app/app-release.aab
+      - artifacts/ejazz-media-app/android/app/build/outputs/apk/release/app-release.apk
+    publishing:
+      email:
+        recipients:
+          - madvibes.ug@gmail.com

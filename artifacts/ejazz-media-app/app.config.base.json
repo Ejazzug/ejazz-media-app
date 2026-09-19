@@ -2,7 +2,7 @@
   "expo": {
     "name": "EJazz Media App",
     "slug": "ejazz-media-app",
-    "version": "0.1.0",
+    "version": "2.0.0",
     "orientation": "portrait",
     "icon": "./assets/images/ejazz-app-icon.png",
     "scheme": "ejazz-media-app",
@@ -45,7 +45,16 @@
       "expo-asset",
       "expo-notifications",
       "@react-native-firebase/app",
-      "@react-native-firebase/analytics"
+      "@react-native-firebase/analytics",
+      [
+        "expo-build-properties",
+        {
+          "android": {
+            "enableProguardInReleaseBuilds": true,
+            "enableShrinkResourcesInReleaseBuilds": true
+          }
+        }
+      ]
     ],
     "experiments": {
       "typedRoutes": true,
