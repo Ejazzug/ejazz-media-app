@@ -45,16 +45,7 @@
       "expo-asset",
       "expo-notifications",
       "@react-native-firebase/app",
-      "@react-native-firebase/analytics",
-      [
-        "expo-build-properties",
-        {
-          "android": {
-            "enableProguardInReleaseBuilds": true,
-            "enableShrinkResourcesInReleaseBuilds": true
-          }
-        }
-      ]
+      "@react-native-firebase/analytics"
     ],
     "experiments": {
       "typedRoutes": true,
