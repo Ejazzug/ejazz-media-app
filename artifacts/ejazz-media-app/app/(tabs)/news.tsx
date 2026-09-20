@@ -3,12 +3,14 @@ import { Image } from 'expo-image';
 import { useRouter } from 'expo-router';
 import React, { useMemo, useState } from 'react';
 import { ActivityIndicator, Pressable, RefreshControl, ScrollView, StyleSheet, Text, TextInput, View } from 'react-native';
-import { EditorialPlaceholder, ScreenHeader, StoryCard } from '@/components/MediaComponents';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
+import { EditorialPlaceholder, MINI_PLAYER_CLEARANCE, ScreenHeader, StoryCard } from '@/components/MediaComponents';
 import { useColors } from '@/hooks/useColors';
 import { NEWS_CATEGORIES, useFeaturedNews, useLatestNews } from '@/lib/news';
 
 export default function NewsScreen() {
   const colors = useColors();
+  const insets = useSafeAreaInsets();
   const router = useRouter();
   const [categoryId, setCategoryId] = useState<number>(12);
   const [searchOpen, setSearchOpen] = useState(false);
@@ -39,7 +41,7 @@ export default function NewsScreen() {
     <View style={[styles.screen, { backgroundColor: colors.background }]}>
       <ScrollView
         showsVerticalScrollIndicator={false}
-        contentContainerStyle={{ paddingBottom: 150 }}
+        contentContainerStyle={{ paddingBottom: MINI_PLAYER_CLEARANCE + insets.bottom }}
         refreshControl={
           <RefreshControl
             refreshing={featured.isRefetching || latest.isRefetching}

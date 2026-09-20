@@ -5,7 +5,7 @@ import { useLocalSearchParams } from 'expo-router';
 import React from 'react';
 import { ActivityIndicator, Pressable, Share, StyleSheet, Text, TextInput, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
-import { PlayButton, PlayingEqualizer } from '@/components/MediaComponents';
+import { MINI_PLAYER_CLEARANCE, PlayButton, PlayingEqualizer } from '@/components/MediaComponents';
 import { KeyboardAwareScrollViewCompat } from '@/components/KeyboardAwareScrollViewCompat';
 import { PodcastsPanel } from '@/components/PodcastsPanel';
 import { useColors } from '@/hooks/useColors';
@@ -31,7 +31,6 @@ export default function RadioScreen() {
   );
   const request = useSongRequest();
   const {
-    activeStation,
     playbackKind,
     isPlaying,
     isBuffering,
@@ -42,18 +41,26 @@ export default function RadioScreen() {
     toggleRadioPlayback,
     retryPlayback,
     stopPlayback,
-    currentTrack,
-    previousTracks,
-    nextTrack,
-    metadataLoading,
-    metadataError,
+    viewingPreviousTracks,
     refreshMetadata,
-    trackArtist,
-    trackTitle,
+    selectedStationId,
+    viewingStationId,
+    setViewingStation,
+    viewingStation,
+    viewingCurrentTrack,
+    viewingNextTrack,
+    viewingMetadataLoading,
+    viewingMetadataError,
+    viewingTrackTitle,
+    viewingTrackArtist,
   } = usePlayer();
+
+  React.useEffect(() => {
+    if (viewMode === 'radio' || viewMode === 'extra') setViewingStation(viewMode);
+  }, [viewMode, setViewingStation]);
   const isRadio = viewMode === 'radio';
   const isPodcasts = viewMode === 'podcasts';
-  const radioPlaying = playbackKind === 'radio' && isPlaying;
+  const radioPlaying = playbackKind === 'radio' && isPlaying && selectedStationId === viewMode;
   const extraSearchResults = useExtraSongSearch(debouncedExtraSearch, viewMode === 'extra');
   const extraRequest = useExtraSongRequest();
 
@@ -97,7 +104,7 @@ export default function RadioScreen() {
     <LinearGradient colors={[colors.gradientStart, colors.background, colors.gradientEnd]} style={styles.screen}>
       <KeyboardAwareScrollViewCompat
         showsVerticalScrollIndicator={false}
-        contentContainerStyle={{ paddingTop: insets.top + 18, paddingBottom: 150 }}
+        contentContainerStyle={{ paddingTop: insets.top + 18, paddingBottom: MINI_PLAYER_CLEARANCE + insets.bottom }}
         bottomOffset={24}
       >
         <View style={styles.header}>
@@ -105,7 +112,7 @@ export default function RadioScreen() {
           <Text style={styles.title}>Radio</Text>
           {!isPodcasts && (
             <Pressable
-              onPress={() => Share.share({ message: `Listen live on ${activeStation.name} — EJazz Media App` })}
+              onPress={() => Share.share({ message: `Listen live on ${viewingStation.name} — EJazz Media App` })}
               accessibilityRole="button"
               accessibilityLabel="Share station"
               style={styles.shareButton}
@@ -123,7 +130,6 @@ export default function RadioScreen() {
                 key={station.id}
                 onPress={() => {
                   setViewMode(station.id);
-                  selectStation(station.id);
                 }}
                 style={[styles.switcherItem, selected && { backgroundColor: colors.primary }]}
               >
@@ -155,7 +161,7 @@ export default function RadioScreen() {
           <>
         <View style={styles.playerArtworkWrap}>
           <View style={styles.playerLogoFallback}>
-            <Image source={activeStation.logo} contentFit="cover" style={styles.playerLogo} />
+            <Image source={viewingStation.logo} contentFit="cover" style={styles.playerLogo} />
           </View>
           <LinearGradient colors={['transparent', 'rgba(7,8,11,0.72)']} style={StyleSheet.absoluteFill} />
           <View style={styles.artworkLive}>
@@ -164,21 +170,24 @@ export default function RadioScreen() {
           </View>
           <View style={styles.artworkStation}>
             <View>
-              <Text style={styles.artworkStationName}>{activeStation.name}</Text>
-              <Text style={styles.artworkStationDescription}>{activeStation.genre}</Text>
+              <Text style={styles.artworkStationName}>{viewingStation.name}</Text>
+              <Text style={styles.artworkStationDescription}>{viewingStation.genre}</Text>
             </View>
           </View>
         </View>
 
         <View style={styles.controls}>
-          <Pressable style={styles.secondaryControl} onPress={() => Share.share({ message: `Listen to ${activeStation.name}` })}>
+          <Pressable style={styles.secondaryControl} onPress={() => Share.share({ message: `Listen to ${viewingStation.name}` })}>
             <Feather name="share-2" size={19} color={colors.mutedForeground} />
             <Text style={styles.controlText}>Share</Text>
           </Pressable>
           <PlayButton
             playing={radioPlaying}
-            onPress={toggleRadioPlayback}
-            loading={playbackKind === 'radio' && isBuffering}
+            onPress={() => {
+              if (viewingStationId !== selectedStationId) selectStation(viewingStationId);
+              else toggleRadioPlayback();
+            }}
+            loading={playbackKind === 'radio' && isBuffering && selectedStationId === viewingStationId}
           />
           <Pressable style={styles.secondaryControl} onPress={stopPlayback}>
             <Feather name="square" size={19} color={colors.mutedForeground} />
@@ -191,49 +200,49 @@ export default function RadioScreen() {
             <Text style={styles.trackEyebrow}>ON AIR</Text>
             <PlayingEqualizer playing={radioPlaying} />
           </View>
-          {metadataLoading && isRadio && !currentTrack ? (
+          {viewingMetadataLoading && isRadio && !viewingCurrentTrack ? (
             <View style={styles.metadataLoading}>
               <ActivityIndicator size="small" color={colors.primary} />
               <Text style={styles.trackArtist}>Finding the current track…</Text>
             </View>
           ) : (
             <>
-              <Text style={styles.trackTitle}>{trackTitle}</Text>
-              <Text style={styles.trackArtist}>{trackArtist}</Text>
+              <Text style={styles.trackTitle}>{viewingTrackTitle}</Text>
+              <Text style={styles.trackArtist}>{viewingTrackArtist}</Text>
             </>
           )}
-          {metadataError && isRadio && !currentTrack && (
+          {viewingMetadataError && isRadio && !viewingCurrentTrack && (
             <Pressable onPress={() => refreshMetadata()} style={styles.metadataRetry}>
               <Text style={styles.metadataRetryText}>TRACK INFO UNAVAILABLE · RETRY</Text>
             </Pressable>
           )}
         </View>
 
-        {!isRadio && nextTrack && (
+        {!isRadio && viewingNextTrack && (
           <View style={styles.nextTrackSection}>
             <Text style={styles.sectionEyebrow}>NEXT UP</Text>
             <View style={styles.nextTrackRow}>
-              {nextTrack.imageUrl ? (
-                <Image source={nextTrack.imageUrl} contentFit="cover" style={styles.nextTrackArtwork} />
+              {viewingNextTrack.imageUrl ? (
+                <Image source={viewingNextTrack.imageUrl} contentFit="cover" style={styles.nextTrackArtwork} />
               ) : (
                 <View style={styles.nextTrackArtworkFallback}>
                   <Feather name="music" size={20} color={colors.accent} />
                 </View>
               )}
               <View style={styles.historyCopy}>
-                <Text numberOfLines={1} style={styles.nextTrackTitle}>{nextTrack.title}</Text>
-                {!!nextTrack.artist && (
-                  <Text numberOfLines={1} style={styles.historyArtist}>{nextTrack.artist}</Text>
+                <Text numberOfLines={1} style={styles.nextTrackTitle}>{viewingNextTrack.title}</Text>
+                {!!viewingNextTrack.artist && (
+                  <Text numberOfLines={1} style={styles.historyArtist}>{viewingNextTrack.artist}</Text>
                 )}
               </View>
             </View>
           </View>
         )}
 
-        {previousTracks.length > 0 && (
+        {viewingPreviousTracks.length > 0 && (
           <View style={styles.historySection}>
             <Text style={styles.sectionEyebrow}>PREVIOUS TRACKS</Text>
-            {previousTracks.map((track, index) => (
+            {viewingPreviousTracks.map((track, index) => (
               <View key={`${track.artist}-${track.title}-${index}`} style={styles.historyRow}>
                 {track.imageUrl ? (
                   <Image source={track.imageUrl} contentFit="cover" style={styles.historyArtwork} />

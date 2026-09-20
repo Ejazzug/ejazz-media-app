@@ -192,7 +192,7 @@ export function StationCard({ station }: { station: Station }) {
         <View style={styles.stationCardBottom}>
           <View style={styles.stationCopy}>
             <Text style={styles.stationName}>{station.name}</Text>
-            <Text style={styles.stationDescription}>{station.genre}</Text>
+            <Text style={styles.stationDescription} numberOfLines={1} adjustsFontSizeToFit minimumFontScale={0.75}>{station.genre}</Text>
           </View>
           <PlayButton
             playing={playbackKind === 'radio' && isSelected && isPlaying}
@@ -243,6 +243,13 @@ export function StoryCard({ story, featured = false }: { story: Story; featured?
   );
 }
 
+// Vertical space the MiniPlayer + tab bar occupy above the screen bottom.
+// 76 = tab bar height; 100 = MiniPlayer's tallest state (podcast mode with
+// scrubber). Scrollable screens add `insets.bottom` to this for their
+// bottom padding so nothing -- including inline success/error banners --
+// ever renders behind the player.
+export const MINI_PLAYER_CLEARANCE = 176;
+
 export function MiniPlayer() {
   const {
     activeStation,
@@ -259,6 +266,7 @@ export function MiniPlayer() {
     podcastDuration,
     trackArtist,
     trackTitle,
+    stopPlayback,
   } = usePlayer();
   const router = useRouter();
   const insets = useSafeAreaInsets();
@@ -348,6 +356,20 @@ export function MiniPlayer() {
               <Feather name={isPlaying ? 'pause' : 'play'} size={18} color={colors.primary} />
             )}
           </Pressable>
+        {!isPodcast && (
+          <Pressable
+            onPress={(event) => {
+              event.stopPropagation();
+              stopPlayback();
+            }}
+            accessibilityRole="button"
+            accessibilityLabel="Stop playback"
+            hitSlop={10}
+            style={styles.miniNext}
+          >
+            <Feather name="square" size={15} color={colors.mutedForeground} />
+          </Pressable>
+        )}
         </View>
         {isPodcast && (
           <View style={styles.miniScrubber}>
@@ -388,7 +410,7 @@ const styles = StyleSheet.create({
   wordmarkText: { color: '#F7F9FC', fontSize: 18, fontWeight: '700', letterSpacing: 3.4 },
   wordmarkCompact: { fontSize: 14, letterSpacing: 2.4 },
   playButton: { alignItems: 'center', justifyContent: 'center' },
-  stationCard: { height: 220, borderWidth: 1, overflow: 'hidden', backgroundColor: '#0D2A57' },
+  stationCard: { flex: 1, height: 176, borderWidth: 1, overflow: 'hidden', backgroundColor: '#0D2A57' },
   stationArtwork: { ...StyleSheet.absoluteFill, opacity: 0.75 },
   stationCardContent: { flex: 1, justifyContent: 'space-between', padding: 16 },
   stationTopRow: { flexDirection: 'row', alignItems: 'flex-start', justifyContent: 'space-between' },
@@ -399,8 +421,8 @@ const styles = StyleSheet.create({
   liveText: { color: '#F7F9FC', fontSize: 10, fontWeight: '700', letterSpacing: 1.3 },
   stationCardBottom: { flexDirection: 'row', alignItems: 'flex-end', justifyContent: 'space-between' },
   stationCopy: { flex: 1, paddingRight: 12 },
-  stationName: { color: '#F7F9FC', fontSize: 23, fontWeight: '700', letterSpacing: -0.7 },
-  stationDescription: { color: '#FF6B6B', fontSize: 11, fontWeight: '700', letterSpacing: 1.4, marginTop: 6 },
+  stationName: { color: '#F7F9FC', fontSize: 19, fontWeight: '700', letterSpacing: -0.7 },
+  stationDescription: { color: '#FF6B6B', fontSize: 10, fontWeight: '700', letterSpacing: 0.6, marginTop: 6 },
   storyPressable: { flexDirection: 'row', gap: 14 },
   storyPressableFeatured: { flexDirection: 'column' },
   storyImage: { width: 104, height: 104, backgroundColor: '#163761' },

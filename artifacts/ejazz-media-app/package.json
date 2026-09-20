@@ -64,7 +64,11 @@
     "@react-native-firebase/app": "^26.4.0",
     "expo-asset": "~57.0.16",
     "expo-audio": "^57.0.4",
+    "expo-build-properties": "~57.0.17",
     "expo-device": "~57.0.1",
-    "expo-notifications": "~57.0.17"
+    "expo-notifications": "~57.0.17",
+    "expo": "~57.0.20",
+    "react": "19.2.3",
+    "react-native": "0.86.3"
   }
 }

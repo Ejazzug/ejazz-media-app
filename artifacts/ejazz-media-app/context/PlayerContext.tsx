@@ -85,6 +85,16 @@ type PlayerContextValue = {
   stations: Station[];
   activeStation: Station;
   selectedStationId: StationId;
+  viewingStationId: StationId;
+  viewingStation: Station;
+  setViewingStation: (stationId: StationId) => void;
+  viewingCurrentTrack: RadioTrack | null;
+  viewingPreviousTracks: RadioTrack[];
+  viewingNextTrack: RadioTrack | null;
+  viewingMetadataLoading: boolean;
+  viewingMetadataError: boolean;
+  viewingTrackTitle: string;
+  viewingTrackArtist: string;
   playbackKind: PlaybackKind;
   isPlaying: boolean;
   isBuffering: boolean;
@@ -120,6 +130,7 @@ const PlayerContext = createContext<PlayerContextValue | null>(null);
 
 export function PlayerProvider({ children }: PropsWithChildren) {
   const [selectedStationId, setSelectedStationId] = useState<StationId>('radio');
+  const [viewingStationId, setViewingStation] = useState<StationId>('radio');
   const [playbackKind, setPlaybackKind] = useState<PlaybackKind>('radio');
   const [isPlaying, setIsPlaying] = useState(false);
   const [streamError, setStreamError] = useState(false);
@@ -166,9 +177,18 @@ export function PlayerProvider({ children }: PropsWithChildren) {
     keepAudioSessionActive: true,
   });
   const status = useAudioPlayerStatus(player);
-  const recentTracks = useRecentTracks(selectedStationId === 'radio' && isAppActive);
-  const extraNowPlaying = useExtraNowPlaying(selectedStationId === 'extra' && isAppActive);
-  const extraRecentTracks = useExtraRecentTracks(selectedStationId === 'extra' && isAppActive);
+  const recentTracks = useRecentTracks(
+    (viewingStationId === 'radio' && isAppActive) || selectedStationId === 'radio',
+    isAppActive,
+  );
+  const extraNowPlaying = useExtraNowPlaying(
+    (viewingStationId === 'extra' && isAppActive) || selectedStationId === 'extra',
+    isAppActive,
+  );
+  const extraRecentTracks = useExtraRecentTracks(
+    (viewingStationId === 'extra' && isAppActive) || selectedStationId === 'extra',
+    isAppActive,
+  );
   const currentTrack = selectedStationId === 'radio'
     ? recentTracks.data?.[0] ?? null
     : extraNowPlaying.data?.currentTrack ?? null;
@@ -184,6 +204,28 @@ export function PlayerProvider({ children }: PropsWithChildren) {
   const metadataError = selectedStationId === 'radio'
     ? recentTracks.isError
     : extraNowPlaying.isError && extraRecentTracks.isError;
+  const viewingStation = useMemo(
+    () => stations.find((station) => station.id === viewingStationId) ?? stations[0],
+    [viewingStationId],
+  );
+  const viewingCurrentTrack = viewingStationId === 'radio'
+    ? recentTracks.data?.[0] ?? null
+    : extraNowPlaying.data?.currentTrack ?? null;
+  const viewingPreviousTracks = viewingStationId === 'radio'
+    ? recentTracks.data?.slice(1, 5) ?? []
+    : extraRecentTracks.data ?? [];
+  const viewingNextTrack = viewingStationId === 'extra'
+    ? extraNowPlaying.data?.nextTrack ?? null
+    : null;
+  const viewingMetadataLoading = viewingStationId === 'radio'
+    ? recentTracks.isLoading
+    : extraNowPlaying.isLoading || extraRecentTracks.isLoading;
+  const viewingMetadataError = viewingStationId === 'radio'
+    ? recentTracks.isError
+    : extraNowPlaying.isError && extraRecentTracks.isError;
+  const viewingTrackTitle = viewingCurrentTrack?.title ?? 'Live from EJazz';
+  const viewingTrackArtist = viewingCurrentTrack?.artist ?? viewingStation.description;
+
   const playbackError = playbackKind === 'podcast' && !!status.error;
 
   const refreshMetadata = useCallback(() => {
@@ -235,9 +277,11 @@ export function PlayerProvider({ children }: PropsWithChildren) {
     };
   }, []);
 
+  const hasActivatedLockScreenRef = useRef(false);
   useEffect(() => {
-    if (!status.playing) return;
     if (playbackKind === 'podcast' && currentPodcast) {
+      if (!status.playing && !hasActivatedLockScreenRef.current) return;
+      hasActivatedLockScreenRef.current = true;
       player.setActiveForLockScreen(
         true,
         {
@@ -250,11 +294,13 @@ export function PlayerProvider({ children }: PropsWithChildren) {
       );
       return;
     }
+    if (!status.playing && !hasActivatedLockScreenRef.current) return;
+    hasActivatedLockScreenRef.current = true;
     player.setActiveForLockScreen(
       true,
       {
-        title: currentTrack?.title ?? 'EJazz live',
-        artist: currentTrack?.artist ?? activeStation.description,
+        title: currentTrack?.title || activeStation.description || activeStation.name,
+        artist: currentTrack?.artist || activeStation.name,
         albumTitle: activeStation.name,
         artworkUrl: currentTrack?.imageUrl || undefined,
       },
@@ -293,6 +339,7 @@ export function PlayerProvider({ children }: PropsWithChildren) {
       .then((savedStation) => {
         if (savedStation === 'radio' || savedStation === 'extra') {
           setSelectedStationId(savedStation);
+          setViewingStation(savedStation);
         }
       })
       .catch(() => undefined);
@@ -301,16 +348,36 @@ export function PlayerProvider({ children }: PropsWithChildren) {
   const selectStation = useCallback(
     (stationId: StationId) => {
       if (stationId === selectedStationId) return;
-      if (playbackKind === 'radio') {
-        player.pause();
-        setIsPlaying(false);
-      }
+      const nextStation = stations.find((station) => station.id === stationId);
       clearAutoRetry();
       setStreamError(false);
       setSelectedStationId(stationId);
       AsyncStorage.setItem('ejazz-selected-station', stationId).catch(() => undefined);
+      if (!nextStation?.streamUrl) {
+        console.error('[EJazz Radio] Selected station has no stream URL.', stationId);
+        setStreamErrorMessage('The live stream URL is empty or undefined in this app build.');
+        setStreamError(true);
+        setIsPlaying(false);
+        return;
+      }
+      try {
+        player.pause();
+        player.replace(nextStation.streamUrl);
+        setPlaybackKind('radio');
+        setCurrentPodcast(null);
+        player.play();
+        setIsPlaying(true);
+        console.log('[EJazz Radio] play() dispatched to the shared audio player after station switch.');
+      } catch (error: unknown) {
+        const message = error instanceof Error ? error.message : String(error);
+        console.error('[EJazz Radio] Failed to start the live stream after station switch.', error);
+        setStreamErrorMessage(`Could not start the live stream: ${message}`);
+        setStreamError(true);
+        setIsPlaying(false);
+        scheduleAutoRetry();
+      }
     },
-    [playbackKind, player, selectedStationId],
+    [player, selectedStationId, clearAutoRetry, scheduleAutoRetry],
   );
 
   const toggleRadioPlayback = useCallback(() => {
@@ -466,6 +533,16 @@ export function PlayerProvider({ children }: PropsWithChildren) {
       stations,
       activeStation,
       selectedStationId,
+      viewingStationId,
+      viewingStation,
+      setViewingStation,
+      viewingCurrentTrack,
+      viewingPreviousTracks,
+      viewingNextTrack,
+      viewingMetadataLoading,
+      viewingMetadataError,
+      viewingTrackTitle,
+      viewingTrackArtist,
       playbackKind,
       isPlaying,
       isBuffering: status.isBuffering,
@@ -516,6 +593,16 @@ export function PlayerProvider({ children }: PropsWithChildren) {
       retryPlayback,
       selectStation,
       selectedStationId,
+      viewingStationId,
+      viewingStation,
+      setViewingStation,
+      viewingCurrentTrack,
+      viewingPreviousTracks,
+      viewingNextTrack,
+      viewingMetadataLoading,
+      viewingMetadataError,
+      viewingTrackTitle,
+      viewingTrackArtist,
       seekPodcastForward,
       seekPodcastTo,
       skipPodcast,

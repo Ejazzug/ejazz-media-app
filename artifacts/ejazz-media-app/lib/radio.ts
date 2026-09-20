@@ -294,35 +294,40 @@ async function submitSongRequest(input: SongRequestInput): Promise<SongRequestRe
   };
 }
 
-export function useRecentTracks(enabled: boolean) {
+export function useRecentTracks(enabled: boolean, isAppActive: boolean = true) {
   return useQuery({
     queryKey: ['radio', 'recent-tracks'],
     queryFn: fetchRecentTracks,
     enabled,
     staleTime: 60_000,
-    refetchInterval: enabled ? 75_000 : false,
+    // Keep polling in the background (at a slower cadence) so the lock-screen /
+    // notification metadata doesn't go stale while the app isn't foregrounded.
+    refetchInterval: enabled ? (isAppActive ? 75_000 : 180_000) : false,
+    refetchIntervalInBackground: true,
     retry: 1,
   });
 }
 
-export function useExtraNowPlaying(enabled: boolean) {
+export function useExtraNowPlaying(enabled: boolean, isAppActive: boolean = true) {
   return useQuery({
     queryKey: ['radio', 'extra', 'now-playing'],
     queryFn: fetchExtraNowPlaying,
     enabled,
     staleTime: 4_000,
-    refetchInterval: enabled ? 5_000 : false,
+    refetchInterval: enabled ? (isAppActive ? 5_000 : 30_000) : false,
+    refetchIntervalInBackground: true,
     retry: 1,
   });
 }
 
-export function useExtraRecentTracks(enabled: boolean) {
+export function useExtraRecentTracks(enabled: boolean, isAppActive: boolean = true) {
   return useQuery({
     queryKey: ['radio', 'extra', 'recent-tracks'],
     queryFn: fetchExtraRecentTracks,
     enabled,
     staleTime: 8_000,
-    refetchInterval: enabled ? 10_000 : false,
+    refetchInterval: enabled ? (isAppActive ? 10_000 : 60_000) : false,
+    refetchIntervalInBackground: true,
     retry: 1,
   });
 }

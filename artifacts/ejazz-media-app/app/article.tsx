@@ -4,7 +4,7 @@ import { Stack, useLocalSearchParams, useRouter } from 'expo-router';
 import React from 'react';
 import { ActivityIndicator, Pressable, ScrollView, Share, StyleSheet, Text, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
-import { EditorialPlaceholder } from '@/components/MediaComponents';
+import { EditorialPlaceholder, MINI_PLAYER_CLEARANCE } from '@/components/MediaComponents';
 import { useColors } from '@/hooks/useColors';
 import { useArticle, useRelatedNews } from '@/lib/news';
 
@@ -55,7 +55,7 @@ export default function ArticleScreen() {
   return (
     <View style={[styles.screen, { backgroundColor: colors.background }]}>
       <Stack.Screen options={{ headerShown: false }} />
-      <ScrollView showsVerticalScrollIndicator={false} contentContainerStyle={{ paddingBottom: 130 }}>
+      <ScrollView showsVerticalScrollIndicator={false} contentContainerStyle={{ paddingBottom: MINI_PLAYER_CLEARANCE + insets.bottom }}>
         <View style={[styles.topBar, { paddingTop: insets.top + 8 }]}>
           <Pressable onPress={() => router.back()} style={styles.topButton} hitSlop={8}>
             <Feather name="arrow-left" size={20} color={colors.foreground} />

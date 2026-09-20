@@ -5,6 +5,8 @@ import * as Device from 'expo-device';
 import * as Notifications from 'expo-notifications';
 import { Platform } from 'react-native';
 
+import { appendNotificationToHistory } from './notificationHistory';
+
 const PUSH_TOKEN_STORAGE_KEY = '@ejazz/expo-push-token';
 const DEFAULT_CHANNEL_ID = 'default';
 
@@ -76,8 +78,14 @@ export function usePushNotifications(): {
       if (isMounted && lastResponse) setResponse(lastResponse);
     });
 
-    const notificationSubscription =
-      Notifications.addNotificationReceivedListener(setNotification);
+    const notificationSubscription = Notifications.addNotificationReceivedListener(
+      (incoming) => {
+        setNotification(incoming);
+        appendNotificationToHistory(incoming).catch((error) => {
+          console.warn('Failed to save notification to history.', error);
+        });
+      },
+    );
     const responseSubscription =
       Notifications.addNotificationResponseReceivedListener(setResponse);
 

@@ -1,53 +1,75 @@
 import { Feather } from '@expo/vector-icons';
+import { useRouter } from 'expo-router';
 import React from 'react';
 import { Linking, Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
-import { EJazzWordmark, ScreenHeader } from '@/components/MediaComponents';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
+import { EJazzWordmark, MINI_PLAYER_CLEARANCE, ScreenHeader } from '@/components/MediaComponents';
 import { useColors } from '@/hooks/useColors';
 import { usePushNotifications } from '@/lib/notifications';
+import { useHosts } from '@/lib/hosts';
 
 const items = [
-  { label: 'About EJazz', icon: 'info' as const, action: undefined },
-  { label: 'Contact EJazz', icon: 'mail' as const, action: 'mailto:hello@ejazzmedia.com' },
-  { label: 'Instagram', icon: 'instagram' as const, action: 'https://instagram.com' },
-  { label: 'Privacy Policy', icon: 'shield' as const, action: undefined },
-  { label: 'Terms', icon: 'file-text' as const, action: undefined },
+  { label: 'Notifications', icon: 'bell' as const, action: undefined, route: '/notifications' as const },
+  { label: 'About EJazz', icon: 'info' as const, action: undefined, route: undefined },
+  { label: 'Contact EJazz', icon: 'mail' as const, action: 'mailto:hello@ejazzmedia.com', route: undefined },
+  { label: 'Instagram', icon: 'instagram' as const, action: 'https://instagram.com', route: undefined },
+  { label: 'Privacy Policy', icon: 'shield' as const, action: undefined, route: undefined },
+  { label: 'Terms', icon: 'file-text' as const, action: undefined, route: undefined },
 ];
 
 export default function MoreScreen() {
   const colors = useColors();
-  const { expoPushToken } = usePushNotifications();
+  const insets = useSafeAreaInsets();
+  const router = useRouter();
+  usePushNotifications();
+  const hostsQuery = useHosts();
+  const hosts = hostsQuery.data ?? [];
   return (
     <View style={[styles.screen, { backgroundColor: colors.background }]}>
-      <ScrollView showsVerticalScrollIndicator={false} contentContainerStyle={{ paddingBottom: 150 }}>
+      <ScrollView showsVerticalScrollIndicator={false} contentContainerStyle={{ paddingBottom: MINI_PLAYER_CLEARANCE + insets.bottom }}>
         <ScreenHeader eyebrow="THE HOUSE OF EJAZZ" title="More" />
         <View style={styles.about}>
           <EJazzWordmark />
           <Text style={styles.aboutTitle}>Your Vibe. Your News. Your EJazz.</Text>
           <Text style={styles.aboutCopy}>Radio, culture &amp; the stories that matter - all in one app.</Text>
         </View>
+        {hosts.length > 0 ? (
+          <View style={styles.hostsSection}>
+            <Text style={styles.hostsTitle}>EJazz Hosts</Text>
+            <View style={styles.hostsList}>
+              {hosts.map((host) => (
+                <View key={host.id} style={styles.hostCard}>
+                  <Text style={styles.hostName}>{host.name}</Text>
+                  {host.bio ? <Text style={styles.hostBio}>{host.bio}</Text> : null}
+                </View>
+              ))}
+            </View>
+          </View>
+        ) : null}
+
         <View style={styles.menu}>
           {items.map((item) => (
             <Pressable
               key={item.label}
               onPress={() => {
-                if (item.action) Linking.openURL(item.action);
+                if (item.route) router.push(item.route);
+                else if (item.action) Linking.openURL(item.action);
               }}
               style={({ pressed }) => [styles.menuItem, { opacity: pressed ? 0.65 : 1 }]}
             >
               <View style={styles.menuIcon}><Feather name={item.icon} size={18} color={colors.primary} /></View>
               <Text style={styles.menuLabel}>{item.label}</Text>
-              <Feather name="arrow-up-right" size={16} color={colors.mutedForeground} />
+              <Feather
+                name={item.route ? 'chevron-right' : 'arrow-up-right'}
+                size={16}
+                color={colors.mutedForeground}
+              />
             </Pressable>
           ))}
         </View>
         <View style={styles.version}>
           <Text style={styles.versionText}>EJAZZ MEDIA APP</Text>
           <Text style={styles.versionSubtext}>VERSION 1.0.0</Text>
-          {expoPushToken ? (
-            <Text style={styles.versionSubtext} selectable>
-              PUSH ID: {expoPushToken}
-            </Text>
-          ) : null}
         </View>
       </ScrollView>
     </View>
@@ -59,6 +81,19 @@ const styles = StyleSheet.create({
   about: { marginHorizontal: 20, paddingVertical: 22, paddingHorizontal: 18, backgroundColor: '#0D2A57', borderLeftWidth: 3, borderLeftColor: '#E43B48' },
   aboutTitle: { color: '#F7F9FC', fontSize: 24, fontWeight: '700', letterSpacing: -0.7, marginTop: 25 },
   aboutCopy: { color: '#A7B7CC', fontSize: 14, lineHeight: 21, marginTop: 10 },
+  hostsSection: { marginHorizontal: 20, marginTop: 22 },
+  hostsTitle: { color: '#F7F9FC', fontSize: 16, fontWeight: '700', marginBottom: 10 },
+  hostsList: { gap: 10 },
+  hostCard: {
+    padding: 14,
+    borderRadius: 12,
+    borderWidth: 1,
+    borderColor: '#204570',
+    backgroundColor: 'rgba(255,255,255,0.04)',
+    gap: 4,
+  },
+  hostName: { color: '#F7F9FC', fontSize: 15, fontWeight: '700' },
+  hostBio: { color: '#A7B7CC', fontSize: 13, lineHeight: 18 },
   menu: { marginHorizontal: 20, marginTop: 27, borderTopWidth: 1, borderTopColor: '#204570' },
   menuItem: { minHeight: 62, flexDirection: 'row', alignItems: 'center', borderBottomWidth: 1, borderBottomColor: '#204570', gap: 13 },
   menuIcon: { width: 32, alignItems: 'center' },
