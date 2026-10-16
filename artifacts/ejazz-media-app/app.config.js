@@ -5,7 +5,11 @@ module.exports = () => {
 
   return {
     ...expo,
-    plugins: [...(expo.plugins || []), './plugins/withEjazzBackgroundMetadata'],
+    plugins: [
+      ...(expo.plugins || []),
+      './plugins/withEjazzBackgroundMetadata',
+      './plugins/withEjazzPictureInPicture',
+    ],
     android: {
       ...expo.android,
       googleServicesFile: './google-services.json',

@@ -3,12 +3,12 @@
     "name": "EJazz Media App",
     "slug": "ejazz-media-app",
     "version": "2.0.0",
-    "orientation": "portrait",
+    "orientation": "default",
     "icon": "./assets/images/ejazz-app-icon.png",
     "scheme": "ejazz-media-app",
     "userInterfaceStyle": "dark",
     "ios": {
-      "supportsTablet": false
+      "supportsTablet": true
     },
     "android": {
       "package": "com.ejazzug.ejazzmedia",

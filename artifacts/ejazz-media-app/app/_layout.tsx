@@ -1,5 +1,5 @@
 import React, { useEffect } from 'react';
-import { View } from 'react-native';
+import { Platform, View, useWindowDimensions } from 'react-native';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { GestureHandlerRootView } from 'react-native-gesture-handler';
 import { KeyboardProvider } from 'react-native-keyboard-controller';
@@ -16,7 +16,7 @@ import { Stack } from 'expo-router';
 import Head from 'expo-router/head';
 import * as SplashScreen from 'expo-splash-screen';
 import { PlayerProvider } from '@/context/PlayerContext';
-import { MiniPlayer } from '@/components/MediaComponents';
+import { MiniPlayer, PictureInPicturePlayer } from '@/components/MediaComponents';
 import { initializeFirebaseAnalytics } from '@/lib/firebase';
 import { usePushNotifications } from '@/lib/notifications';
 
@@ -39,6 +39,25 @@ function RootLayoutNav() {
     <Stack screenOptions={{ headerBackTitle: 'Back' }}>
       <Stack.Screen name="(tabs)" options={{ headerShown: false }} />
     </Stack>
+  );
+}
+
+function RootLayoutContent() {
+  const { width, height } = useWindowDimensions();
+  const isPictureInPictureWindow =
+    Platform.OS === 'android' && width > height && width <= 520 && height <= 260;
+
+  return (
+    <View style={{ flex: 1 }}>
+      <Head>
+        <meta name="referrer" content="no-referrer" />
+      </Head>
+      <View style={{ flex: 1, display: isPictureInPictureWindow ? 'none' : 'flex' }}>
+        <RootLayoutNav />
+        <MiniPlayer />
+      </View>
+      {isPictureInPictureWindow && <PictureInPicturePlayer />}
+    </View>
   );
 }
 
@@ -72,13 +91,7 @@ export default function RootLayout() {
           <GestureHandlerRootView>
             <KeyboardProvider>
               <PlayerProvider>
-                <View style={{ flex: 1 }}>
-                  <Head>
-                    <meta name="referrer" content="no-referrer" />
-                  </Head>
-                  <RootLayoutNav />
-                  <MiniPlayer />
-                </View>
+                <RootLayoutContent />
               </PlayerProvider>
             </KeyboardProvider>
           </GestureHandlerRootView>

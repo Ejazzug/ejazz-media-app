@@ -20,6 +20,7 @@ import { useColors } from '@/hooks/useColors';
 import { Station, usePlayer } from '@/context/PlayerContext';
 import { Story } from '@/lib/news';
 import { PodcastScrubber } from '@/components/PodcastScrubber';
+import { canEnterPictureInPicture, enterPictureInPicture } from '@/lib/pictureInPicture';
 
 export function PlayingEqualizer({
   playing,
@@ -356,6 +357,22 @@ export function MiniPlayer() {
               <Feather name={isPlaying ? 'pause' : 'play'} size={18} color={colors.primary} />
             )}
           </Pressable>
+          {isPlaying && canEnterPictureInPicture() && (
+            <Pressable
+              onPress={(event) => {
+                event.stopPropagation();
+                void enterPictureInPicture().catch((error: unknown) => {
+                  console.warn('[EJazz PiP] Could not enter picture-in-picture mode.', error);
+                });
+              }}
+              accessibilityRole="button"
+              accessibilityLabel="Open player in picture-in-picture"
+              hitSlop={10}
+              style={styles.miniNext}
+            >
+              <Feather name="minimize-2" size={16} color={colors.mutedForeground} />
+            </Pressable>
+          )}
         {!isPodcast && (
           <Pressable
             onPress={(event) => {
@@ -381,6 +398,67 @@ export function MiniPlayer() {
             />
           </View>
         )}
+      </Pressable>
+    </View>
+  );
+}
+
+export function PictureInPicturePlayer() {
+  const {
+    activeStation,
+    currentPodcast,
+    playbackKind,
+    isPlaying,
+    togglePlayback,
+    stopPlayback,
+    trackTitle,
+    trackArtist,
+  } = usePlayer();
+  const colors = useColors();
+  const isPodcast = playbackKind === 'podcast' && !!currentPodcast;
+
+  return (
+    <View style={[styles.pipPlayer, { backgroundColor: colors.background }]}>
+      <View style={[styles.pipArtwork, { backgroundColor: colors.card }]}>
+        {isPodcast && currentPodcast.artworkUrl ? (
+          <Image source={currentPodcast.artworkUrl} contentFit="cover" style={styles.pipArtworkImage} />
+        ) : isPodcast ? (
+          <Feather name="mic" size={19} color={colors.accent} />
+        ) : (
+          <Image source={activeStation.logo} contentFit="contain" style={styles.pipArtworkImage} />
+        )}
+      </View>
+      <View style={styles.pipCopy}>
+        <Text numberOfLines={1} style={[styles.pipLabel, { color: colors.accent }]}>
+          {isPodcast ? currentPodcast.showName : `LIVE · ${activeStation.shortName}`}
+        </Text>
+        <Text numberOfLines={1} style={[styles.pipTitle, { color: colors.foreground }]}>
+          {isPodcast ? currentPodcast.title : trackTitle}
+        </Text>
+        <Text numberOfLines={1} style={[styles.pipSubtitle, { color: colors.mutedForeground }]}>
+          {isPodcast ? currentPodcast.showName : trackArtist}
+        </Text>
+      </View>
+      <Pressable
+        onPress={togglePlayback}
+        accessibilityRole="button"
+        accessibilityLabel={isPlaying ? 'Pause playback' : 'Resume playback'}
+        style={[styles.pipPlay, { backgroundColor: colors.primary }]}
+      >
+        <Feather
+          name={isPlaying ? 'pause' : 'play'}
+          size={17}
+          color={colors.primaryForeground}
+        />
+      </Pressable>
+      <Pressable
+        onPress={stopPlayback}
+        accessibilityRole="button"
+        accessibilityLabel="Stop playback"
+        hitSlop={8}
+        style={styles.pipStop}
+      >
+        <Feather name="square" size={14} color={colors.mutedForeground} />
       </Pressable>
     </View>
   );
@@ -455,6 +533,15 @@ const styles = StyleSheet.create({
   miniNext: { minWidth: 34, height: 34, flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 2 },
   miniQueueCount: { color: '#A7B7CC', fontSize: 8, fontWeight: '700' },
   miniPlay: { width: 34, height: 34, alignItems: 'center', justifyContent: 'center' },
+  pipPlayer: { flex: 1, minWidth: 0, flexDirection: 'row', alignItems: 'center', gap: 8, paddingHorizontal: 10 },
+  pipArtwork: { width: 42, height: 42, alignItems: 'center', justifyContent: 'center', borderRadius: 6, overflow: 'hidden' },
+  pipArtworkImage: { width: '100%', height: '100%' },
+  pipCopy: { flex: 1, minWidth: 0, gap: 2 },
+  pipLabel: { fontSize: 8, fontWeight: '700', letterSpacing: 0.5 },
+  pipTitle: { fontSize: 11, fontWeight: '700' },
+  pipSubtitle: { fontSize: 9 },
+  pipPlay: { width: 34, height: 34, alignItems: 'center', justifyContent: 'center', borderRadius: 17 },
+  pipStop: { width: 28, height: 34, alignItems: 'center', justifyContent: 'center' },
   screenHeader: { paddingHorizontal: 20, paddingBottom: 18, gap: 21 },
   headerEyebrow: { color: '#FF6B6B', fontSize: 10, fontWeight: '700', letterSpacing: 1.6, marginBottom: 5 },
   headerTitle: { color: '#F7F9FC', fontSize: 32, fontWeight: '700', letterSpacing: -1.2 },
