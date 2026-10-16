@@ -5,7 +5,6 @@ import { Linking, Pressable, ScrollView, StyleSheet, Text, View } from 'react-na
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { EJazzWordmark, MINI_PLAYER_CLEARANCE, ScreenHeader } from '@/components/MediaComponents';
 import { useColors } from '@/hooks/useColors';
-import { usePushNotifications } from '@/lib/notifications';
 import { useHosts } from '@/lib/hosts';
 
 const items = [
@@ -21,7 +20,6 @@ export default function MoreScreen() {
   const colors = useColors();
   const insets = useSafeAreaInsets();
   const router = useRouter();
-  usePushNotifications();
   const hostsQuery = useHosts();
   const hosts = hostsQuery.data ?? [];
   return (

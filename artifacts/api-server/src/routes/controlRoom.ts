@@ -224,7 +224,12 @@ $('createBtn').addEventListener('click', async () => {
     return;
   }
   try {
-    await api('/content', { method: 'POST', body: JSON.stringify(payload) });
+    const created = await api('/content', { method: 'POST', body: JSON.stringify(payload) });
+    if (created.pushDelivery) {
+      $('createErr').style.color = created.pushDelivery.sent > 0 ? '#a7f3d0' : '#fca5a5';
+      $('createErr').textContent = created.pushDelivery.error ||
+        ('Push accepted by Expo for ' + created.pushDelivery.sent + ' device(s).');
+    }
     $('f_title').value = ''; $('f_body').value = ''; $('f_artist').value = '';
     $('f_song').value = ''; $('f_show').value = ''; $('f_station').value = '';
     $('f_pollOptions').value = ''; $('f_push').checked = false;

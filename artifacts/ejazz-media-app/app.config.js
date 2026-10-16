@@ -10,6 +10,7 @@ module.exports = () => {
 
   return {
     ...expo,
+    plugins: [...(expo.plugins || []), './plugins/withEjazzBackgroundMetadata'],
     android: {
       ...expo.android,
       ...(googleServicesFile ? { googleServicesFile } : {}),

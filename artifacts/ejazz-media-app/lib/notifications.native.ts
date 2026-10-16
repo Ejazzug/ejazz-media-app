@@ -9,6 +9,7 @@ import { appendNotificationToHistory } from './notificationHistory';
 
 const PUSH_TOKEN_STORAGE_KEY = '@ejazz/expo-push-token';
 const DEFAULT_CHANNEL_ID = 'default';
+const PUSH_API_URL = process.env.EXPO_PUBLIC_PULSE_API_URL?.trim() ?? '';
 
 Notifications.setNotificationHandler({
   handleNotification: async () => ({
@@ -49,6 +50,20 @@ async function registerForPushNotifications(): Promise<string | null> {
 
   const token = (await Notifications.getExpoPushTokenAsync({ projectId })).data;
   await AsyncStorage.setItem(PUSH_TOKEN_STORAGE_KEY, token);
+  if (!PUSH_API_URL) {
+    console.warn('[EJazz Push] Token was created but not registered: EXPO_PUBLIC_PULSE_API_URL is not configured.');
+    return token;
+  }
+
+  const response = await fetch(new URL('/api/notifications/register', PUSH_API_URL), {
+    method: 'POST',
+    headers: { Accept: 'application/json', 'Content-Type': 'application/json' },
+    body: JSON.stringify({ token, platform: Platform.OS }),
+  });
+  if (!response.ok) {
+    const details = await response.text().catch(() => '');
+    throw new Error(`Push token registration failed (HTTP ${response.status}): ${details.slice(0, 200)}`);
+  }
   return token;
 }
 

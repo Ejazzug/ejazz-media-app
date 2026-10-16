@@ -31,6 +31,7 @@ export const contentItemsTable = pgTable("content_items", {
   quizCorrectIndex: integer("quiz_correct_index"),
   startAt: timestamp("start_at", { withTimezone: true }),
   endAt: timestamp("end_at", { withTimezone: true }),
+  pushSentAt: timestamp("push_sent_at", { withTimezone: true }),
   createdBy: text("created_by"),
   createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
   updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
@@ -40,6 +41,7 @@ export const insertContentItemSchema = createInsertSchema(contentItemsTable).omi
   id: true,
   createdAt: true,
   updatedAt: true,
+  pushSentAt: true,
 });
 export const updateContentItemSchema = insertContentItemSchema.partial();
 

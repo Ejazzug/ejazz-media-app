@@ -62,11 +62,7 @@ function isContentItem(value: unknown): value is PulseContentItem {
 }
 
 export function isPulseConfigured(): boolean {
-  // Hard-disabled for this release: Pulse content, Programme Lineup, and Host
-  // profiles all depend on api-server having a public URL, which isn't live
-  // yet (pending Contabo). Ship this version clean; flip back to
-  // `Boolean(PULSE_API_URL)` once that's ready — targeted for the next version.
-  return false;
+  return Boolean(PULSE_API_URL);
 }
 
 async function requestActiveContent(placement: string): Promise<PulseContentItem[]> {

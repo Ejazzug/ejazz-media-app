@@ -12,6 +12,7 @@ import {
   insertHostSchema,
   updateHostSchema,
 } from "@workspace/db";
+import { sendContentPush } from "../lib/pushNotifications";
 import { signSession, requireAdmin, ADMIN_COOKIE } from "../middlewares/adminAuth";
 import {
   generateWithGemini,
@@ -21,6 +22,41 @@ import {
 } from "../lib/gemini";
 
 const router: IRouter = Router();
+
+async function attemptContentPush(item: {
+  id: number;
+  type: string;
+  title: string;
+  body: string | null;
+  status: string;
+  pushEnabled: boolean;
+  pushSentAt: Date | null;
+}) {
+  if (!item.pushEnabled || item.status !== "live" || item.pushSentAt) return null;
+
+  try {
+    const delivery = await sendContentPush(item);
+    if (delivery.sent > 0) {
+      const pushSentAt = new Date();
+      await db
+        .update(contentItemsTable)
+        .set({ pushSentAt, updatedAt: pushSentAt })
+        .where(eq(contentItemsTable.id, item.id));
+    }
+    return {
+      ...delivery,
+      error: delivery.registered === 0 ? "No app devices have registered for push notifications." : null,
+    };
+  } catch (error) {
+    console.error("[EJazz Push] Content notification delivery failed.", { contentId: item.id, error });
+    return {
+      sent: 0,
+      failed: 0,
+      registered: 0,
+      error: error instanceof Error ? error.message : "Push delivery failed.",
+    };
+  }
+}
 
 router.post("/login", (req, res) => {
   const adminPassword = process.env.ADMIN_PASSWORD;
@@ -66,7 +102,11 @@ router.post("/content", async (req, res) => {
     return;
   }
   const [item] = await db.insert(contentItemsTable).values(parsed.data).returning();
-  res.status(201).json(item);
+  const pushDelivery = await attemptContentPush(item);
+  const [savedItem] = pushDelivery?.sent
+    ? await db.select().from(contentItemsTable).where(eq(contentItemsTable.id, item.id))
+    : [item];
+  res.status(201).json({ ...savedItem, pushDelivery });
 });
 
 router.patch("/content/:id", async (req, res) => {
@@ -80,6 +120,14 @@ router.patch("/content/:id", async (req, res) => {
     res.status(400).json({ error: parsed.error.flatten() });
     return;
   }
+  const [previousItem] = await db
+    .select()
+    .from(contentItemsTable)
+    .where(eq(contentItemsTable.id, id));
+  if (!previousItem) {
+    res.status(404).json({ error: "not found" });
+    return;
+  }
   const [item] = await db
     .update(contentItemsTable)
     .set({ ...parsed.data, updatedAt: new Date() })
@@ -89,7 +137,12 @@ router.patch("/content/:id", async (req, res) => {
     res.status(404).json({ error: "not found" });
     return;
   }
-  res.json(item);
+  const becameLive = previousItem.status !== "live" && item.status === "live";
+  const pushDelivery = becameLive ? await attemptContentPush(item) : null;
+  const [savedItem] = pushDelivery?.sent
+    ? await db.select().from(contentItemsTable).where(eq(contentItemsTable.id, item.id))
+    : [item];
+  res.json({ ...savedItem, pushDelivery });
 });
 
 router.get("/shows", async (_req, res) => {
