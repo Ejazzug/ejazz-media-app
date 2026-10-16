@@ -125,6 +125,14 @@ const PAGE = `<!doctype html>
       <input type="checkbox" id="f_push">
       <label for="f_push" style="margin:0;">Send push notification</label>
     </div>
+    <div class="field" id="pushTopicField" style="display:none; margin-top:10px;">
+      <label for="f_pushTopic">Notification audience</label>
+      <select id="f_pushTopic">
+        <option value="all">All listeners</option>
+        <option value="radio">EJazz Radio</option>
+        <option value="xtra">EJazz Xtra</option>
+      </select>
+    </div>
     <div style="margin-top:14px;">
       <button id="createBtn">Create</button>
     </div>
@@ -196,6 +204,17 @@ $('f_type').addEventListener('change', () => {
   $('pollOptionsField').style.display = $('f_type').value === 'poll' ? 'block' : 'none';
 });
 
+function showPushDelivery(delivery) {
+  if (!delivery) return;
+  $('createErr').style.color = delivery.sent ? '#a7f3d0' : '#fca5a5';
+  $('createErr').textContent = delivery.error ||
+    ('FCM notification sent to the "' + delivery.topic + '" topic.');
+}
+
+$('f_push').addEventListener('change', () => {
+  $('pushTopicField').style.display = $('f_push').checked ? 'block' : 'none';
+});
+
 $('createBtn').addEventListener('click', async () => {
   $('createErr').textContent = '';
   const type = $('f_type').value;
@@ -209,6 +228,7 @@ $('createBtn').addEventListener('click', async () => {
     relatedShow: $('f_show').value || null,
     relatedStation: $('f_station').value || null,
     pushEnabled: $('f_push').checked,
+    pushTopic: $('f_pushTopic').value,
     placement: 'home',
   };
   if (type === 'poll') {
@@ -225,14 +245,11 @@ $('createBtn').addEventListener('click', async () => {
   }
   try {
     const created = await api('/content', { method: 'POST', body: JSON.stringify(payload) });
-    if (created.pushDelivery) {
-      $('createErr').style.color = created.pushDelivery.sent > 0 ? '#a7f3d0' : '#fca5a5';
-      $('createErr').textContent = created.pushDelivery.error ||
-        ('Push accepted by Expo for ' + created.pushDelivery.sent + ' device(s).');
-    }
+    showPushDelivery(created.pushDelivery);
     $('f_title').value = ''; $('f_body').value = ''; $('f_artist').value = '';
     $('f_song').value = ''; $('f_show').value = ''; $('f_station').value = '';
     $('f_pollOptions').value = ''; $('f_push').checked = false;
+    $('pushTopicField').style.display = 'none';
     await loadItems();
   } catch (e) {
     $('createErr').textContent = 'Could not create: ' + e.message;
@@ -240,7 +257,8 @@ $('createBtn').addEventListener('click', async () => {
 });
 
 async function setStatus(id, status) {
-  await api('/content/' + id, { method: 'PATCH', body: JSON.stringify({ status }) });
+  const result = await api('/content/' + id, { method: 'PATCH', body: JSON.stringify({ status }) });
+  showPushDelivery(result.pushDelivery);
   await loadItems();
 }
 

@@ -1,0 +1,49 @@
+{
+  "project_info": {
+    "project_number": "26227834719",
+    "firebase_url": "https://ejazz-media-1524991294947.firebaseio.com",
+    "project_id": "ejazz-media-1524991294947",
+    "storage_bucket": "ejazz-media-1524991294947.firebasestorage.app"
+  },
+  "client": [
+    {
+      "client_info": {
+        "mobilesdk_app_id": "1:26227834719:android:9e38ad0d5c8e1e5f",
+        "android_client_info": {
+          "package_name": "EJazz.Media.app"
+        }
+      },
+      "oauth_client": [],
+      "api_key": [
+        {
+          "current_key": "AIzaSyAlhL8dFXK9TUkNRofad7GY8KFkC5-lgeQ"
+        }
+      ],
+      "services": {
+        "appinvite_service": {
+          "other_platform_oauth_client": []
+        }
+      }
+    },
+    {
+      "client_info": {
+        "mobilesdk_app_id": "1:26227834719:android:144b1c49d3fa0b477d40ea",
+        "android_client_info": {
+          "package_name": "com.ejazzug.ejazzmedia"
+        }
+      },
+      "oauth_client": [],
+      "api_key": [
+        {
+          "current_key": "AIzaSyAlhL8dFXK9TUkNRofad7GY8KFkC5-lgeQ"
+        }
+      ],
+      "services": {
+        "appinvite_service": {
+          "other_platform_oauth_client": []
+        }
+      }
+    }
+  ],
+  "configuration_version": "1"
+}

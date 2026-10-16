@@ -13,6 +13,8 @@ export const contentTypeEnum = pgEnum("content_type", [
 ]);
 export const contentStatusEnum = pgEnum("content_status", ["draft", "live", "withdrawn", "expired"]);
 export const contentPlacementEnum = pgEnum("content_placement", ["home"]);
+export const pushTopicEnum = pgEnum("push_topic", ["all", "radio", "xtra"]);
+export type PushTopic = (typeof pushTopicEnum.enumValues)[number];
 
 export const contentItemsTable = pgTable("content_items", {
   id: serial("id").primaryKey(),
@@ -26,6 +28,7 @@ export const contentItemsTable = pgTable("content_items", {
   relatedStation: text("related_station"),
   placement: contentPlacementEnum("placement").notNull().default("home"),
   pushEnabled: boolean("push_enabled").notNull().default(false),
+  pushTopic: pushTopicEnum("push_topic").notNull().default("all"),
   status: contentStatusEnum("status").notNull().default("draft"),
   pollOptions: jsonb("poll_options").$type<{ label: string; votes: number }[]>(),
   quizCorrectIndex: integer("quiz_correct_index"),

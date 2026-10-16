@@ -1,5 +1,4 @@
 import AsyncStorage from '@react-native-async-storage/async-storage';
-import type * as Notifications from 'expo-notifications';
 
 export type StoredNotification = {
   id: string;
@@ -25,17 +24,21 @@ export async function getNotificationHistory(): Promise<StoredNotification[]> {
 }
 
 export async function appendNotificationToHistory(
-  notification: Notifications.Notification,
+  notification: {
+    id?: string;
+    title?: string | null;
+    body?: string | null;
+    receivedAt?: number;
+    data?: Record<string, unknown>;
+  },
 ): Promise<void> {
   try {
-    const content = notification.request?.content;
-    if (!content) return;
     const entry: StoredNotification = {
-      id: notification.request.identifier || String(Date.now()),
-      title: content.title ?? 'EJazz Media',
-      body: content.body ?? '',
-      receivedAt: Date.now(),
-      data: (content.data as Record<string, unknown>) ?? undefined,
+      id: notification.id || String(Date.now()),
+      title: notification.title || 'EJazz Media',
+      body: notification.body || '',
+      receivedAt: notification.receivedAt ?? Date.now(),
+      data: notification.data,
     };
     const existing = await getNotificationHistory();
     const deduped = existing.filter((item) => item.id !== entry.id);

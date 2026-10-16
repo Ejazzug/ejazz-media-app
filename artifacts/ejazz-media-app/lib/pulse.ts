@@ -31,6 +31,7 @@ export type PulseContentItem = {
   relatedStation: string | null;
   placement: 'home';
   pushEnabled: boolean;
+  pushTopic: 'all' | 'radio' | 'xtra';
   status: PulseContentStatus;
   pollOptions: { label: string; votes: number }[] | null;
   quizCorrectIndex: number | null;

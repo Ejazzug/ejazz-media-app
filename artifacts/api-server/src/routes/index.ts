@@ -4,7 +4,6 @@ import adminRouter from "./admin";
 import contentRouter from "./content";
 import showsRouter from "./shows";
 import hostsRouter from "./hosts";
-import notificationsRouter from "./notifications";
 
 const router: IRouter = Router();
 
@@ -13,6 +12,5 @@ router.use("/admin", adminRouter);
 router.use("/content", contentRouter);
 router.use("/shows", showsRouter);
 router.use("/hosts", hostsRouter);
-router.use("/notifications", notificationsRouter);
 
 export default router;

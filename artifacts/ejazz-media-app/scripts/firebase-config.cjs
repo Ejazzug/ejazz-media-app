@@ -77,7 +77,12 @@ function writeGoogleServicesJson({ expectedPackageName, required = false }) {
   validateAndroidClient(googleServices, expectedPackageName);
 
   if (secretValue && fs.existsSync(secretValue)) {
-    return secretValue;
+    const sourcePath = path.resolve(secretValue);
+    if (sourcePath !== googleServicesPath) {
+      fs.copyFileSync(sourcePath, googleServicesPath);
+      fs.chmodSync(googleServicesPath, 0o600);
+    }
+    return './google-services.json';
   }
 
   writePrivateJson(googleServicesPath, googleServices);

@@ -50,7 +50,6 @@ Thumbs.db
 
 # Generated Firebase credentials/config
 artifacts/ejazz-media-app/.firebase/
-artifacts/ejazz-media-app/google-services.json
 
 # Local build caches
 .buildtmp/

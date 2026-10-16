@@ -1,81 +1,92 @@
-import { inArray } from "drizzle-orm";
-import { db, expoPushTokensTable } from "@workspace/db";
+import { existsSync, readFileSync } from "node:fs";
+import { cert, getApps, initializeApp } from "firebase-admin/app";
+import { getMessaging } from "firebase-admin/messaging";
+import type { PushTopic } from "@workspace/db";
 
-const EXPO_PUSH_URL = "https://exp.host/--/api/v2/push/send";
-const MAX_BATCH_SIZE = 100;
-
-type PushTicket = {
-  status?: string;
-  details?: { error?: string };
+type FirebaseServiceAccount = {
+  project_id: string;
+  client_email: string;
+  private_key: string;
 };
 
 export type PushDeliveryResult = {
-  sent: number;
-  failed: number;
-  registered: number;
+  sent: boolean;
+  topic: PushTopic;
+  messageId: string | null;
+  error: string | null;
 };
+
+function readFirebaseServiceAccount(): FirebaseServiceAccount {
+  const configuredValue = process.env.FIREBASE_SERVICE_ACCOUNT_JSON?.trim();
+  if (!configuredValue) {
+    throw new Error("FIREBASE_SERVICE_ACCOUNT_JSON is not configured.");
+  }
+
+  const json = existsSync(configuredValue)
+    ? readFileSync(configuredValue, "utf8")
+    : configuredValue;
+  const account = JSON.parse(json) as Partial<FirebaseServiceAccount>;
+  if (
+    typeof account.project_id !== "string" ||
+    typeof account.client_email !== "string" ||
+    typeof account.private_key !== "string"
+  ) {
+    throw new Error("FIREBASE_SERVICE_ACCOUNT_JSON is missing required service-account fields.");
+  }
+  return account as FirebaseServiceAccount;
+}
+
+function getEJazzMessaging() {
+  const appName = "ejazz-control-room";
+  const existingApp = getApps().find((app) => app.name === appName);
+  if (existingApp) return getMessaging(existingApp);
+
+  const account = readFirebaseServiceAccount();
+  const app = initializeApp(
+    {
+      credential: cert({
+        projectId: account.project_id,
+        clientEmail: account.client_email,
+        privateKey: account.private_key,
+      }),
+      projectId: account.project_id,
+    },
+    appName,
+  );
+  return getMessaging(app);
+}
 
 export async function sendContentPush(input: {
   id: number;
   type: string;
   title: string;
   body: string | null;
+  pushTopic: PushTopic;
 }): Promise<PushDeliveryResult> {
-  const registrations = await db
-    .select({ token: expoPushTokensTable.token })
-    .from(expoPushTokensTable);
-  const tokens = registrations.map(({ token }) => token);
-  const result: PushDeliveryResult = { sent: 0, failed: 0, registered: tokens.length };
-
-  for (let offset = 0; offset < tokens.length; offset += MAX_BATCH_SIZE) {
-    const batch = tokens.slice(offset, offset + MAX_BATCH_SIZE);
-    const messages = batch.map((to) => ({
-      to,
-      sound: "default",
-      channelId: "default",
+  const messageId = await getEJazzMessaging().send({
+    topic: input.pushTopic,
+    notification: {
       title: input.title,
       body: input.body?.trim() || "Open EJazz Media for the latest update.",
-      data: { type: "ejazz-content", contentId: input.id, contentType: input.type },
-    }));
-    const controller = new AbortController();
-    const timeout = setTimeout(() => controller.abort(), 12_000);
+    },
+    data: {
+      type: "ejazz-content",
+      contentId: String(input.id),
+      contentType: input.type,
+    },
+    android: {
+      priority: "high",
+      notification: {
+        channelId: "default",
+        sound: "default",
+      },
+    },
+  });
 
-    try {
-      const response = await fetch(EXPO_PUSH_URL, {
-        method: "POST",
-        headers: {
-          Accept: "application/json",
-          "Accept-Encoding": "gzip, deflate",
-          "Content-Type": "application/json",
-        },
-        body: JSON.stringify(messages),
-        signal: controller.signal,
-      });
-      const payload = (await response.json()) as { data?: PushTicket[]; errors?: unknown[] };
-      if (!response.ok || !Array.isArray(payload.data)) {
-        throw new Error(
-          `Expo Push API returned HTTP ${response.status}${payload.errors?.length ? `: ${JSON.stringify(payload.errors).slice(0, 300)}` : ""}`,
-        );
-      }
-
-      for (let index = 0; index < payload.data.length; index += 1) {
-        const ticket = payload.data[index];
-        if (ticket.status === "ok") {
-          result.sent += 1;
-          continue;
-        }
-        result.failed += 1;
-        if (ticket.details?.error === "DeviceNotRegistered") {
-          await db
-            .delete(expoPushTokensTable)
-            .where(inArray(expoPushTokensTable.token, [batch[index]]));
-        }
-      }
-      if (payload.data.length < batch.length) result.failed += batch.length - payload.data.length;
-    } finally {
-      clearTimeout(timeout);
-    }
-  }
-
-  return result;
+  return {
+    sent: true,
+    topic: input.pushTopic,
+    messageId,
+    error: null,
+  };
 }

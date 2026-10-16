@@ -12,6 +12,7 @@
     },
     "android": {
       "package": "com.ejazzug.ejazzmedia",
+      "googleServicesFile": "./google-services.json",
       "permissions": [
         "android.permission.INTERNET",
         "FOREGROUND_SERVICE",
@@ -45,6 +46,7 @@
       "expo-asset",
       "expo-notifications",
       "@react-native-firebase/app",
+      "@react-native-firebase/messaging",
       "@react-native-firebase/analytics"
     ],
     "experiments": {

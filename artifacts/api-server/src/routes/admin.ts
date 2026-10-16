@@ -12,7 +12,8 @@ import {
   insertHostSchema,
   updateHostSchema,
 } from "@workspace/db";
-import { sendContentPush } from "../lib/pushNotifications";
+import { sendContentPush, type PushDeliveryResult } from "../lib/pushNotifications";
+import type { PushTopic } from "@workspace/db";
 import { signSession, requireAdmin, ADMIN_COOKIE } from "../middlewares/adminAuth";
 import {
   generateWithGemini,
@@ -30,29 +31,27 @@ async function attemptContentPush(item: {
   body: string | null;
   status: string;
   pushEnabled: boolean;
+  pushTopic: PushTopic;
   pushSentAt: Date | null;
-}) {
+}): Promise<PushDeliveryResult | null> {
   if (!item.pushEnabled || item.status !== "live" || item.pushSentAt) return null;
 
   try {
     const delivery = await sendContentPush(item);
-    if (delivery.sent > 0) {
+    if (delivery.sent) {
       const pushSentAt = new Date();
       await db
         .update(contentItemsTable)
         .set({ pushSentAt, updatedAt: pushSentAt })
         .where(eq(contentItemsTable.id, item.id));
     }
-    return {
-      ...delivery,
-      error: delivery.registered === 0 ? "No app devices have registered for push notifications." : null,
-    };
+    return delivery;
   } catch (error) {
     console.error("[EJazz Push] Content notification delivery failed.", { contentId: item.id, error });
     return {
-      sent: 0,
-      failed: 0,
-      registered: 0,
+      sent: false,
+      topic: item.pushTopic,
+      messageId: null,
       error: error instanceof Error ? error.message : "Push delivery failed.",
     };
   }
