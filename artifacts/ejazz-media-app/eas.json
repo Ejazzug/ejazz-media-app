@@ -15,6 +15,14 @@
         "buildType": "apk"
       }
     },
+    "preview-aab": {
+      "environment": "preview",
+      "distribution": "store",
+      "autoIncrement": true,
+      "android": {
+        "buildType": "app-bundle"
+      }
+    },
     "production": {
       "autoIncrement": true,
       "android": {

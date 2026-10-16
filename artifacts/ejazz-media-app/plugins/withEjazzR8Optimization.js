@@ -25,17 +25,33 @@ function useOptimizedProguardRules(contents) {
   return contents.replace(standard, optimized);
 }
 
+function useAppVersionName(contents, version) {
+  if (!/^\d+\.\d+\.\d+(?:[-+][0-9A-Za-z.-]+)?$/.test(version)) {
+    throw new Error(`EJazz Android version name is not a valid version string: ${version}`);
+  }
+  const versionNamePattern = /^(\s*versionName\s+)"[^"]*"/m;
+  if (!versionNamePattern.test(contents)) {
+    throw new Error('EJazz R8 plugin could not find the Android versionName setting.');
+  }
+  return contents.replace(versionNamePattern, `$1"${version}"`);
+}
+
 module.exports = function withEjazzR8Optimization(config) {
+  const appVersion = config.version;
   config = withGradleProperties(config, (modConfig) => {
     modConfig.modResults = ensureMinifyEnabled(modConfig.modResults);
     return modConfig;
   });
 
   return withAppBuildGradle(config, (modConfig) => {
-    modConfig.modResults.contents = useOptimizedProguardRules(modConfig.modResults.contents);
+    modConfig.modResults.contents = useAppVersionName(
+      useOptimizedProguardRules(modConfig.modResults.contents),
+      appVersion,
+    );
     return modConfig;
   });
 };
 
 module.exports.ensureMinifyEnabled = ensureMinifyEnabled;
 module.exports.useOptimizedProguardRules = useOptimizedProguardRules;
+module.exports.useAppVersionName = useAppVersionName;

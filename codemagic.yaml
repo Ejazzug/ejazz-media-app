@@ -43,3 +43,44 @@ workflows:
       email:
         recipients:
           - madvibes.ug@gmail.com
+
+  ejazz-android-preview:
+    name: EJazz Media - Android Preview (Internal AAB + APK)
+    max_build_duration: 90
+    environment:
+      node: 20
+      java: 17
+      groups:
+        - ejazz_eas
+    cache:
+      cache_paths:
+        - ~/.pnpm-store
+    scripts:
+      - name: Enable pnpm (matches project's pinned version)
+        script: |
+          corepack enable
+          corepack prepare pnpm@10.26.1 --activate
+      - name: Install workspace dependencies
+        script: |
+          pnpm install --frozen-lockfile
+      - name: Install eas-cli
+        script: npm install -g eas-cli
+      - name: Build preview AAB for manual Play internal testing
+        script: |
+          cd artifacts/ejazz-media-app
+          eas build --local \
+            --platform android \
+            --profile preview-aab \
+            --non-interactive \
+            --output app-preview.aab
+      - name: Build preview APK for device testing
+        script: |
+          cd artifacts/ejazz-media-app
+          eas build --local \
+            --platform android \
+            --profile preview \
+            --non-interactive \
+            --output app-preview.apk
+    artifacts:
+      - artifacts/ejazz-media-app/app-preview.aab
+      - artifacts/ejazz-media-app/app-preview.apk
