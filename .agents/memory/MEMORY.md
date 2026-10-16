@@ -3,5 +3,6 @@
 - [Expo lint compatibility](expo-lint-compatibility.md) — Expo’s lint preset hit a pnpm nested-export conflict; keep the lightweight TypeScript ESLint setup unless upstream changes.
 - [EJazz FCM topic delivery](firebase-notification-topics.md) — Android push uses Firebase topics `all`, `radio`, and `xtra`, sent server-side with Firebase Admin.
 - [Android audio PiP](android-audio-picture-in-picture.md) — PiP is a user-invoked compact player for live radio and podcasts, not a video feature.
+- [R8 release optimization](r8-release-optimization.md) — use optimized ProGuard rules for release builds; keep resource shrinking off pending Android validation.
 - [GitHub integration boundaries](github-integration-boundaries.md) — OAuth API access and an Active Source Control panel may still leave Agent-shell Git unauthenticated.
 - [EAS preview public configuration](eas-preview-public-configuration.md) — Replit secrets are not inherited by EAS; explicitly sync public runtime URLs into the preview environment.

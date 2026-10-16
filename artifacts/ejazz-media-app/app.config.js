@@ -9,6 +9,7 @@ module.exports = () => {
       ...(expo.plugins || []),
       './plugins/withEjazzBackgroundMetadata',
       './plugins/withEjazzPictureInPicture',
+      './plugins/withEjazzR8Optimization',
     ],
     android: {
       ...expo.android,
