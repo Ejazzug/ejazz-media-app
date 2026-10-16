@@ -1,6 +1,6 @@
 const path = require('node:path');
 const fs = require('node:fs/promises');
-const { withDangerousMod } = require('@expo/config-plugins');
+const { withDangerousMod } = require('expo/config-plugins');
 
 function replaceOnce(source, needle, replacement, label) {
   if (source.includes(replacement)) return source;
@@ -58,7 +58,7 @@ function patchAudioControlsService(source) {
     val station = metadata.albumTitle?.trim()?.lowercase() ?: return null
     val url = when (station) {
       "ejazz radio" ->
-        "https://eu1.reliastream.com:2199/external/rpc.php?m=recenttracks.get&username=ejazzug&charset=UTF-8&limit=1"
+        "https://eu1.reliastream.com:2199/external/rpc.php?m=recenttracks.get&username=ejazzug&charset=UTF-8&limit=10"
       "ejazz xtra" -> "https://c32.radioboss.fm/w/nowplayinginfo?u=320"
       else -> return null
     }

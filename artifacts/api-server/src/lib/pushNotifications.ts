@@ -58,10 +58,11 @@ export async function sendContentPush(input: {
         );
       }
 
-      payload.data.forEach((ticket, index) => {
+      for (let index = 0; index < payload.data.length; index += 1) {
+        const ticket = payload.data[index];
         if (ticket.status === "ok") {
           result.sent += 1;
-          return;
+          continue;
         }
         result.failed += 1;
         if (ticket.details?.error === "DeviceNotRegistered") {
@@ -69,7 +70,7 @@ export async function sendContentPush(input: {
             .delete(expoPushTokensTable)
             .where(inArray(expoPushTokensTable.token, [batch[index]]));
         }
-      });
+      }
       if (payload.data.length < batch.length) result.failed += batch.length - payload.data.length;
     } finally {
       clearTimeout(timeout);

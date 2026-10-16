@@ -55,14 +55,18 @@ async function registerForPushNotifications(): Promise<string | null> {
     return token;
   }
 
-  const response = await fetch(new URL('/api/notifications/register', PUSH_API_URL), {
-    method: 'POST',
-    headers: { Accept: 'application/json', 'Content-Type': 'application/json' },
-    body: JSON.stringify({ token, platform: Platform.OS }),
-  });
-  if (!response.ok) {
-    const details = await response.text().catch(() => '');
-    throw new Error(`Push token registration failed (HTTP ${response.status}): ${details.slice(0, 200)}`);
+  try {
+    const response = await fetch(new URL('/api/notifications/register', PUSH_API_URL), {
+      method: 'POST',
+      headers: { Accept: 'application/json', 'Content-Type': 'application/json' },
+      body: JSON.stringify({ token, platform: Platform.OS }),
+    });
+    if (!response.ok) {
+      const details = await response.text().catch(() => '');
+      throw new Error(`Push token registration failed (HTTP ${response.status}): ${details.slice(0, 200)}`);
+    }
+  } catch (error) {
+    console.warn('[EJazz Push] Device token could not be registered with the API server.', error);
   }
   return token;
 }

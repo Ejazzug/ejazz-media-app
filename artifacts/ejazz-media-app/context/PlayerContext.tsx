@@ -254,9 +254,24 @@ export function PlayerProvider({ children }: PropsWithChildren) {
   useEffect(() => {
     const subscription = AppState.addEventListener('change', (state) => {
       setIsAppActive(state === 'active');
+      if (state === 'active') {
+        if (selectedStationId === 'radio' || viewingStationId === 'radio') {
+          void recentTracks.refetch();
+        }
+        if (selectedStationId === 'extra' || viewingStationId === 'extra') {
+          void extraNowPlaying.refetch();
+          void extraRecentTracks.refetch();
+        }
+      }
     });
     return () => subscription.remove();
-  }, []);
+  }, [
+    extraNowPlaying.refetch,
+    extraRecentTracks.refetch,
+    recentTracks.refetch,
+    selectedStationId,
+    viewingStationId,
+  ]);
 
   useEffect(() => {
     if (status.playing !== isPlaying) setIsPlaying(status.playing);

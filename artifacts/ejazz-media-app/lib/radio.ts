@@ -300,9 +300,9 @@ export function useRecentTracks(enabled: boolean, isAppActive: boolean = true) {
     queryFn: fetchRecentTracks,
     enabled,
     staleTime: 60_000,
-    // Keep polling in the background (at a slower cadence) so the lock-screen /
-    // notification metadata doesn't go stale while the app isn't foregrounded.
-    refetchInterval: enabled ? (isAppActive ? 75_000 : 180_000) : false,
+    // Keep the in-app history current when Android allows the JS runtime to run;
+    // the native audio service separately refreshes lock-screen metadata.
+    refetchInterval: enabled ? (isAppActive ? 75_000 : 60_000) : false,
     refetchIntervalInBackground: true,
     retry: 1,
   });
