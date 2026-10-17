@@ -1,15 +1,20 @@
 import { Feather } from '@expo/vector-icons';
 import { Stack, useFocusEffect, useRouter } from 'expo-router';
-import React, { useCallback, useEffect, useState } from 'react';
+import React, { useCallback, useState } from 'react';
 import { Alert, Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { MINI_PLAYER_CLEARANCE } from '@/components/MediaComponents';
 import { useColors } from '@/hooks/useColors';
 import {
-  clearNotificationHistory,
   getNotificationHistory,
   type StoredNotification,
 } from '@/lib/notificationHistory';
+import {
+  dismissNotifications,
+  fetchServerNotifications,
+  getDismissedIds,
+  isNotificationFeedConfigured,
+} from '@/lib/notificationFeed';
 
 function formatReceivedAt(timestamp: number): string {
   const diffMs = Date.now() - timestamp;
@@ -32,30 +37,88 @@ export default function NotificationsScreen() {
   const [history, setHistory] = useState<StoredNotification[]>([]);
   const [isLoading, setIsLoading] = useState(true);
 
+  /**
+   * The server list is the source of truth: the station can retract a notification, and a
+   * retracted or expired one stops coming back from the API, so it disappears here too.
+   *
+   * Two things keep this honest offline and on older installs:
+   *  - if the request fails we fall back to the locally stored history, so the screen is
+   *    not empty just because the phone has no signal;
+   *  - dismissals are local and per device (they never reach the server), so clearing a
+   *    notification here cannot remove it from anyone else's phone.
+   */
   const loadHistory = useCallback(() => {
-    getNotificationHistory()
-      .then(setHistory)
-      .finally(() => setIsLoading(false));
+    let cancelled = false;
+    const toStored = (list: { id: string; title: string; body: string; sentAt: number }[]) =>
+      list.map((n) => ({ id: n.id, title: n.title, body: n.body, receivedAt: n.sentAt }));
+
+    (async () => {
+      const dismissed = new Set(await getDismissedIds());
+      let items: StoredNotification[] = [];
+      try {
+        if (!isNotificationFeedConfigured()) throw new Error('Notification feed is not configured.');
+        items = toStored(await fetchServerNotifications());
+      } catch {
+        items = [];
+      }
+      // Fall back to the on-device history when the server has nothing to show -- the
+      // request failed, the feed is not configured, or the server list is genuinely empty
+      // (every install was local-only before this screen moved to the API, and those
+      // notifications should not vanish the first time it loads).
+      if (items.length === 0) {
+        items = await getNotificationHistory();
+      }
+      if (cancelled) return;
+      setHistory(items.filter((item) => !dismissed.has(item.id)));
+      setIsLoading(false);
+    })();
+
+    return () => {
+      cancelled = true;
+    };
   }, []);
 
   useFocusEffect(
     useCallback(() => {
-      loadHistory();
+      const cleanup = loadHistory();
+      return cleanup;
     }, [loadHistory])
   );
+
+  const handleDismissOne = (item: StoredNotification) => {
+    Alert.alert(
+      'Delete this notification?',
+      'It is removed from this device only.',
+      [
+        { text: 'Cancel', style: 'cancel' },
+        {
+          text: 'Delete',
+          style: 'destructive',
+          onPress: () => {
+            // Hide it immediately, then persist -- the list should never feel laggy, and a
+            // storage failure is already logged and self-corrects on the next load.
+            setHistory((current) => current.filter((n) => n.id !== item.id));
+            void dismissNotifications([item.id]);
+          },
+        },
+      ],
+    );
+  };
 
   const handleClearAll = () => {
     if (history.length === 0) return;
     Alert.alert(
       'Clear all notifications?',
-      'This removes your notification history from this device.',
+      'This clears the list on this device only. It does not affect other devices.',
       [
         { text: 'Cancel', style: 'cancel' },
         {
           text: 'Clear All',
           style: 'destructive',
           onPress: () => {
-            clearNotificationHistory().then(() => setHistory([]));
+            const ids = history.map((n) => n.id);
+            setHistory([]);
+            void dismissNotifications(ids);
           },
         },
       ],
@@ -110,6 +173,15 @@ export default function NotificationsScreen() {
                   {item.body ? <Text style={styles.itemBody}>{item.body}</Text> : null}
                   <Text style={styles.itemTime}>{formatReceivedAt(item.receivedAt)}</Text>
                 </View>
+                <Pressable
+                  onPress={() => handleDismissOne(item)}
+                  style={styles.itemDelete}
+                  hitSlop={10}
+                  accessibilityRole="button"
+                  accessibilityLabel={`Delete notification: ${item.title}`}
+                >
+                  <Feather name="x" size={16} color={colors.mutedForeground} />
+                </Pressable>
               </View>
             ))}
           </View>
@@ -163,6 +235,7 @@ const styles = StyleSheet.create({
     backgroundColor: 'rgba(122,168,255,0.14)',
   },
   itemCopy: { flex: 1, gap: 3 },
+  itemDelete: { width: 28, alignItems: 'center', justifyContent: 'flex-start', paddingTop: 2 },
   itemTitle: { color: '#F7F9FC', fontSize: 14, fontWeight: '700' },
   itemBody: { color: '#C7D3E5', fontSize: 13, lineHeight: 18 },
   itemTime: { color: '#7890AE', fontSize: 10, fontWeight: '600', letterSpacing: 0.4, marginTop: 2 },
