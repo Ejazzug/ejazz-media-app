@@ -736,6 +736,7 @@ function funFactsSectionHtml() {
     '</select></div>' +
     '<div class="field"><label>Dayparts</label><div id="ffDayparts"></div>' +
     '<p class="hint" style="margin-top:4px;">Each ticked daypart fires once on a chosen day, within 10 minutes of its time. A slot missed while the server was down is skipped, not posted late.</p></div>' +
+    '<div class="err" id="ffWarn" style="display:none;"></div>' +
     '<div id="ffLog" class="items" style="margin-top:12px;"><div class="empty">Loading the log…</div></div>' +
     '</div>';
 }
@@ -802,6 +803,20 @@ async function loadFunFactLog() {
   if (!host) return;
   try {
     const data = await api('/fun-facts/log', { method: 'GET' });
+    // Without an API key nothing here can ever produce a fact, so say so and disable the
+    // buttons rather than letting a click fail after the fact.
+    if (data.geminiConfigured === false) {
+      document.querySelectorAll('.ffRun').forEach((b) => {
+        b.disabled = true;
+        b.title = 'GEMINI_API_KEY is not set for this service.';
+      });
+      const warn = $('ffWarn');
+      if (warn) {
+        warn.textContent = 'Automatic fun facts cannot run: GEMINI_API_KEY is not set for this service. '
+          + 'Scheduled dayparts will fail too until it is.';
+        warn.style.display = 'block';
+      }
+    }
     const items = data.items || [];
     if (!items.length) {
       host.innerHTML = '<div class="empty">Nothing has auto-fired yet.</div>';

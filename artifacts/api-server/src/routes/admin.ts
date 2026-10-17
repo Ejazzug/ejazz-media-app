@@ -267,7 +267,9 @@ router.post("/ai/test", async (req, res) => {
 /** What the fun fact automation has actually fired, newest first. */
 router.get("/fun-facts/log", async (_req, res) => {
   try {
-    res.json({ items: await recentAutoFacts(50) });
+    // geminiConfigured lets the panel disable "Send one now" up front, rather than letting
+    // the operator click a button that cannot possibly work and reading the failure after.
+    res.json({ items: await recentAutoFacts(50), geminiConfigured: isGeminiConfigured() });
   } catch (err) {
     res.status(500).json({ error: "Could not read the fun fact log." });
   }
@@ -286,9 +288,22 @@ router.post("/fun-facts/run", async (req, res) => {
     res.status(400).json({ error: "Unknown daypart." });
     return;
   }
+  // A missing API key is this server being misconfigured, not a gateway failure. Returning
+  // 502 for it sent a previous debugging session looking at nginx; 503 says "this service
+  // cannot do that right now", which is what is actually true.
+  if (!isGeminiConfigured()) {
+    res.status(503).json({ error: "Gemini is not configured (GEMINI_API_KEY is not set for this service)." });
+    return;
+  }
   try {
     const result = await runDaypart(daypart);
-    res.status(result.status === "sent" ? 200 : 502).json(result);
+    // Always report the reason under `error`: the Control Room's api() helper reads that key
+    // and otherwise falls back to a bare "HTTP 502", throwing away a perfectly good message.
+    if (result.status === "sent") {
+      res.json(result);
+      return;
+    }
+    res.status(502).json({ error: result.reason || "The fact could not be sent.", ...result });
   } catch (err) {
     res.status(502).json({
       error: "fun_fact_run_failed",
