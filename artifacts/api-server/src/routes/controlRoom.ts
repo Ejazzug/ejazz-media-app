@@ -108,6 +108,10 @@ const PAGE = `<!doctype html>
           <option value="fact">Fact (Clock It)</option>
           <option value="poll">Poll (Aura Check)</option>
           <option value="announcement">Announcement</option>
+          <option value="quiz">Quiz</option>
+          <option value="song_battle">Song battle</option>
+          <option value="push_alert">Push alert</option>
+          <option value="show_alert">Show alert</option>
         </select>
       </div>
       <div class="field">
@@ -126,6 +130,21 @@ const PAGE = `<!doctype html>
       <label>Body</label>
       <textarea id="f_body" rows="3" placeholder="The actual content..."></textarea>
     </div>
+    <div class="field" id="pickerBox">
+      <label>Fill from the station</label>
+      <p class="hint" id="pickerHint" style="margin:0 0 8px;">Pick something already produced on the dashboard instead of typing it. You can still edit every field afterwards.</p>
+      <div class="row">
+        <div class="field">
+          <select id="p_element"><option value="">Content element…</option></select>
+        </div>
+        <div class="field">
+          <select id="p_chart"><option value="">Chart…</option></select>
+        </div>
+      </div>
+      <div class="field" id="p_songWrap" style="display:none;">
+        <select id="p_song"><option value="">Song from that chart…</option></select>
+      </div>
+    </div>
     <div class="row">
       <div class="field"><label>Related artist</label><input type="text" id="f_artist"></div>
       <div class="field"><label>Related song</label><input type="text" id="f_song"></div>
@@ -135,8 +154,12 @@ const PAGE = `<!doctype html>
       <div class="field"><label>Related station</label><input type="text" id="f_station"></div>
     </div>
     <div class="field" id="pollOptionsField" style="display:none;">
-      <label>Poll options (comma-separated)</label>
+      <label id="pollOptionsLabel">Poll options (comma-separated)</label>
       <input type="text" id="f_pollOptions" placeholder="Asake, Rema, Burna Boy, Wizkid">
+    </div>
+    <div class="field" id="quizAnswerField" style="display:none;">
+      <label for="f_quizCorrect">Correct answer (which option number, starting at 1)</label>
+      <input type="text" id="f_quizCorrect" placeholder="1">
     </div>
     <div class="checkbox">
       <input type="checkbox" id="f_push">
@@ -256,6 +279,9 @@ function showMain() {
   $('loginView').style.display = 'none';
   $('mainView').style.display = 'block';
   $('logoutBtn').style.display = 'inline-block';
+  // Fire and forget: the picker is an optional convenience, so a dashboard that is down
+  // must not block the Content & push form from being usable.
+  void loadPickers();
 }
 
 $('loginBtn').addEventListener('click', async () => {
@@ -277,8 +303,102 @@ $('logoutBtn').addEventListener('click', async () => {
   showLogin();
 });
 
+// poll, quiz and song_battle all need a list of options; only a quiz has a correct answer.
+const OPTION_TYPES = ['poll', 'quiz', 'song_battle'];
+const OPTION_LABELS = {
+  poll: 'Poll options (comma-separated)',
+  quiz: 'Answer options (comma-separated)',
+  song_battle: 'The two songs (comma-separated)',
+};
 $('f_type').addEventListener('change', () => {
-  $('pollOptionsField').style.display = $('f_type').value === 'poll' ? 'block' : 'none';
+  const t = $('f_type').value;
+  const needsOptions = OPTION_TYPES.indexOf(t) !== -1;
+  $('pollOptionsField').style.display = needsOptions ? 'block' : 'none';
+  $('quizAnswerField').style.display = t === 'quiz' ? 'block' : 'none';
+  if (needsOptions) $('pollOptionsLabel').textContent = OPTION_LABELS[t];
+  $('f_pollOptions').placeholder = t === 'song_battle' ? 'Song A, Song B' : 'Asake, Rema, Burna Boy, Wizkid';
+});
+
+// ---------- picker: content elements and charts from the Flask dashboard ----------
+// Same origin (ejazz-proxy forwards anything it does not claim to Flask on 9000), so these
+// are plain relative fetches with no CORS and no second host to configure. The four text
+// fields below stay the source of truth: the picker only fills them in, and if either fetch
+// fails the picker hides itself and the fields are simply typed by hand as before.
+let chartCache = {};
+
+function pickerFailed(what) {
+  const hint = $('pickerHint');
+  hint.textContent = 'Could not reach the dashboard (' + what + '). Type the fields in by hand.';
+  hint.style.color = '#fca5a5';
+}
+
+async function loadPickers() {
+  try {
+    const d = await fetch('/api/content-elements').then((r) => r.json());
+    const sel = $('p_element');
+    (d.items || []).forEach((it) => {
+      const o = document.createElement('option');
+      o.value = it.id;
+      o.textContent = it.title + (it.station ? ' — ' + it.station : '');
+      o.dataset.payload = JSON.stringify(it);
+      sel.appendChild(o);
+    });
+    if (!(d.items || []).length) sel.options[0].textContent = 'No content elements yet';
+  } catch (e) {
+    $('p_element').style.display = 'none';
+    pickerFailed('content elements');
+  }
+
+  try {
+    const d = await fetch('/api/charts').then((r) => r.json());
+    const sel = $('p_chart');
+    (d.items || []).forEach((c) => {
+      chartCache[c.id] = c;
+      const o = document.createElement('option');
+      o.value = c.id;
+      const when = c.date ? new Date(c.date).toLocaleDateString() : '';
+      o.textContent = (c.title || 'Untitled chart') + (when ? ' — ' + when : '') + ' (' + (c.entries || []).length + ')';
+      sel.appendChild(o);
+    });
+    if (!(d.items || []).length) sel.options[0].textContent = 'No charts yet';
+  } catch (e) {
+    $('p_chart').style.display = 'none';
+    $('p_songWrap').style.display = 'none';
+    pickerFailed('charts');
+  }
+}
+
+$('p_element').addEventListener('change', () => {
+  const opt = $('p_element').selectedOptions[0];
+  if (!opt || !opt.dataset.payload) return;
+  const it = JSON.parse(opt.dataset.payload);
+  if (!$('f_title').value) $('f_title').value = it.title || '';
+  if (!$('f_body').value) $('f_body').value = it.body || '';
+  if (it.station) $('f_station').value = it.station;
+});
+
+$('p_chart').addEventListener('change', () => {
+  const chart = chartCache[$('p_chart').value];
+  const wrap = $('p_songWrap');
+  const sel = $('p_song');
+  sel.innerHTML = '<option value="">Song from that chart…</option>';
+  if (!chart) { wrap.style.display = 'none'; return; }
+  (chart.entries || []).forEach((e, i) => {
+    const o = document.createElement('option');
+    o.value = String(i);
+    o.textContent = (e.position != null ? e.position + '. ' : '') + e.title + (e.artist ? ' — ' + e.artist : '');
+    sel.appendChild(o);
+  });
+  wrap.style.display = (chart.entries || []).length ? 'block' : 'none';
+});
+
+$('p_song').addEventListener('change', () => {
+  const chart = chartCache[$('p_chart').value];
+  const idx = Number($('p_song').value);
+  if (!chart || !chart.entries || !chart.entries[idx]) return;
+  const e = chart.entries[idx];
+  $('f_song').value = e.title || '';
+  $('f_artist').value = e.artist || '';
 });
 
 function showPushDelivery(delivery) {
@@ -312,13 +432,28 @@ $('createBtn').addEventListener('click', async () => {
     payload.status = 'draft';
     payload.scheduleAt = localToIso($('f_schedule').value);
   }
-  if (type === 'poll') {
+  if (OPTION_TYPES.indexOf(type) !== -1) {
     const opts = $('f_pollOptions').value.split(',').map((s) => s.trim()).filter(Boolean);
-    if (opts.length < 2) {
-      $('createErr').textContent = 'Add at least 2 poll options.';
+    const least = type === 'song_battle' ? 2 : 2;
+    if (opts.length < least) {
+      $('createErr').textContent = type === 'song_battle'
+        ? 'A song battle needs two songs, separated by a comma.'
+        : 'Add at least 2 options.';
+      return;
+    }
+    if (type === 'song_battle' && opts.length !== 2) {
+      $('createErr').textContent = 'A song battle takes exactly two songs.';
       return;
     }
     payload.pollOptions = opts.map((label) => ({ label, votes: 0 }));
+    if (type === 'quiz') {
+      const n = Number($('f_quizCorrect').value);
+      if (!Number.isInteger(n) || n < 1 || n > opts.length) {
+        $('createErr').textContent = 'Give the correct answer as a number between 1 and ' + opts.length + '.';
+        return;
+      }
+      payload.quizCorrectIndex = n - 1;   // stored zero-based; typed one-based
+    }
   }
   if (!payload.title) {
     $('createErr').textContent = 'Title is required.';
@@ -330,6 +465,8 @@ $('createBtn').addEventListener('click', async () => {
     $('f_title').value = ''; $('f_body').value = ''; $('f_artist').value = '';
     $('f_song').value = ''; $('f_show').value = ''; $('f_station').value = '';
     $('f_pollOptions').value = ''; $('f_push').checked = false; $('f_schedule').value = '';
+    $('f_quizCorrect').value = '';
+    $('p_element').value = ''; $('p_chart').value = ''; $('p_songWrap').style.display = 'none';
     $('pushTopicField').style.display = 'none';
     await loadItems();
   } catch (e) {
