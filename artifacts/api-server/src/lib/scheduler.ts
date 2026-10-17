@@ -1,6 +1,7 @@
 import { and, eq, isNotNull, lte } from "drizzle-orm";
 import { db, contentItemsTable } from "@workspace/db";
 import { attemptContentPush } from "./contentPush";
+import { runDueFunFacts } from "./funFacts";
 import { logger } from "./logger";
 
 const TICK_MS = 60_000;
@@ -38,6 +39,19 @@ async function tick(): Promise<void> {
     }
   } catch (error) {
     logger.error({ err: error }, "Scheduler tick failed");
+  }
+
+  // Automatic fun facts, in their own try so a failure here cannot stop scheduled content
+  // from publishing on the next tick (and vice versa). Usually a no-op: one config read.
+  try {
+    const fired = await runDueFunFacts();
+    for (const result of fired) {
+      if (result.status === "failed") {
+        logger.error({ daypart: result.daypartId, reason: result.reason }, "Fun fact daypart failed");
+      }
+    }
+  } catch (error) {
+    logger.error({ err: error }, "Fun fact tick failed");
   } finally {
     running = false;
   }

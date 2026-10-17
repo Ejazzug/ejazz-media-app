@@ -13,6 +13,21 @@ import { db, appSettingsTable } from "@workspace/db";
 export type StreamConfig = { url: string; backupUrl: string };
 export type PodcastEntry = { slug: string; name: string; feedUrl: string };
 
+/**
+ * One slot in the day at which an automatic fun fact fires. Dayparts, not an interval:
+ * the time of day is itself the context handed to the model, and an interval would drift
+ * across the clock and post at 3am.
+ */
+export type FunFactDaypart = { id: string; label: string; time: string; enabled: boolean };
+export type FunFactsConfig = {
+  enabled: boolean;
+  /** Days of the week it may fire on, 0 = Sunday. Empty = every day. */
+  days: number[];
+  /** Push audience, same values as a manual push. */
+  topic: "all" | "radio" | "xtra";
+  dayparts: FunFactDaypart[];
+};
+
 export type AppConfig = {
   features: {
     news: boolean;
@@ -72,6 +87,11 @@ export type AppConfig = {
   };
   /** Empty list = the app uses its built-in podcast list. */
   podcasts: PodcastEntry[];
+  /**
+   * Operator-only. Stripped by toPublicConfig(), so it never reaches a device: the app has
+   * no use for it and it would just be scheduling detail leaked to every phone.
+   */
+  funFacts: FunFactsConfig;
 };
 
 export const DEFAULT_APP_CONFIG: AppConfig = {
@@ -96,6 +116,19 @@ export const DEFAULT_APP_CONFIG: AppConfig = {
     shareText: "",
   },
   podcasts: [],
+  // Off by default, and every daypart off: turning the feature on must be a deliberate act,
+  // and nothing should start pushing to every listener because a config row got created.
+  funFacts: {
+    enabled: false,
+    days: [],
+    topic: "all",
+    dayparts: [
+      { id: "morning", label: "Morning", time: "08:00", enabled: false },
+      { id: "midday", label: "Midday", time: "12:30", enabled: false },
+      { id: "drive", label: "Drive time", time: "17:00", enabled: false },
+      { id: "evening", label: "Evening", time: "20:00", enabled: false },
+    ],
+  },
 };
 
 // ---------- sanitising helpers (no external deps; never trust stored/posted JSON) ----------
@@ -144,6 +177,47 @@ function isoDate(value: unknown, fallback = ""): string {
 
 function slugify(value: string): string {
   return value.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-+|-+$/g, "").slice(0, 40) || "show";
+}
+
+const TIME_RE = /^([01]\d|2[0-3]):[0-5]\d$/;
+
+function funFacts(value: unknown): FunFactsConfig {
+  const d = DEFAULT_APP_CONFIG.funFacts;
+  const src = obj(value);
+  const topicRaw = text(src.topic, d.topic, 10);
+  const days = Array.isArray(src.days)
+    ? [...new Set(src.days.filter((n): n is number => Number.isInteger(n) && n >= 0 && n <= 6))].sort()
+    : d.days;
+
+  // Dayparts are rebuilt from the defaults by id, so an unknown id from a hand-edited
+  // config cannot introduce a slot the UI has no control for, and a removed one comes back
+  // with its default time rather than silently disappearing.
+  const incoming = new Map<string, Record<string, unknown>>();
+  if (Array.isArray(src.dayparts)) {
+    for (const raw of src.dayparts) {
+      const item = obj(raw);
+      const id = text(item.id, "", 20);
+      if (id) incoming.set(id, item);
+    }
+  }
+  const dayparts = d.dayparts.map((def) => {
+    const item = incoming.get(def.id);
+    if (!item) return { ...def };
+    const time = text(item.time, def.time, 5);
+    return {
+      id: def.id,
+      label: def.label,
+      time: TIME_RE.test(time) ? time : def.time,
+      enabled: bool(item.enabled, def.enabled),
+    };
+  });
+
+  return {
+    enabled: bool(src.enabled, d.enabled),
+    days,
+    topic: topicRaw === "radio" || topicRaw === "xtra" ? topicRaw : "all",
+    dayparts,
+  };
 }
 
 function podcasts(value: unknown): PodcastEntry[] {
@@ -246,6 +320,7 @@ export function normalizeAppConfig(input: unknown): AppConfig {
       shareText: text(lk.shareText, "", 200),
     },
     podcasts: podcasts(src.podcasts),
+    funFacts: funFacts(src.funFacts),
   };
 }
 
@@ -259,9 +334,15 @@ function inWindow(startAt: string, endAt: string, now: number): boolean {
  * What the mobile app receives: the stored config with time windows applied
  * server-side, so an expired banner disappears even for apps with a stale cache clock.
  */
-export function toPublicConfig(config: AppConfig, now: number = Date.now()): AppConfig {
+/**
+ * The device-facing view of the config. Besides gating the timed banners, this DROPS
+ * operator-only sections -- funFacts is scheduling detail the app has no use for, and
+ * publishing it would hand every phone the station's posting timetable.
+ */
+export function toPublicConfig(config: AppConfig, now: number = Date.now()): Omit<AppConfig, "funFacts"> {
+  const { funFacts: _operatorOnly, ...publicConfig } = config;
   return {
-    ...config,
+    ...publicConfig,
     featured: { ...config.featured, enabled: config.featured.enabled && inWindow(config.featured.startAt, config.featured.endAt, now) },
     banner: { ...config.banner, enabled: config.banner.enabled && inWindow(config.banner.startAt, config.banner.endAt, now) },
     sponsor: { ...config.sponsor, enabled: config.sponsor.enabled && inWindow(config.sponsor.startAt, config.sponsor.endAt, now) },

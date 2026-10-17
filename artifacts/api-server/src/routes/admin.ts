@@ -13,6 +13,7 @@ import {
   updateHostSchema,
 } from "@workspace/db";
 import { attemptContentPush } from "../lib/contentPush";
+import { recentAutoFacts, runDaypart } from "../lib/funFacts";
 import { getAppConfig, saveAppConfig } from "../lib/appConfig";
 import { signSession, requireAdmin, ADMIN_COOKIE } from "../middlewares/adminAuth";
 import {
@@ -258,6 +259,39 @@ router.post("/ai/test", async (req, res) => {
   } catch (err) {
     res.status(502).json({
       error: "gemini_request_failed",
+      detail: err instanceof Error ? err.message : String(err),
+    });
+  }
+});
+
+/** What the fun fact automation has actually fired, newest first. */
+router.get("/fun-facts/log", async (_req, res) => {
+  try {
+    res.json({ items: await recentAutoFacts(50) });
+  } catch (err) {
+    res.status(500).json({ error: "Could not read the fun fact log." });
+  }
+});
+
+/**
+ * Fire one daypart right now, for testing. Runs the identical path the scheduler uses --
+ * generate, publish, push, and roll back the row if the push fails -- so what the operator
+ * sees here is exactly what automatic firing does, not a simulation of it.
+ */
+router.post("/fun-facts/run", async (req, res) => {
+  const id = typeof req.body?.daypartId === "string" ? req.body.daypartId : "";
+  const config = await getAppConfig();
+  const daypart = config.funFacts.dayparts.find((d) => d.id === id);
+  if (!daypart) {
+    res.status(400).json({ error: "Unknown daypart." });
+    return;
+  }
+  try {
+    const result = await runDaypart(daypart);
+    res.status(result.status === "sent" ? 200 : 502).json(result);
+  } catch (err) {
+    res.status(502).json({
+      error: "fun_fact_run_failed",
       detail: err instanceof Error ? err.message : String(err),
     });
   }

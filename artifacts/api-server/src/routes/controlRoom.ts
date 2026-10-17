@@ -569,7 +569,28 @@ function renderControls() {
     return '<div class="card section"><h3>' + escapeHtml(sec.title) + '</h3><p class="hint">' + escapeHtml(sec.hint) + '</p>' + fields + '</div>';
   }).join('') +
     '<div class="card section"><h3>Podcasts</h3><p class="hint">One show per line: Name | feed link. Leave empty to keep the podcasts built into the app. Up to 12.</p>' +
-    '<div class="field"><textarea id="cfg_podcasts" rows="4" placeholder="The Xtreme BPM | https://anchor.fm/s/281a6d78/podcast/rss"></textarea></div></div>';
+    '<div class="field"><textarea id="cfg_podcasts" rows="4" placeholder="The Xtreme BPM | https://anchor.fm/s/281a6d78/podcast/rss"></textarea></div></div>' +
+    funFactsSectionHtml();
+}
+
+function funFactsSectionHtml() {
+  const days = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
+  const dayBoxes = days.map((d, i) =>
+    '<label style="margin-right:12px;white-space:nowrap;"><input type="checkbox" class="ffDay" value="' + i + '"> ' + d + '</label>'
+  ).join('');
+  return '<div class="card section"><h3>Automatic fun facts</h3>' +
+    '<p class="hint">Writes a fact with AI and pushes it, at the dayparts you tick. The time of day and the weekday are given to the AI as context, so a drive-time fact reads differently from a morning one. ' +
+    'A fact is only ever created together with its push — if the push fails the fact is withdrawn, never left sitting silently.</p>' +
+    '<div class="checkbox" style="margin-bottom:10px;"><input type="checkbox" id="cfg_ff_enabled"><label for="cfg_ff_enabled" style="margin:0;">Automatic fun facts ON</label></div>' +
+    '<div class="field"><label>Days</label><div id="ffDays" style="padding:4px 0;">' + dayBoxes + '</div>' +
+    '<p class="hint" style="margin-top:4px;">Tick none to run every day.</p></div>' +
+    '<div class="field"><label for="cfg_ff_topic">Push audience</label><select id="cfg_ff_topic">' +
+    '<option value="all">All listeners</option><option value="radio">EJazz Radio</option><option value="xtra">EJazz Xtra</option>' +
+    '</select></div>' +
+    '<div class="field"><label>Dayparts</label><div id="ffDayparts"></div>' +
+    '<p class="hint" style="margin-top:4px;">Each ticked daypart fires once on a chosen day, within 10 minutes of its time. A slot missed while the server was down is skipped, not posted late.</p></div>' +
+    '<div id="ffLog" class="items" style="margin-top:12px;"><div class="empty">Loading the log…</div></div>' +
+    '</div>';
 }
 
 function fillControls(cfg) {
@@ -582,6 +603,74 @@ function fillControls(cfg) {
   }));
   const nl = String.fromCharCode(10);
   $('cfg_podcasts').value = (cfg.podcasts || []).map((p) => p.name + ' | ' + p.feedUrl).join(nl);
+  fillFunFacts(cfg.funFacts || {});
+}
+
+function fillFunFacts(ff) {
+  $('cfg_ff_enabled').checked = Boolean(ff.enabled);
+  $('cfg_ff_topic').value = ff.topic || 'all';
+  const days = ff.days || [];
+  document.querySelectorAll('.ffDay').forEach((b) => { b.checked = days.indexOf(Number(b.value)) !== -1; });
+  $('ffDayparts').innerHTML = (ff.dayparts || []).map((d) =>
+    '<div class="checkbox" style="margin-bottom:8px;gap:10px;">' +
+    '<input type="checkbox" class="ffPartOn" data-id="' + escapeHtml(d.id) + '"' + (d.enabled ? ' checked' : '') + '>' +
+    '<label style="margin:0;min-width:92px;">' + escapeHtml(d.label) + '</label>' +
+    '<input type="time" class="ffPartTime" data-id="' + escapeHtml(d.id) + '" value="' + escapeHtml(d.time) + '" style="width:auto;margin:0;">' +
+    '<button type="button" class="secondary ffRun" data-id="' + escapeHtml(d.id) + '" style="width:auto;margin:0;">Send one now</button>' +
+    '</div>'
+  ).join('');
+  document.querySelectorAll('.ffRun').forEach((b) => b.addEventListener('click', () => runFunFactNow(b)));
+  loadFunFactLog();
+}
+
+/** The shape saveControls sends back; dayparts are rebuilt from the rendered rows. */
+function collectFunFacts() {
+  const days = Array.from(document.querySelectorAll('.ffDay')).filter((b) => b.checked).map((b) => Number(b.value));
+  const times = {};
+  document.querySelectorAll('.ffPartTime').forEach((t) => { times[t.getAttribute('data-id')] = t.value; });
+  const dayparts = Array.from(document.querySelectorAll('.ffPartOn')).map((b) => {
+    const id = b.getAttribute('data-id');
+    return { id: id, enabled: b.checked, time: times[id] };
+  });
+  return { enabled: $('cfg_ff_enabled').checked, days: days, topic: $('cfg_ff_topic').value, dayparts: dayparts };
+}
+
+async function runFunFactNow(btn) {
+  const id = btn.getAttribute('data-id');
+  if (!confirm('Write a fact now and push it to listeners? This is a real push, not a preview.')) return;
+  const original = btn.textContent;
+  btn.disabled = true; btn.textContent = 'Sending…';
+  try {
+    await api('/fun-facts/run', { method: 'POST', body: JSON.stringify({ daypartId: id }) });
+    await loadFunFactLog();
+  } catch (e) {
+    alert('Could not send: ' + e.message);
+  } finally {
+    btn.disabled = false; btn.textContent = original;
+  }
+}
+
+async function loadFunFactLog() {
+  const host = $('ffLog');
+  if (!host) return;
+  try {
+    const data = await api('/fun-facts/log', { method: 'GET' });
+    const items = data.items || [];
+    if (!items.length) {
+      host.innerHTML = '<div class="empty">Nothing has auto-fired yet.</div>';
+      return;
+    }
+    host.innerHTML = items.map((it) => {
+      const slot = String(it.createdBy || '').split(':')[2] || '?';
+      const meta = [slot, new Date(it.createdAt).toLocaleString(),
+        it.pushSentAt ? 'pushed to ' + it.pushTopic : 'NOT PUSHED'].filter(Boolean).join(' · ');
+      return '<div class="item"><div><div><strong>' + escapeHtml(it.title) + '</strong></div>' +
+        '<div class="meta">' + escapeHtml(meta) + '</div>' +
+        '<div class="meta">' + escapeHtml(String(it.body || '').slice(0, 160)) + '</div></div></div>';
+    }).join('');
+  } catch (e) {
+    host.innerHTML = '<div class="empty">Could not load the log.</div>';
+  }
 }
 
 async function loadControls() {
@@ -613,6 +702,7 @@ $('saveControlsBtn').addEventListener('click', async () => {
       const parts = line.split('|');
       return { name: (parts[0] || '').trim(), feedUrl: (parts.slice(1).join('|') || '').trim() };
     });
+    next.funFacts = collectFunFacts();
     controlsConfig = await api('/app-config', { method: 'PUT', body: JSON.stringify(next) });
     fillControls(controlsConfig);
     msg.textContent = 'Saved. Phones pick this up the next time the app opens. Anything left blank or invalid (for example a link that is not https) was reset to the default.';
