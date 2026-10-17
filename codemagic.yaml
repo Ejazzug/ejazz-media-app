@@ -7,6 +7,12 @@ workflows:
       java: 17
       groups:
         - ejazz_eas
+      vars:
+        # Baked into the bundle at build time (EXPO_PUBLIC_* is inlined by Expo, so it is
+        # NOT a secret and must never hold one). Without it the app silently disables every
+        # Pulse feature -- isPulseConfigured() returns false and no request is ever made --
+        # which is why Home showed no Pulse cards and the Control Room reached nobody.
+        EXPO_PUBLIC_PULSE_API_URL: "https://control.ejazzug.com"
     cache:
       cache_paths:
         - ~/.pnpm-store
@@ -52,6 +58,10 @@ workflows:
       java: 17
       groups:
         - ejazz_eas
+      vars:
+        # Same as the release workflow -- a preview build that cannot reach Pulse would not
+        # be testing the same app. See the note there.
+        EXPO_PUBLIC_PULSE_API_URL: "https://control.ejazzug.com"
     cache:
       cache_paths:
         - ~/.pnpm-store
