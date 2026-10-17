@@ -16,6 +16,8 @@ import { Stack } from 'expo-router';
 import Head from 'expo-router/head';
 import * as SplashScreen from 'expo-splash-screen';
 import { PlayerProvider } from '@/context/PlayerContext';
+import { AppGate } from '@/components/RemoteControls';
+import { AppConfigProvider } from '@/lib/appConfig';
 import { MiniPlayer, PictureInPicturePlayer } from '@/components/MediaComponents';
 import { initializeFirebaseAnalytics } from '@/lib/firebase';
 import { usePushNotifications } from '@/lib/notifications';
@@ -53,8 +55,10 @@ function RootLayoutContent() {
         <meta name="referrer" content="no-referrer" />
       </Head>
       <View style={{ flex: 1, display: isPictureInPictureWindow ? 'none' : 'flex' }}>
-        <RootLayoutNav />
-        <MiniPlayer />
+        <AppGate>
+          <RootLayoutNav />
+          <MiniPlayer />
+        </AppGate>
       </View>
       {isPictureInPictureWindow && <PictureInPicturePlayer />}
     </View>
@@ -90,9 +94,11 @@ export default function RootLayout() {
         <QueryClientProvider client={queryClient}>
           <GestureHandlerRootView>
             <KeyboardProvider>
-              <PlayerProvider>
-                <RootLayoutContent />
-              </PlayerProvider>
+              <AppConfigProvider>
+                <PlayerProvider>
+                  <RootLayoutContent />
+                </PlayerProvider>
+              </AppConfigProvider>
             </KeyboardProvider>
           </GestureHandlerRootView>
         </QueryClientProvider>

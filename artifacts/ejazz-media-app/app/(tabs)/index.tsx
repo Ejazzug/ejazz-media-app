@@ -13,11 +13,14 @@ import { useShows, classifyLineup, formatShowTime } from '@/lib/shows';
 import { FreshEjazzSection } from '@/components/FreshEjazzSection';
 import { ContinueEjazzSection } from '@/components/ContinueEjazzSection';
 import { TheTeaSection } from '@/components/TheTeaSection';
+import { FeaturedCard, PromoBanner, SponsorSlot, UpdateBanner } from '@/components/RemoteControls';
+import { useAppConfig } from '@/lib/appConfig';
 
 export default function HomeScreen() {
   const colors = useColors();
   const insets = useSafeAreaInsets();
   const router = useRouter();
+  const { features, links } = useAppConfig();
   const { activeStation, isPlaying, stations, togglePlayback } = usePlayer();
   const featured = useFeaturedNews();
   const latest = useLatestNews();
@@ -30,7 +33,8 @@ export default function HomeScreen() {
   const showsQuery = useShows();
   const lineup = classifyLineup(showsQuery.data ?? []);
   const handleSharePulse = (item: { title: string; body: string | null }) => {
-    Share.share({ message: item.body ? `${item.title}\n\n${item.body}\n\nvia EJazz Media` : `${item.title}\n\nvia EJazz Media` }).catch(() => {});
+    const suffix = links.shareText || 'via EJazz Media';
+    Share.share({ message: item.body ? `${item.title}\n\n${item.body}\n\n${suffix}` : `${item.title}\n\n${suffix}` }).catch(() => {});
   };
   const isLoading = featured.isLoading || latest.isLoading;
   const isError = featured.isError && latest.isError;
@@ -57,11 +61,16 @@ export default function HomeScreen() {
           </Pressable>
         </View>
 
+        <UpdateBanner />
+        <PromoBanner />
+
         <View style={styles.hero}>
           <Text style={styles.heroKicker}>EJAZZ MEDIA</Text>
           <Text style={styles.heroTitle}>What's The EJazz? 👋</Text>
           <Text style={styles.heroCopy}>Radio, culture &amp; the stories everyone's talking about — all in one app.</Text>
         </View>
+
+        <FeaturedCard />
 
         <View style={styles.sectionHeading}>
           <Text style={styles.listenLiveTitle}>Listen live</Text>
@@ -86,7 +95,7 @@ export default function HomeScreen() {
 
         {/* <FreshEjazzSection /> - temporarily hidden until backend is ready; re-enable for a future release */}
 
-        {pulseItems.length > 0 ? (
+        {features.pulse && pulseItems.length > 0 ? (
           <>
             <View style={styles.sectionHeading}>
               <Text style={styles.sectionTitle}>EJazz Pulse</Text>
@@ -97,9 +106,11 @@ export default function HomeScreen() {
                   <Text style={styles.pulseCardKicker}>CLOCK IT</Text>
                   <Text style={styles.pulseCardTitle}>{item.title}</Text>
                   {item.body ? <Text style={styles.pulseCardBody}>{item.body}</Text> : null}
-                  <Pressable onPress={() => handleSharePulse(item)} hitSlop={8} style={styles.pulseShareBtn}>
-                    <Text style={styles.pulseShareLabel}>SHARE THE EJAZZ</Text>
-                  </Pressable>
+                  {features.share ? (
+                    <Pressable onPress={() => handleSharePulse(item)} hitSlop={8} style={styles.pulseShareBtn}>
+                      <Text style={styles.pulseShareLabel}>SHARE THE EJAZZ</Text>
+                    </Pressable>
+                  ) : null}
                 </View>
               ))}
             </View>
@@ -108,7 +119,7 @@ export default function HomeScreen() {
 
         {/* <ContinueEjazzSection /> - temporarily hidden until backend is ready; re-enable for a future release */}
 
-        {lineup.now || lineup.next ? (
+        {features.schedule && (lineup.now || lineup.next) ? (
           <>
             <View style={styles.sectionHeading}>
               <Text style={styles.sectionTitle}>Coming Up</Text>
@@ -142,6 +153,8 @@ export default function HomeScreen() {
           </>
         ) : null}
 
+        {features.news ? (
+          <>
         <View style={[styles.sectionHeading, styles.latestHeading]}>
           <Text style={styles.sectionTitle}>The Latest EJazz</Text>
           <Pressable onPress={() => router.push('/news')} hitSlop={8}>
@@ -170,7 +183,11 @@ export default function HomeScreen() {
           <Text style={styles.newsStatusText}>No stories have been published yet.</Text>
         )}
 
-        <TheTeaSection />
+            <TheTeaSection />
+          </>
+        ) : null}
+
+        <SponsorSlot />
 
         <View style={styles.footerNote}>
           <Text style={styles.footerText}>EJAZZ MEDIA</Text>

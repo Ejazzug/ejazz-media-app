@@ -1,7 +1,8 @@
 import { useRouter } from 'expo-router';
 import { ActivityIndicator, Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
 
-import { PODCAST_SHOWS, usePodcastFeed, type PodcastSlug } from '@/lib/podcasts';
+import { useAppConfig, usePodcastShows } from '@/lib/appConfig';
+import { usePodcastFeed, type PodcastSlug } from '@/lib/podcasts';
 
 function PodcastShowCard({ slug, name }: { slug: PodcastSlug; name: string }) {
   const router = useRouter();
@@ -28,7 +29,9 @@ function PodcastShowCard({ slug, name }: { slug: PodcastSlug; name: string }) {
 }
 
 export function ContinueEjazzSection() {
-  if (PODCAST_SHOWS.length === 0) return null;
+  const shows = usePodcastShows();
+  const { features } = useAppConfig();
+  if (!features.podcasts || shows.length === 0) return null;
 
   return (
     <View style={styles.wrap}>
@@ -36,7 +39,7 @@ export function ContinueEjazzSection() {
         <Text style={styles.title}>Continue The EJazz</Text>
       </View>
       <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.row}>
-        {PODCAST_SHOWS.map((show) => (
+        {shows.map((show) => (
           <PodcastShowCard key={show.slug} slug={show.slug} name={show.name} />
         ))}
       </ScrollView>

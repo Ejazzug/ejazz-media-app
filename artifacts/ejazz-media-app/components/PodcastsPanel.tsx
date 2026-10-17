@@ -4,8 +4,9 @@ import React from 'react';
 import { ActivityIndicator, Pressable, StyleSheet, Text, View } from 'react-native';
 import { usePlayer } from '@/context/PlayerContext';
 import { useColors } from '@/hooks/useColors';
+import { usePodcastShows } from '@/lib/appConfig';
 import {
-  PODCAST_SHOWS,
+  PodcastConfig,
   PodcastSlug,
   usePodcastFeed,
 } from '@/lib/podcasts';
@@ -57,11 +58,56 @@ function ExpandableDescription({
   );
 }
 
+function ShowCard({ config, onOpen }: { config: PodcastConfig; onOpen: (slug: PodcastSlug) => void }) {
+  const colors = useColors();
+  const query = usePodcastFeed(config.slug);
+  return (
+    <View style={styles.showCard}>
+      {query.data?.artworkUrl ? (
+        <Image source={query.data.artworkUrl} contentFit="cover" style={styles.showArtwork} />
+      ) : (
+        <View style={styles.showArtworkFallback}>
+          {query.isLoading
+            ? <ActivityIndicator color={colors.primary} />
+            : <Feather name="mic" size={30} color={colors.accent} />}
+        </View>
+      )}
+      <View style={styles.showCopy}>
+        <Text style={styles.showTitle}>{config.name}</Text>
+        {query.data && (
+          <>
+            <ExpandableDescription textStyle={styles.showDescription}>
+              {query.data.description}
+            </ExpandableDescription>
+            <Text style={styles.episodeCount}>{query.data.episodes.length} LATEST EPISODES</Text>
+          </>
+        )}
+        {query.isError && (
+          <Pressable onPress={() => query.refetch()}>
+            <Text style={styles.errorText}>Couldn’t load this show. TAP TO RETRY</Text>
+          </Pressable>
+        )}
+        <Pressable
+          onPress={() => onOpen(config.slug)}
+          disabled={!query.data}
+          style={({ pressed }) => [
+            styles.openShow,
+            { opacity: !query.data ? 0.4 : pressed ? 0.7 : 1 },
+          ]}
+        >
+          <Text style={styles.openShowText}>VIEW EPISODES</Text>
+          <Feather name="arrow-right" size={14} color={colors.primary} />
+        </Pressable>
+      </View>
+    </View>
+  );
+}
+
 export function PodcastsPanel() {
   const colors = useColors();
+  const shows = usePodcastShows();
   const [selectedShow, setSelectedShow] = React.useState<PodcastSlug | null>(null);
-  const xtreme = usePodcastFeed('xtreme-bpm');
-  const finance = usePodcastFeed('finance-future-tech');
+  const selectedQuery = usePodcastFeed(selectedShow);
   const {
     playbackKind,
     currentPodcast,
@@ -79,12 +125,6 @@ export function PodcastsPanel() {
     podcastPosition,
     podcastDuration,
   } = usePlayer();
-  const selectedQuery = selectedShow === 'xtreme-bpm'
-    ? xtreme
-    : selectedShow === 'finance-future-tech'
-      ? finance
-      : null;
-
   if (!selectedShow) {
     return (
       <View style={styles.panel}>
@@ -94,55 +134,15 @@ export function PodcastsPanel() {
           <Text style={styles.introCopy}>Fresh conversations, culture and ideas—ready when you are.</Text>
         </View>
         <View style={styles.showList}>
-          {PODCAST_SHOWS.map((config) => {
-            const query = config.slug === 'xtreme-bpm' ? xtreme : finance;
-            return (
-              <View key={config.slug} style={styles.showCard}>
-                {query.data?.artworkUrl ? (
-                  <Image source={query.data.artworkUrl} contentFit="cover" style={styles.showArtwork} />
-                ) : (
-                  <View style={styles.showArtworkFallback}>
-                    {query.isLoading
-                      ? <ActivityIndicator color={colors.primary} />
-                      : <Feather name="mic" size={30} color={colors.accent} />}
-                  </View>
-                )}
-                <View style={styles.showCopy}>
-                  <Text style={styles.showTitle}>{config.name}</Text>
-                  {query.data && (
-                    <>
-                      <ExpandableDescription textStyle={styles.showDescription}>
-                        {query.data.description}
-                      </ExpandableDescription>
-                      <Text style={styles.episodeCount}>{query.data.episodes.length} LATEST EPISODES</Text>
-                    </>
-                  )}
-                  {query.isError && (
-                    <Pressable onPress={() => query.refetch()}>
-                      <Text style={styles.errorText}>Couldn’t load this show. TAP TO RETRY</Text>
-                    </Pressable>
-                  )}
-                  <Pressable
-                    onPress={() => setSelectedShow(config.slug)}
-                    disabled={!query.data}
-                    style={({ pressed }) => [
-                      styles.openShow,
-                      { opacity: !query.data ? 0.4 : pressed ? 0.7 : 1 },
-                    ]}
-                  >
-                    <Text style={styles.openShowText}>VIEW EPISODES</Text>
-                    <Feather name="arrow-right" size={14} color={colors.primary} />
-                  </Pressable>
-                </View>
-              </View>
-            );
-          })}
+          {shows.map((config) => (
+            <ShowCard key={config.slug} config={config} onOpen={setSelectedShow} />
+          ))}
         </View>
       </View>
     );
   }
 
-  if (selectedQuery?.isLoading) {
+  if (selectedQuery.isLoading) {
     return (
       <View style={styles.fullStatus}>
         <ActivityIndicator color={colors.primary} />
@@ -151,9 +151,9 @@ export function PodcastsPanel() {
     );
   }
 
-  if (selectedQuery?.isError || !selectedQuery?.data) {
+  if (selectedQuery.isError || !selectedQuery.data) {
     return (
-      <Pressable onPress={() => selectedQuery?.refetch()} style={styles.fullStatus}>
+      <Pressable onPress={() => selectedQuery.refetch()} style={styles.fullStatus}>
         <Feather name="wifi-off" size={24} color={colors.accent} />
         <Text style={styles.statusTitle}>Couldn’t load this podcast right now.</Text>
         <Text style={styles.errorText}>TAP TO RETRY</Text>

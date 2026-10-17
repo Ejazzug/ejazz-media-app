@@ -34,6 +34,8 @@ export const contentItemsTable = pgTable("content_items", {
   quizCorrectIndex: integer("quiz_correct_index"),
   startAt: timestamp("start_at", { withTimezone: true }),
   endAt: timestamp("end_at", { withTimezone: true }),
+  // When set on a draft item, the API scheduler publishes it (and sends its push) at this time.
+  scheduleAt: timestamp("schedule_at", { withTimezone: true }),
   pushSentAt: timestamp("push_sent_at", { withTimezone: true }),
   createdBy: text("created_by"),
   createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),

@@ -12,8 +12,8 @@ import {
   insertHostSchema,
   updateHostSchema,
 } from "@workspace/db";
-import { sendContentPush, type PushDeliveryResult } from "../lib/pushNotifications";
-import type { PushTopic } from "@workspace/db";
+import { attemptContentPush } from "../lib/contentPush";
+import { getAppConfig, saveAppConfig } from "../lib/appConfig";
 import { signSession, requireAdmin, ADMIN_COOKIE } from "../middlewares/adminAuth";
 import {
   generateWithGemini,
@@ -24,37 +24,18 @@ import {
 
 const router: IRouter = Router();
 
-async function attemptContentPush(item: {
-  id: number;
-  type: string;
-  title: string;
-  body: string | null;
-  status: string;
-  pushEnabled: boolean;
-  pushTopic: PushTopic;
-  pushSentAt: Date | null;
-}): Promise<PushDeliveryResult | null> {
-  if (!item.pushEnabled || item.status !== "live" || item.pushSentAt) return null;
-
-  try {
-    const delivery = await sendContentPush(item);
-    if (delivery.sent) {
-      const pushSentAt = new Date();
-      await db
-        .update(contentItemsTable)
-        .set({ pushSentAt, updatedAt: pushSentAt })
-        .where(eq(contentItemsTable.id, item.id));
+/** The Control Room sends dates as ISO strings; the schema expects Date objects. */
+function withDates(body: unknown): unknown {
+  if (!body || typeof body !== "object" || Array.isArray(body)) return body;
+  const out: Record<string, unknown> = { ...(body as Record<string, unknown>) };
+  for (const key of ["startAt", "endAt", "scheduleAt"]) {
+    const value = out[key];
+    if (typeof value === "string") {
+      const parsed = new Date(value);
+      out[key] = Number.isNaN(parsed.getTime()) ? value : parsed;
     }
-    return delivery;
-  } catch (error) {
-    console.error("[EJazz Push] Content notification delivery failed.", { contentId: item.id, error });
-    return {
-      sent: false,
-      topic: item.pushTopic,
-      messageId: null,
-      error: error instanceof Error ? error.message : "Push delivery failed.",
-    };
   }
+  return out;
 }
 
 router.post("/login", (req, res) => {
@@ -95,7 +76,7 @@ router.get("/content", async (_req, res) => {
 });
 
 router.post("/content", async (req, res) => {
-  const parsed = insertContentItemSchema.safeParse(req.body);
+  const parsed = insertContentItemSchema.safeParse(withDates(req.body));
   if (!parsed.success) {
     res.status(400).json({ error: parsed.error.flatten() });
     return;
@@ -114,7 +95,7 @@ router.patch("/content/:id", async (req, res) => {
     res.status(400).json({ error: "invalid id" });
     return;
   }
-  const parsed = updateContentItemSchema.safeParse(req.body);
+  const parsed = updateContentItemSchema.safeParse(withDates(req.body));
   if (!parsed.success) {
     res.status(400).json({ error: parsed.error.flatten() });
     return;
@@ -238,6 +219,18 @@ router.delete("/hosts/:id", async (req, res) => {
   }
   await db.delete(hostsTable).where(eq(hostsTable.id, id));
   res.json({ ok: true });
+});
+
+router.get("/app-config", async (_req, res) => {
+  res.json(await getAppConfig());
+});
+
+router.put("/app-config", async (req, res) => {
+  if (!req.body || typeof req.body !== "object") {
+    res.status(400).json({ error: "expected a JSON object" });
+    return;
+  }
+  res.json(await saveAppConfig(req.body));
 });
 
 router.post("/ai/test", async (req, res) => {

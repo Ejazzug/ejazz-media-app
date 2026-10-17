@@ -15,6 +15,7 @@ import {
   useAudioPlayerStatus,
 } from 'expo-audio';
 import { AppState } from 'react-native';
+import { useAppConfig } from '@/lib/appConfig';
 import { PodcastEpisode, PodcastShow } from '@/lib/podcasts';
 import {
   RadioTrack,
@@ -33,6 +34,8 @@ export type Station = {
   description: string;
   genre: string;
   streamUrl: string;
+  /** Optional second stream the app switches to when the main one keeps failing. */
+  backupUrl: string;
   artwork: number;
   logo: number;
   color: string;
@@ -46,7 +49,7 @@ export type PodcastPlaybackItem = {
   artworkUrl: string;
 };
 
-const stations: Station[] = [
+const BASE_STATIONS: Station[] = [
   {
     id: 'radio',
     name: 'EJazz Radio',
@@ -54,6 +57,7 @@ const stations: Station[] = [
     description: 'AT40, Pop & Indie',
     genre: 'AT40 • POP • INDIE',
     streamUrl: process.env.EXPO_PUBLIC_EJAZZ_RADIO_STREAM_URL ?? '',
+    backupUrl: '',
     artwork: require('@/assets/images/editorial-vocalist.jpg'),
     logo: require('@/assets/images/ejazz-radio-logo.png'),
     color: '#E43B48',
@@ -65,6 +69,7 @@ const stations: Station[] = [
     description: 'African Pop',
     genre: 'AFRICAN POP',
     streamUrl: process.env.EXPO_PUBLIC_EJAZZ_EXTRA_STREAM_URL ?? '',
+    backupUrl: '',
     artwork: require('@/assets/images/editorial-african-pop.jpg'),
     logo: require('@/assets/images/ejazz-xtra-logo.png'),
     color: '#FF6B6B',
@@ -129,6 +134,22 @@ type PlayerContextValue = {
 const PlayerContext = createContext<PlayerContextValue | null>(null);
 
 export function PlayerProvider({ children }: PropsWithChildren) {
+  const { streams } = useAppConfig();
+  // The Control Room can override either stream address (and add a backup) without a new app release.
+  const stations = useMemo<Station[]>(
+    () => BASE_STATIONS.map((station) => {
+      const remote = station.id === 'radio' ? streams.radio : streams.xtra;
+      return {
+        ...station,
+        streamUrl: remote.url || station.streamUrl,
+        backupUrl: remote.backupUrl,
+      };
+    }),
+    [streams.radio, streams.xtra],
+  );
+  // Which stations are currently on their backup stream (flips on every failed attempt).
+  const onBackupRef = useRef<Record<StationId, boolean>>({ radio: false, extra: false });
+  const retryRef = useRef<() => void>(() => undefined);
   const [selectedStationId, setSelectedStationId] = useState<StationId>('radio');
   const [viewingStationId, setViewingStation] = useState<StationId>('radio');
   const [playbackKind, setPlaybackKind] = useState<PlaybackKind>('radio');
@@ -165,12 +186,12 @@ export function PlayerProvider({ children }: PropsWithChildren) {
     autoRetryTimerRef.current = setTimeout(() => {
       autoRetryTimerRef.current = null;
       console.log('[EJazz Radio] Auto-retry attempting reconnect...');
-      retryPlayback();
+      retryRef.current();
     }, 6000);
   }, [clearAutoRetry]);
   const activeStation = useMemo(
     () => stations.find((station) => station.id === selectedStationId) ?? stations[0],
-    [selectedStationId],
+    [selectedStationId, stations],
   );
   const player = useAudioPlayer(null, {
     updateInterval: 800,
@@ -206,7 +227,7 @@ export function PlayerProvider({ children }: PropsWithChildren) {
     : extraNowPlaying.isError && extraRecentTracks.isError;
   const viewingStation = useMemo(
     () => stations.find((station) => station.id === viewingStationId) ?? stations[0],
-    [viewingStationId],
+    [viewingStationId, stations],
   );
   const viewingCurrentTrack = viewingStationId === 'radio'
     ? recentTracks.data?.[0] ?? null
@@ -280,11 +301,14 @@ export function PlayerProvider({ children }: PropsWithChildren) {
         console.error('[EJazz Radio] Audio player reported a runtime error.', status.error);
         setStreamErrorMessage(`Live stream error: ${String(status.error)}`);
         setStreamError(true);
+        if (activeStation.backupUrl) {
+          onBackupRef.current[activeStation.id] = !onBackupRef.current[activeStation.id];
+        }
         scheduleAutoRetry();
       }
       setIsPlaying(false);
     }
-  }, [isPlaying, playbackKind, scheduleAutoRetry, status.error, status.playing]);
+  }, [activeStation.backupUrl, activeStation.id, isPlaying, playbackKind, scheduleAutoRetry, status.error, status.playing]);
 
   useEffect(() => {
     return () => {
@@ -365,6 +389,7 @@ export function PlayerProvider({ children }: PropsWithChildren) {
       if (stationId === selectedStationId) return;
       const nextStation = stations.find((station) => station.id === stationId);
       clearAutoRetry();
+      onBackupRef.current[stationId] = false;
       setStreamError(false);
       setSelectedStationId(stationId);
       AsyncStorage.setItem('ejazz-selected-station', stationId).catch(() => undefined);
@@ -392,7 +417,7 @@ export function PlayerProvider({ children }: PropsWithChildren) {
         scheduleAutoRetry();
       }
     },
-    [player, selectedStationId, clearAutoRetry, scheduleAutoRetry],
+    [player, selectedStationId, stations, clearAutoRetry, scheduleAutoRetry],
   );
 
   const toggleRadioPlayback = useCallback(() => {
@@ -417,6 +442,7 @@ export function PlayerProvider({ children }: PropsWithChildren) {
     }
     try {
       clearAutoRetry();
+      onBackupRef.current[activeStation.id] = false;
       player.pause();
       player.replace(activeStation.streamUrl);
       setPlaybackKind('radio');
@@ -432,7 +458,7 @@ export function PlayerProvider({ children }: PropsWithChildren) {
       setIsPlaying(false);
       scheduleAutoRetry();
     }
-  }, [activeStation.streamUrl, isPlaying, playbackKind, player, scheduleAutoRetry, status.playing]);
+  }, [activeStation.id, activeStation.streamUrl, clearAutoRetry, isPlaying, playbackKind, player, scheduleAutoRetry, status.playing]);
 
   const togglePlayback = useCallback(() => {
     if (playbackKind === 'radio') {
@@ -459,11 +485,14 @@ export function PlayerProvider({ children }: PropsWithChildren) {
       return;
     }
     try {
+      const retryUrl = onBackupRef.current[activeStation.id] && activeStation.backupUrl
+        ? activeStation.backupUrl
+        : activeStation.streamUrl;
       console.log('[EJazz Radio] Retry handler invoked.', {
         station: activeStation.id,
-        streamUrl: activeStation.streamUrl,
+        streamUrl: retryUrl,
       });
-      player.replace(activeStation.streamUrl);
+      player.replace(retryUrl);
       setPlaybackKind('radio');
       setCurrentPodcast(null);
       player.play();
@@ -478,7 +507,8 @@ export function PlayerProvider({ children }: PropsWithChildren) {
       setIsPlaying(false);
       scheduleAutoRetry();
     }
-  }, [activeStation.streamUrl, player, scheduleAutoRetry]);
+  }, [activeStation.backupUrl, activeStation.id, activeStation.streamUrl, clearAutoRetry, player, scheduleAutoRetry]);
+  retryRef.current = retryPlayback;
 
   const stopPlayback = useCallback(() => {
     clearAutoRetry();
@@ -589,6 +619,7 @@ export function PlayerProvider({ children }: PropsWithChildren) {
       seekPodcastTo,
     }),
     [
+      stations,
       activeStation,
       currentPodcast,
       currentTrack,

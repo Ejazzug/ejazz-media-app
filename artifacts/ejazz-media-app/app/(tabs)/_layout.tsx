@@ -7,6 +7,7 @@ import { isLiquidGlassAvailable } from 'expo-glass-effect';
 import { Tabs } from 'expo-router';
 import { NativeTabs } from 'expo-router/unstable-native-tabs';
 import { SymbolView } from 'expo-symbols';
+import { useAppConfig } from '@/lib/appConfig';
 
 // IMPORTANT: iOS 26 uses NativeTabs for native tabs with liquid glass support.
 // NativeTabs intentionally does NOT use custom design tokens — liquid glass
@@ -29,6 +30,7 @@ function ClassicTabLayout() {
   const colors = useColors();
   const isIOS = Platform.OS === 'ios';
   const isWeb = Platform.OS === 'web';
+  const { features } = useAppConfig();
 
   return (
     <Tabs
@@ -84,6 +86,7 @@ function ClassicTabLayout() {
       <Tabs.Screen
         name="news"
         options={{
+          href: features.news ? undefined : null,
           title: 'News',
           tabBarIcon: ({ color }) =>
             isIOS ? <SymbolView name="newspaper" tintColor={color} size={24} /> : <Feather name="book-open" size={21} color={color} />,

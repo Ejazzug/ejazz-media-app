@@ -2,7 +2,13 @@ import { useQuery } from '@tanstack/react-query';
 
 const REQUEST_TIMEOUT_MS = 10_000;
 
-export type PodcastSlug = 'xtreme-bpm' | 'finance-future-tech';
+export type PodcastSlug = string;
+
+export type PodcastConfig = {
+  slug: PodcastSlug;
+  name: string;
+  feedUrl: string;
+};
 
 export type PodcastEpisode = {
   id: string;
@@ -21,11 +27,8 @@ export type PodcastShow = {
   episodes: PodcastEpisode[];
 };
 
-export const PODCAST_SHOWS: ReadonlyArray<{
-  slug: PodcastSlug;
-  name: string;
-  feedUrl: string;
-}> = [
+/** Built-in shows, used until (or unless) the Control Room sets its own list. */
+export const BUILT_IN_PODCASTS: ReadonlyArray<PodcastConfig> = [
   {
     slug: 'xtreme-bpm',
     name: 'The Xtreme BPM',
@@ -37,6 +40,17 @@ export const PODCAST_SHOWS: ReadonlyArray<{
     feedUrl: 'https://anchor.fm/s/ecdbbb44/podcast/rss',
   },
 ];
+
+let remotePodcasts: ReadonlyArray<PodcastConfig> = [];
+
+/** Called by the app-config provider. An empty list means "use the built-in shows". */
+export function setRemotePodcasts(shows: ReadonlyArray<PodcastConfig>) {
+  remotePodcasts = shows;
+}
+
+export function getPodcastShows(): ReadonlyArray<PodcastConfig> {
+  return remotePodcasts.length > 0 ? remotePodcasts : BUILT_IN_PODCASTS;
+}
 
 function decodeXml(value: string) {
   return value
@@ -84,7 +98,7 @@ function formatEpisodeDate(value: string) {
 }
 
 function parsePodcastFeed(xml: string, slug: PodcastSlug): PodcastShow {
-  const config = PODCAST_SHOWS.find((show) => show.slug === slug);
+  const config = getPodcastShows().find((show) => show.slug === slug);
   if (!config) throw new Error('Unknown podcast');
   const channel = xml.match(/<channel\b[^>]*>([\s\S]*?)<\/channel>/i)?.[1];
   if (!channel) throw new Error('Invalid podcast feed');
@@ -123,7 +137,7 @@ function parsePodcastFeed(xml: string, slug: PodcastSlug): PodcastShow {
 }
 
 async function fetchPodcastFeed(slug: PodcastSlug) {
-  const config = PODCAST_SHOWS.find((show) => show.slug === slug);
+  const config = getPodcastShows().find((show) => show.slug === slug);
   if (!config) throw new Error('Unknown podcast');
   const controller = new AbortController();
   const timeout = setTimeout(() => controller.abort(), REQUEST_TIMEOUT_MS);
@@ -141,10 +155,12 @@ async function fetchPodcastFeed(slug: PodcastSlug) {
   }
 }
 
-export function usePodcastFeed(slug: PodcastSlug) {
+export function usePodcastFeed(slug: PodcastSlug | null) {
+  const feedUrl = slug ? getPodcastShows().find((show) => show.slug === slug)?.feedUrl : undefined;
   return useQuery({
-    queryKey: ['podcasts', slug],
-    queryFn: () => fetchPodcastFeed(slug),
+    queryKey: ['podcasts', slug, feedUrl],
+    queryFn: () => fetchPodcastFeed(slug as PodcastSlug),
+    enabled: Boolean(slug && feedUrl),
     staleTime: 15 * 60_000,
     retry: 1,
   });

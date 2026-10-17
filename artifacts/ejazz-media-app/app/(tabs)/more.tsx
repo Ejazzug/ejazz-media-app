@@ -1,25 +1,35 @@
 import { Feather } from '@expo/vector-icons';
 import { useRouter } from 'expo-router';
 import React from 'react';
-import { Linking, Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
+import { Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { EJazzWordmark, MINI_PLAYER_CLEARANCE, ScreenHeader } from '@/components/MediaComponents';
 import { useColors } from '@/hooks/useColors';
+import { getAppVersion, openLink, useAppConfig } from '@/lib/appConfig';
 import { useHosts } from '@/lib/hosts';
 
-const items = [
-  { label: 'Notifications', icon: 'bell' as const, action: undefined, route: '/notifications' as const },
-  { label: 'About EJazz', icon: 'info' as const, action: undefined, route: undefined },
-  { label: 'Contact EJazz', icon: 'mail' as const, action: 'mailto:hello@ejazzmedia.com', route: undefined },
-  { label: 'Instagram', icon: 'instagram' as const, action: 'https://instagram.com', route: undefined },
-  { label: 'Privacy Policy', icon: 'shield' as const, action: undefined, route: undefined },
-  { label: 'Terms', icon: 'file-text' as const, action: undefined, route: undefined },
-];
+type MenuItem = {
+  label: string;
+  icon: React.ComponentProps<typeof Feather>['name'];
+  action?: string;
+  route?: '/notifications';
+};
 
 export default function MoreScreen() {
   const colors = useColors();
   const insets = useSafeAreaInsets();
   const router = useRouter();
+  const { links } = useAppConfig();
+  const items: MenuItem[] = [
+    { label: 'Notifications', icon: 'bell', route: '/notifications' },
+    { label: 'About EJazz', icon: 'info' },
+    { label: 'Contact EJazz', icon: 'mail', action: `mailto:${links.contactEmail || 'hello@ejazzmedia.com'}` },
+    { label: 'Instagram', icon: 'instagram', action: links.instagramUrl || 'https://instagram.com' },
+    ...(links.whatsappUrl ? [{ label: 'WhatsApp', icon: 'message-circle', action: links.whatsappUrl } as MenuItem] : []),
+    ...(links.websiteUrl ? [{ label: 'Website', icon: 'globe', action: links.websiteUrl } as MenuItem] : []),
+    { label: 'Privacy Policy', icon: 'shield', action: links.privacyUrl || undefined },
+    { label: 'Terms', icon: 'file-text', action: links.termsUrl || undefined },
+  ];
   const hostsQuery = useHosts();
   const hosts = hostsQuery.data ?? [];
   return (
@@ -51,7 +61,7 @@ export default function MoreScreen() {
               key={item.label}
               onPress={() => {
                 if (item.route) router.push(item.route);
-                else if (item.action) Linking.openURL(item.action);
+                else if (item.action) openLink(item.action);
               }}
               style={({ pressed }) => [styles.menuItem, { opacity: pressed ? 0.65 : 1 }]}
             >
@@ -67,7 +77,7 @@ export default function MoreScreen() {
         </View>
         <View style={styles.version}>
           <Text style={styles.versionText}>EJAZZ MEDIA APP</Text>
-          <Text style={styles.versionSubtext}>VERSION 1.0.0</Text>
+          <Text style={styles.versionSubtext}>VERSION {getAppVersion()}</Text>
         </View>
       </ScrollView>
     </View>

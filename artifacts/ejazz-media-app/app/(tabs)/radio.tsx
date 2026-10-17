@@ -8,6 +8,7 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { MINI_PLAYER_CLEARANCE, PlayButton, PlayingEqualizer } from '@/components/MediaComponents';
 import { KeyboardAwareScrollViewCompat } from '@/components/KeyboardAwareScrollViewCompat';
 import { PodcastsPanel } from '@/components/PodcastsPanel';
+import { useAppConfig } from '@/lib/appConfig';
 import { useColors } from '@/hooks/useColors';
 import { usePlayer } from '@/context/PlayerContext';
 import { useExtraSongRequest, useExtraSongSearch, useSongRequest } from '@/lib/radio';
@@ -26,9 +27,15 @@ export default function RadioScreen() {
   const [formError, setFormError] = React.useState('');
   const [extraSearch, setExtraSearch] = React.useState('');
   const [debouncedExtraSearch, setDebouncedExtraSearch] = React.useState('');
-  const [viewMode, setViewMode] = React.useState<RadioView>(
+  const { features, songRequests, links } = useAppConfig();
+  const [rawViewMode, setViewMode] = React.useState<RadioView>(
     mode === 'podcasts' ? 'podcasts' : 'radio',
   );
+  // If the Control Room switches podcasts off while someone is on that tab, fall back to the radio.
+  const viewMode: RadioView = rawViewMode === 'podcasts' && !features.podcasts ? 'radio' : rawViewMode;
+  const shareMessage = (fallback: string) => (links.shareText ? `${links.shareText}` : fallback);
+  const radioRequestsOpen = features.songRequests && songRequests.radioEnabled;
+  const xtraRequestsOpen = features.songRequests && songRequests.xtraEnabled;
   const request = useSongRequest();
   const {
     playbackKind,
@@ -110,9 +117,9 @@ export default function RadioScreen() {
         <View style={styles.header}>
           <Text style={styles.eyebrow}>EJAZZ LIVE</Text>
           <Text style={styles.title}>Radio</Text>
-          {!isPodcasts && (
+          {!isPodcasts && features.share && (
             <Pressable
-              onPress={() => Share.share({ message: `Listen live on ${viewingStation.name} — EJazz Media App` })}
+              onPress={() => Share.share({ message: shareMessage(`Listen live on ${viewingStation.name} — EJazz Media App`) })}
               accessibilityRole="button"
               accessibilityLabel="Share station"
               style={styles.shareButton}
@@ -142,6 +149,7 @@ export default function RadioScreen() {
               </Pressable>
             );
           })}
+          {features.podcasts && (
           <Pressable
             onPress={() => setViewMode('podcasts')}
             style={[styles.switcherItem, isPodcasts && { backgroundColor: colors.primary }]}
@@ -153,6 +161,7 @@ export default function RadioScreen() {
               Podcasts
             </Text>
           </Pressable>
+          )}
         </View>
 
         {isPodcasts ? (
@@ -177,10 +186,14 @@ export default function RadioScreen() {
         </View>
 
         <View style={styles.controls}>
-          <Pressable style={styles.secondaryControl} onPress={() => Share.share({ message: `Listen to ${viewingStation.name}` })}>
-            <Feather name="share-2" size={19} color={colors.mutedForeground} />
-            <Text style={styles.controlText}>Share</Text>
-          </Pressable>
+          {features.share ? (
+            <Pressable style={styles.secondaryControl} onPress={() => Share.share({ message: shareMessage(`Listen to ${viewingStation.name}`) })}>
+              <Feather name="share-2" size={19} color={colors.mutedForeground} />
+              <Text style={styles.controlText}>Share</Text>
+            </Pressable>
+          ) : (
+            <View style={styles.secondaryControl} />
+          )}
           <PlayButton
             playing={radioPlaying}
             onPress={() => {
@@ -283,7 +296,15 @@ export default function RadioScreen() {
           </View>
         </View>
 
-        {isRadio && (
+        {isRadio && !radioRequestsOpen && (
+          <View style={styles.requestSection}>
+            <Text style={styles.sectionEyebrow}>YOUR SONG, ON AIR</Text>
+            <Text style={styles.requestTitle}>Requests are closed</Text>
+            <Text style={styles.requestIntro}>{songRequests.closedMessage}</Text>
+          </View>
+        )}
+
+        {isRadio && radioRequestsOpen && (
           <View style={styles.requestSection}>
             <Text style={styles.sectionEyebrow}>YOUR SONG, ON AIR</Text>
             <Text style={styles.requestTitle}>Request a track</Text>
@@ -372,7 +393,15 @@ export default function RadioScreen() {
           </View>
         )}
 
-        {!isRadio && (
+        {!isRadio && !xtraRequestsOpen && (
+          <View style={styles.requestSection}>
+            <Text style={styles.sectionEyebrow}>FIND IT. REQUEST IT.</Text>
+            <Text style={styles.requestTitle}>Requests are closed</Text>
+            <Text style={styles.requestIntro}>{songRequests.closedMessage}</Text>
+          </View>
+        )}
+
+        {!isRadio && xtraRequestsOpen && (
           <View style={styles.requestSection}>
             <Text style={styles.sectionEyebrow}>FIND IT. REQUEST IT.</Text>
             <Text style={styles.requestTitle}>Request on EJazz Xtra</Text>
