@@ -1,5 +1,6 @@
 package com.ejazzug.ejazzmedia
 
+import android.app.Activity
 import android.app.PictureInPictureParams
 import android.os.Build
 import android.util.Rational
@@ -33,7 +34,11 @@ class EjazzPictureInPictureModule(
       return
     }
 
-    val activity = currentActivity
+    // getCurrentActivity() is protected on ReactContextBaseJavaModule, which lives in another
+    // package, so Kotlin K2 will not expose it as the synthetic `currentActivity` property --
+    // that resolved under K1 but is an unresolved reference now. Call the getter explicitly,
+    // and type the local so `activity` is unambiguously a platform-free Activity?.
+    val activity: Activity? = getCurrentActivity()
     if (activity == null) {
       promise.resolve(false)
       return
