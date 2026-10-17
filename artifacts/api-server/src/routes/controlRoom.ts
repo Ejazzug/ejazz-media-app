@@ -95,6 +95,7 @@ const PAGE = `<!doctype html>
     <button class="tabBtn active" data-panel="panel-content">Content &amp; push</button>
     <button class="tabBtn" data-panel="panel-controls">App controls</button>
     <button class="tabBtn" data-panel="panel-schedule">Programme schedule</button>
+    <button class="tabBtn" data-panel="panel-notifications">Notifications</button>
   </nav>
 
   <section id="panel-content" class="panel active">
@@ -201,6 +202,21 @@ const PAGE = `<!doctype html>
       <div class="err" id="showErr"></div>
     </div>
     <div class="items" id="showsList"><div class="empty">Loading…</div></div>
+  </section>
+
+  <section id="panel-notifications" class="panel">
+    <h2>Notifications</h2>
+    <div class="card">
+      <p class="meta" style="margin:0 0 10px;">
+        Every push that was actually sent. <strong>Retract</strong> stops the notification
+        showing in the app for everyone — it does not recall a message already delivered to a
+        phone's tray, which nothing can.
+        <strong>Delete</strong> only removes the row from this log and changes nothing on any device.
+      </p>
+      <button id="clearNotifsBtn" class="secondary">Clear all</button>
+      <div class="err" id="notifErr"></div>
+    </div>
+    <div class="items" id="notifList"><div class="empty">Loading…</div></div>
   </section>
 </main>
 
@@ -356,6 +372,80 @@ function escapeHtml(s) {
   return String(s || '').replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
 }
 
+// ---------- notifications ----------
+// api() above is hardcoded to the /api/admin prefix; the notification routes live at
+// /api/notifications (the app reads the public one), so they need their own caller.
+function apiRoot(path, opts) {
+  return fetch('/api' + path, Object.assign({ credentials: 'include', headers: { 'Content-Type': 'application/json' } }, opts))
+    .then(async (r) => {
+      const body = await r.json().catch(() => ({}));
+      if (!r.ok) throw new Error((body && body.error) || ('HTTP ' + r.status));
+      return body;
+    });
+}
+
+async function loadNotifications() {
+  const list = $('notifList');
+  $('notifErr').textContent = '';
+  try {
+    const data = await apiRoot('/notifications/admin', { method: 'GET' });
+    const rows = data.notifications || [];
+    if (!rows.length) {
+      list.innerHTML = '<div class="empty">Nothing sent yet.</div>';
+      return;
+    }
+    list.innerHTML = rows.map((n) => {
+      const retracted = Boolean(n.retractedAt);
+      const expired = n.expiresAt && new Date(n.expiresAt) <= new Date();
+      const meta = [
+        'to ' + n.topic,
+        'sent ' + new Date(n.sentAt).toLocaleString(),
+        n.expiresAt ? (expired ? 'expired ' : 'expires ') + new Date(n.expiresAt).toLocaleString() : '',
+        retracted ? 'RETRACTED ' + new Date(n.retractedAt).toLocaleString() : '',
+      ].filter(Boolean).join(' · ');
+      const actions = retracted
+        ? '<button data-id="' + n.id + '" class="secondary notifUnretract">Un-retract</button>'
+        : '<button data-id="' + n.id + '" class="secondary notifRetract">Retract</button>';
+      return '<div class="item">' +
+        '<div><div><strong>' + escapeHtml(n.title) + '</strong>' +
+        (retracted ? ' <span class="badge withdrawn">retracted</span>' : '') +
+        (expired && !retracted ? ' <span class="badge expired">expired</span>' : '') +
+        '</div><div class="meta">' + escapeHtml(meta) + '</div></div>' +
+        '<div class="actions">' + actions +
+        '<button data-id="' + n.id + '" class="secondary notifDelete">Delete</button></div></div>';
+    }).join('');
+
+    document.querySelectorAll('.notifRetract').forEach((b) => b.addEventListener('click', async () => {
+      if (!confirm('Retract this notification? It will disappear from the app for everyone. Already-delivered phone alerts cannot be recalled.')) return;
+      await notifAction('/notifications/' + b.getAttribute('data-id') + '/retract', { method: 'POST' });
+    }));
+    document.querySelectorAll('.notifUnretract').forEach((b) => b.addEventListener('click', async () => {
+      await notifAction('/notifications/' + b.getAttribute('data-id') + '/unretract', { method: 'POST' });
+    }));
+    document.querySelectorAll('.notifDelete').forEach((b) => b.addEventListener('click', async () => {
+      if (!confirm('Delete from this log only? Devices that already have it keep it — use Retract to hide it in the app.')) return;
+      await notifAction('/notifications/' + b.getAttribute('data-id'), { method: 'DELETE' });
+    }));
+  } catch (e) {
+    list.innerHTML = '<div class="empty">Could not load the log.</div>';
+    $('notifErr').textContent = e.message;
+  }
+}
+
+async function notifAction(path, opts) {
+  try {
+    await apiRoot(path, opts);
+    await loadNotifications();
+  } catch (e) {
+    $('notifErr').textContent = e.message;
+  }
+}
+
+$('clearNotifsBtn').addEventListener('click', async () => {
+  if (!confirm('Clear the entire notification log?\n\nThis only empties this list. It does not retract anything — a retracted notification that is deleted here becomes visible in the app again. Retract first, then clear.')) return;
+  await notifAction('/notifications?confirm=yes', { method: 'DELETE' });
+});
+
 // ---------- tabs ----------
 document.querySelectorAll('.tabBtn').forEach((btn) => {
   btn.addEventListener('click', () => {
@@ -365,6 +455,7 @@ document.querySelectorAll('.tabBtn').forEach((btn) => {
     $(btn.getAttribute('data-panel')).classList.add('active');
     if (btn.getAttribute('data-panel') === 'panel-controls') loadControls();
     if (btn.getAttribute('data-panel') === 'panel-schedule') loadShows();
+    if (btn.getAttribute('data-panel') === 'panel-notifications') loadNotifications();
   });
 });
 
