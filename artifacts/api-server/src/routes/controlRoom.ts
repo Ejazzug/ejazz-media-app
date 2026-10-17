@@ -579,7 +579,17 @@ async function notifAction(path, opts) {
 }
 
 $('clearNotifsBtn').addEventListener('click', async () => {
-  if (!confirm('Clear the entire notification log?\n\nThis only empties this list. It does not retract anything — a retracted notification that is deleted here becomes visible in the app again. Retract first, then clear.')) return;
+  // Build the line break with String.fromCharCode(10) rather than a backslash escape.
+  // This whole page is a template literal, so a backslash escape is consumed when the
+  // HTML is built and reaches the browser as a real newline inside a quoted string --
+  // a SyntaxError that kills the entire script, every listener on the page included.
+  // That applies in comments too, which is why this one spells none of it literally.
+  // Same reason the podcasts section above uses this idiom.
+  const br = String.fromCharCode(10);
+  const warning = 'Clear the entire notification log?' + br + br
+    + 'This only empties this list. It does not retract anything — a retracted notification '
+    + 'that is deleted here becomes visible in the app again. Retract first, then clear.';
+  if (!confirm(warning)) return;
   await notifAction('/notifications?confirm=yes', { method: 'DELETE' });
 });
 
