@@ -39,7 +39,10 @@ function patchAudioControlsService(source) {
           if (activePlayer?.ref?.isPlaying == true && metadata != null) {
             val latest = fetchStationMetadata(metadata)
             if (latest != null && activePlayer == currentPlayer) {
-              appContext?.mainQueue?.launch {
+              // Main dispatcher directly, NOT appContext?.mainQueue: appContext can be null
+              // once the activity is gone, and that made this update silently do nothing,
+              // which is exactly when the lock screen needs it (app in the background).
+              launch(Dispatchers.Main) {
                 if (activePlayer == currentPlayer && activePlayer.ref.isPlaying) {
                   updateMetadataInternal(activePlayer, latest)
                 }
@@ -49,8 +52,30 @@ function patchAudioControlsService(source) {
         } catch (error: Exception) {
           Log.w("EJazzNowPlaying", "Background station metadata refresh failed", error)
         }
-        delay(30_000L)
+        delay(15_000L)
       }
+    }
+  }
+
+  // The programme on air now, from the Control Room line-up. Blank on any failure or when
+  // nothing is scheduled, so a hiccup here never costs the song update itself.
+  private fun fetchOnAirShow(stationKey: String): String {
+    return try {
+      val connection = (URL("https://control.ejazzug.com/api/shows/on-air?station=" + stationKey).openConnection() as HttpURLConnection).apply {
+        connectTimeout = 5_000
+        readTimeout = 5_000
+        setRequestProperty("Accept", "application/json")
+        setRequestProperty("User-Agent", "EJazzMediaApp/0.1.0")
+      }
+      try {
+        if (connection.responseCode !in 200..299) return ""
+        val root = JSONObject(connection.inputStream.bufferedReader().use { it.readText() })
+        if (root.isNull("show")) "" else root.optString("show").trim()
+      } finally {
+        connection.disconnect()
+      }
+    } catch (error: Exception) {
+      ""
     }
   }
 
@@ -114,12 +139,13 @@ function patchAudioControlsService(source) {
         }
       }
       if (title.isEmpty() && artist.isEmpty()) return null
-      return Metadata(
-        title.ifEmpty { metadata.title },
-        artist.ifEmpty { metadata.artist },
-        metadata.albumTitle,
-        artworkUrl
-      )
+      // Same wording as lib/lockScreen.ts: line 1 "Song - Artist", line 2 "EJazz Media App
+      // - station - show on air" (show left out when the Control Room has none).
+      val stationName = metadata.albumTitle?.trim().orEmpty()
+      val show = fetchOnAirShow(if (station == "ejazz radio") "radio" else "xtra")
+      val line1 = if (title.isNotEmpty() && artist.isNotEmpty()) title + " - " + artist else title.ifEmpty { artist }
+      val line2 = listOf("EJazz Media App", stationName, show).filter { it.isNotEmpty() }.joinToString(" \u00B7 ")
+      return Metadata(line1, line2, metadata.albumTitle, artworkUrl)
     } finally {
       connection.disconnect()
     }

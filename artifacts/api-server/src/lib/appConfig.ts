@@ -28,6 +28,17 @@ export type FunFactsConfig = {
   dayparts: FunFactDaypart[];
 };
 
+/** Operator-only: whether a song with no fact gets one written by AI the first time it is seen. */
+export type SongFactsConfig = {
+  autoGenerate: boolean;
+  /** Which model writes a fact when none exists: Gemini (search-grounded), Groq (no search), or none (sheet and typed facts only). */
+  provider: "gemini" | "groq" | "none";
+  maxPerHour: number;
+  maxPerDay: number;
+  /** A Google Sheet of facts (artist, title, fact). Blank = none linked. Checked hourly. */
+  sheetUrl: string;
+};
+
 export type AppConfig = {
   features: {
     news: boolean;
@@ -92,6 +103,8 @@ export type AppConfig = {
    * no use for it and it would just be scheduling detail leaked to every phone.
    */
   funFacts: FunFactsConfig;
+  /** Operator-only, stripped by toPublicConfig() like funFacts. */
+  songFacts: SongFactsConfig;
 };
 
 export const DEFAULT_APP_CONFIG: AppConfig = {
@@ -118,6 +131,7 @@ export const DEFAULT_APP_CONFIG: AppConfig = {
   podcasts: [],
   // Off by default, and every daypart off: turning the feature on must be a deliberate act,
   // and nothing should start pushing to every listener because a config row got created.
+  songFacts: { autoGenerate: true, provider: "gemini", maxPerHour: 40, maxPerDay: 300, sheetUrl: "" },
   funFacts: {
     enabled: false,
     days: [],
@@ -180,6 +194,34 @@ function slugify(value: string): string {
 }
 
 const TIME_RE = /^([01]\d|2[0-3]):[0-5]\d$/;
+
+/** Same rule as songFactsSheet.validateSheetUrl, inlined to keep this file free of imports from it. */
+function validateSheetUrlShape(raw: string): boolean {
+  try {
+    const u = new URL(raw);
+    return u.protocol === "https:" && u.hostname === "docs.google.com" && u.pathname.startsWith("/spreadsheets/");
+  } catch {
+    return false;
+  }
+}
+
+function capNumber(value: unknown, fallback: number, max: number): number {
+  const n = typeof value === "number" ? value : Number(value);
+  return Number.isFinite(n) && n >= 0 ? Math.min(Math.floor(n), max) : fallback;
+}
+
+/** 0 is a valid cap (generate nothing); a missing or invalid value keeps the default. */
+function songFactsConfig(value: unknown): SongFactsConfig {
+  const d = DEFAULT_APP_CONFIG.songFacts;
+  const src = obj(value);
+  return {
+    autoGenerate: src.autoGenerate !== false,
+    provider: src.provider === "groq" ? "groq" : src.provider === "none" ? "none" : "gemini",
+    sheetUrl: typeof src.sheetUrl === "string" && validateSheetUrlShape(src.sheetUrl.trim()) ? src.sheetUrl.trim().slice(0, 500) : "",
+    maxPerHour: capNumber(src.maxPerHour, d.maxPerHour, 1000),
+    maxPerDay: capNumber(src.maxPerDay, d.maxPerDay, 10000),
+  };
+}
 
 function funFacts(value: unknown): FunFactsConfig {
   const d = DEFAULT_APP_CONFIG.funFacts;
@@ -321,6 +363,7 @@ export function normalizeAppConfig(input: unknown): AppConfig {
     },
     podcasts: podcasts(src.podcasts),
     funFacts: funFacts(src.funFacts),
+    songFacts: songFactsConfig(src.songFacts),
   };
 }
 
@@ -339,8 +382,8 @@ function inWindow(startAt: string, endAt: string, now: number): boolean {
  * operator-only sections -- funFacts is scheduling detail the app has no use for, and
  * publishing it would hand every phone the station's posting timetable.
  */
-export function toPublicConfig(config: AppConfig, now: number = Date.now()): Omit<AppConfig, "funFacts"> {
-  const { funFacts: _operatorOnly, ...publicConfig } = config;
+export function toPublicConfig(config: AppConfig, now: number = Date.now()): Omit<AppConfig, "funFacts" | "songFacts"> {
+  const { funFacts: _operatorOnly, songFacts: _operatorOnly2, ...publicConfig } = config;
   return {
     ...publicConfig,
     featured: { ...config.featured, enabled: config.featured.enabled && inWindow(config.featured.startAt, config.featured.endAt, now) },

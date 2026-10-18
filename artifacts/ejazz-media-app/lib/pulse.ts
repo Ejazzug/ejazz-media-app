@@ -43,7 +43,7 @@ export type PulseContentItem = {
 };
 
 const PULSE_KICKERS: Record<PulseContentType, string> = {
-  fact: 'DID YOU KNOW',
+  fact: 'CLOCK THIS...',
   poll: 'AURA CHECK',
   announcement: 'ANNOUNCEMENT',
   quiz: 'QUIZ',
@@ -60,6 +60,11 @@ function isContentItem(value: unknown): value is PulseContentItem {
   if (!value || typeof value !== 'object') return false;
   const item = value as Partial<PulseContentItem>;
   return typeof item.id === 'number' && typeof item.title === 'string' && typeof item.type === 'string';
+}
+
+/** Base URL of the Pulse API, or '' when not configured. Shared by the song-fact and chart hooks. */
+export function pulseBaseUrl(): string {
+  return PULSE_API_URL.replace(/\/$/, '');
 }
 
 export function isPulseConfigured(): boolean {

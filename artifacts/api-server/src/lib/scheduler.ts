@@ -2,6 +2,7 @@ import { and, eq, isNotNull, lte } from "drizzle-orm";
 import { db, contentItemsTable } from "@workspace/db";
 import { attemptContentPush } from "./contentPush";
 import { runDueFunFacts } from "./funFacts";
+import { syncSheetIfDue } from "./songFactsSheet";
 import { logger } from "./logger";
 
 const TICK_MS = 60_000;
@@ -52,6 +53,13 @@ async function tick(): Promise<void> {
     }
   } catch (error) {
     logger.error({ err: error }, "Fun fact tick failed");
+  }
+
+  // Hourly re-sync of the linked facts sheet (no-op when none is linked).
+  try {
+    await syncSheetIfDue();
+  } catch (error) {
+    logger.error({ err: error }, "Song facts sheet tick failed");
   } finally {
     running = false;
   }

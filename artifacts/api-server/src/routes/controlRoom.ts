@@ -85,6 +85,15 @@ const PAGE = `<!doctype html>
   details.section[open] > summary::after { content: "−"; }
   details.section > summary:hover { color: #ff5f70; }
   details.section > summary .sumhint { font-weight: 500; font-size: 11.5px; color: #8a8195; flex: 1; }
+  /* App controls: three sections to a row. An opened section spans the full row so its
+     form fields keep a usable width, and the others reflow around it. */
+  #controlsForm { display:grid; grid-template-columns: repeat(3, 1fr); gap: 12px; align-items: start; }
+  #controlsForm details.section { margin-bottom: 0; }
+  #controlsForm details.section[open] { grid-column: 1 / -1; }
+  #controlsForm details.section > summary { flex-wrap: wrap; }
+  #controlsForm details.section > summary .sumhint { flex-basis: 100%; order: 3; }
+  @media (max-width: 760px) { #controlsForm { grid-template-columns: repeat(2, 1fr); } }
+  @media (max-width: 480px) { #controlsForm { grid-template-columns: 1fr; } }
   .section-body { padding-top: 14px; margin-top: 12px; border-top: 1px solid rgba(255,255,255,0.08); }
 
   /* Station sub-tabs inside the programme panel. */
@@ -823,7 +832,9 @@ function renderControls() {
     sectionHtml('Podcasts',
       'One show per line: Name | feed link. Leave empty to keep the podcasts built into the app. Up to 12.',
       '<div class="field"><textarea id="cfg_podcasts" rows="4" placeholder="The Xtreme BPM | https://anchor.fm/s/281a6d78/podcast/rss"></textarea></div>') +
-    funFactsSectionHtml();
+    funFactsSectionHtml() +
+    songFactsSectionHtml() +
+    stationChartsSectionHtml();
 }
 
 // One collapsed section. <details> rather than a click handler on a heading: the App
@@ -867,6 +878,14 @@ function fillControls(cfg) {
   const nl = String.fromCharCode(10);
   $('cfg_podcasts').value = (cfg.podcasts || []).map((p) => p.name + ' | ' + p.feedUrl).join(nl);
   fillFunFacts(cfg.funFacts || {});
+  const sfc = cfg.songFacts || {};
+  $('sf_auto').checked = sfc.autoGenerate !== false;
+  $('sf_hour').value = sfc.maxPerHour == null ? 40 : sfc.maxPerHour;
+  $('sf_day').value = sfc.maxPerDay == null ? 300 : sfc.maxPerDay;
+  $('sf_provider').value = sfc.provider === 'groq' || sfc.provider === 'none' ? sfc.provider : 'gemini';
+  $('sf_sheet').value = sfc.sheetUrl || '';
+  loadSongFacts();
+  loadStationCharts();
 }
 
 function fillFunFacts(ff) {
@@ -950,6 +969,138 @@ async function loadFunFactLog() {
   }
 }
 
+
+// ---------- facts that follow the song on air ----------
+// Shown under the player on each Radio view while a matching song plays. A fact is matched
+// on the normalised artist (and title); an artist with no title applies to all their songs.
+function songFactsSectionHtml() {
+  return sectionHtml('Song facts',
+    'A short fact under the player while a matching song plays.',
+    '<p class="hint">Written by AI the first time a song plays, or typed here. A fact you type always wins and is never overwritten. Leave the song title blank for a fact about the artist that suits any of their songs.</p>' +
+    '<div class="checkbox" style="margin-bottom:10px;"><input type="checkbox" id="sf_auto"><label for="sf_auto" style="margin:0;">Write a fact with AI the first time a song plays (saved with the Save button below)</label></div>' +
+    '<div class="field"><label for="sf_provider">AI that writes the facts</label><select id="sf_provider">' +
+    '<option value="gemini">Gemini (checks the web first when it can)</option><option value="groq">Groq (faster, no web check - leave facts you are unsure about to the sheet)</option>' +
+    '</select><div class="hint" id="sf_provhint" style="margin-top:4px;"></div></div>' +
+    '<div class="row"><div class="field"><label for="sf_hour">Most new AI facts per hour</label><input type="number" id="sf_hour" min="0" max="1000"></div>' +
+    '<div class="field"><label for="sf_day">Most new AI facts per day</label><input type="number" id="sf_day" min="0" max="10000"></div></div>' +
+    '<p class="hint">Songs that already have a fact never count. At the limit a new song simply shows no fact until there is room. 0 stops AI writing.</p>' +
+    '<div class="row"><div class="field"><label for="sf_artist">Artist</label><input type="text" id="sf_artist"></div>' +
+    '<div class="field"><label for="sf_title">Song (optional)</label><input type="text" id="sf_title"></div></div>' +
+    '<div class="field"><label for="sf_body">Fact</label><textarea id="sf_body" rows="2" maxlength="400"></textarea></div>' +
+    '<button type="button" id="sf_add" style="width:auto;">Add fact</button>' +
+    '<div class="err" id="sf_err"></div>' +
+    '<div id="sf_list" class="items" style="margin-top:12px;"><div class="empty">Loading…</div></div>');
+}
+
+async function loadSongFacts() {
+  const host = $('sf_list');
+  if (!host) return;
+  try {
+    const data = await api('/song-facts', { method: 'GET' });
+    const items = data.items || [];
+    const pv = $('sf_provider').value;
+    const missing = pv === 'none' ? false : pv === 'groq' ? !data.groqConfigured : !data.geminiConfigured;
+    $('sf_provhint').textContent = missing ? 'This AI is not set up on the server (its key is missing), so no facts will be written by it.' : '';
+    if (data.lastSync) $('sf_syncmsg').textContent = 'Last sync ' + String(data.lastSync.at).slice(0, 16).replace('T', ' ') + ' UTC: ' + data.lastSync.message;
+    if (!items.length) { host.innerHTML = '<div class="empty">No facts yet. They appear here as songs play.</div>'; return; }
+    host.innerHTML = items.map((f) => {
+      const who = f.title ? f.artist + ' - ' + f.title : f.artist + ' (any song)';
+      const marker = f.body ? '' : ' <span class="badge expired">no fact found</span>';
+      return '<div class="item" data-id="' + f.id + '"><div class="lead"><div style="flex:1;min-width:0;">' +
+        '<div class="title">' + escapeHtml(who) + ' <span class="badge ' + (f.source === 'manual' ? 'live' : 'draft') + '">' + (f.source === 'manual' ? 'typed' : 'AI') + '</span>' +
+        (f.enabled || !f.body ? '' : ' <span class="badge expired">off</span>') + marker + '</div>' +
+        '<div class="meta">' + escapeHtml(f.body) + '</div></div>' +
+        '<div class="actions">' +
+        '<button type="button" class="secondary sfEdit" data-id="' + f.id + '">Edit</button>' +
+        (f.body ? '<button type="button" class="secondary sfToggle" data-id="' + f.id + '">' + (f.enabled ? 'Turn off' : 'Turn on') + '</button>' : '') +
+        '<button type="button" class="secondary sfDel" data-id="' + f.id + '">Delete</button></div></div></div>';
+    }).join('');
+    const byId = {};
+    items.forEach((f) => { byId[f.id] = f; });
+    host.querySelectorAll('.sfEdit').forEach((b) => b.addEventListener('click', async () => {
+      const f = byId[b.dataset.id];
+      const next = window.prompt('Fact for ' + f.artist + (f.title ? ' - ' + f.title : ''), f.body || '');
+      if (next === null) return;
+      try { await api('/song-facts/' + f.id, { method: 'PATCH', body: JSON.stringify({ body: next, enabled: true }) }); loadSongFacts(); }
+      catch (e) { $('sf_err').textContent = e.message; }
+    }));
+    host.querySelectorAll('.sfToggle').forEach((b) => b.addEventListener('click', async () => {
+      const f = byId[b.dataset.id];
+      try { await api('/song-facts/' + f.id, { method: 'PATCH', body: JSON.stringify({ body: f.body, enabled: !f.enabled }) }); loadSongFacts(); }
+      catch (e) { $('sf_err').textContent = e.message; }
+    }));
+    host.querySelectorAll('.sfDel').forEach((b) => b.addEventListener('click', async () => {
+      if (!window.confirm('Delete this fact? A new one may be written by AI the next time the song plays.')) return;
+      try { await api('/song-facts/' + b.dataset.id, { method: 'DELETE' }); loadSongFacts(); }
+      catch (e) { $('sf_err').textContent = e.message; }
+    }));
+  } catch (e) {
+    host.innerHTML = '<div class="empty">Could not load the facts: ' + escapeHtml(e.message) + '</div>';
+  }
+}
+
+document.addEventListener('click', async (ev) => {
+  if (ev.target && ev.target.id === 'sf_sync') {
+    const msg = $('sf_syncmsg');
+    msg.textContent = 'Syncing...';
+    try {
+      const r = await api('/song-facts/sync', { method: 'POST', body: JSON.stringify({ url: $('sf_sheet').value.trim() }) });
+      msg.textContent = r.message + ' Added ' + r.added + ', updated ' + r.updated + ', removed ' + r.removed + ', skipped ' + r.skipped + '. Press Save to keep this link.';
+      loadSongFacts();
+    } catch (e) { msg.textContent = 'Sync failed: ' + e.message; }
+    return;
+  }
+  if (!ev.target || ev.target.id !== 'sf_add') return;
+  const err = $('sf_err');
+  err.textContent = '';
+  try {
+    await api('/song-facts', { method: 'POST', body: JSON.stringify({ artist: $('sf_artist').value, title: $('sf_title').value, body: $('sf_body').value }) });
+    $('sf_artist').value = ''; $('sf_title').value = ''; $('sf_body').value = '';
+    loadSongFacts();
+  } catch (e) { err.textContent = e.message; }
+});
+
+// ---------- charts per station ----------
+// A chart reaches listeners only once it is assigned here. Assigning takes a snapshot, so
+// the app never depends on the dashboard being reachable.
+function stationChartsSectionHtml() {
+  return sectionHtml('Charts per station',
+    'Choose which charts show in each station view of the app.',
+    '<p class="hint">Charts are made on the dashboard Charts page. Nothing shows in the app until you tick a station here. Un-tick both to remove a chart from the app.</p>' +
+    '<div class="err" id="sc_err"></div>' +
+    '<div id="sc_list" class="items"><div class="empty">Loading…</div></div>');
+}
+
+async function loadStationCharts() {
+  const host = $('sc_list');
+  if (!host) return;
+  try {
+    const data = await api('/station-charts', { method: 'GET' });
+    $('sc_err').textContent = data.warning || '';
+    const items = data.items || [];
+    if (!items.length) { host.innerHTML = '<div class="empty">No charts yet. Generate one on the dashboard Charts page.</div>'; return; }
+    host.innerHTML = items.map((c) => {
+      const has = (s) => (c.stations || []).indexOf(s) !== -1;
+      return '<div class="item" data-id="' + escapeHtml(c.id) + '"><div class="lead"><div style="flex:1;min-width:0;">' +
+        '<div class="title">' + escapeHtml(c.title) + '</div>' +
+        '<div class="meta">' + c.count + ' songs - ' + escapeHtml(String(c.date || '').slice(0, 10)) + '</div></div>' +
+        '<div class="actions" style="gap:12px;align-items:center;">' +
+        '<label style="white-space:nowrap;"><input type="checkbox" class="scBox" data-id="' + escapeHtml(c.id) + '" data-st="radio"' + (has('radio') ? ' checked' : '') + '> Radio</label>' +
+        '<label style="white-space:nowrap;"><input type="checkbox" class="scBox" data-id="' + escapeHtml(c.id) + '" data-st="xtra"' + (has('xtra') ? ' checked' : '') + '> Xtra</label>' +
+        '</div></div></div>';
+    }).join('');
+    host.querySelectorAll('.scBox').forEach((b) => b.addEventListener('change', async () => {
+      const id = b.dataset.id;
+      const stations = Array.from(host.querySelectorAll('.scBox')).filter((x) => x.dataset.id === id && x.checked).map((x) => x.dataset.st);
+      $('sc_err').textContent = '';
+      try { await api('/station-charts/' + encodeURIComponent(id), { method: 'PUT', body: JSON.stringify({ stations: stations }) }); }
+      catch (e) { $('sc_err').textContent = e.message; loadStationCharts(); }
+    }));
+  } catch (e) {
+    host.innerHTML = '<div class="empty">Could not load the charts: ' + escapeHtml(e.message) + '</div>';
+  }
+}
+
 function setAllSections(open) {
   document.querySelectorAll('#controlsForm details.section').forEach((d) => { d.open = open; });
 }
@@ -986,6 +1137,7 @@ $('saveControlsBtn').addEventListener('click', async () => {
       return { name: (parts[0] || '').trim(), feedUrl: (parts.slice(1).join('|') || '').trim() };
     });
     next.funFacts = collectFunFacts();
+    next.songFacts = { autoGenerate: $('sf_auto').checked, maxPerHour: Number($('sf_hour').value), maxPerDay: Number($('sf_day').value), provider: $('sf_provider').value, sheetUrl: $('sf_sheet').value.trim() };
     controlsConfig = await api('/app-config', { method: 'PUT', body: JSON.stringify(next) });
     fillControls(controlsConfig);
     msg.textContent = 'Saved. Phones pick this up the next time the app opens. Anything left blank or invalid (for example a link that is not https) was reset to the default.';

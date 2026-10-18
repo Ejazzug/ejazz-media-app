@@ -15,6 +15,8 @@ import {
   useAudioPlayerStatus,
 } from 'expo-audio';
 import { AppState } from 'react-native';
+import { podcastLockScreenMetadata, stationLockScreenMetadata } from '@/lib/lockScreen';
+import { useOnAirShow } from '@/lib/stationExtras';
 import { useAppConfig } from '@/lib/appConfig';
 import { PodcastEpisode, PodcastShow } from '@/lib/podcasts';
 import {
@@ -321,6 +323,9 @@ export function PlayerProvider({ children }: PropsWithChildren) {
     };
   }, []);
 
+  // Programme on air on the station being listened to, for the lock screen / notification.
+  const onAirShow = useOnAirShow(selectedStationId === 'extra' ? 'xtra' : 'radio', playbackKind === 'radio');
+
   const hasActivatedLockScreenRef = useRef(false);
   useEffect(() => {
     if (playbackKind === 'podcast' && currentPodcast) {
@@ -328,12 +333,11 @@ export function PlayerProvider({ children }: PropsWithChildren) {
       hasActivatedLockScreenRef.current = true;
       player.setActiveForLockScreen(
         true,
-        {
-          title: currentPodcast.title,
-          artist: currentPodcast.showName,
-          albumTitle: 'EJazz Podcasts',
+        podcastLockScreenMetadata({
+          episodeTitle: currentPodcast.title,
+          showName: currentPodcast.showName,
           artworkUrl: currentPodcast.artworkUrl || undefined,
-        },
+        }),
         { showSeekForward: true, showSeekBackward: true },
       );
       return;
@@ -342,12 +346,14 @@ export function PlayerProvider({ children }: PropsWithChildren) {
     hasActivatedLockScreenRef.current = true;
     player.setActiveForLockScreen(
       true,
-      {
-        title: currentTrack?.title || activeStation.description || activeStation.name,
-        artist: currentTrack?.artist || activeStation.name,
-        albumTitle: activeStation.name,
+      stationLockScreenMetadata({
+        title: currentTrack?.title,
+        artist: currentTrack?.artist,
+        stationName: activeStation.name,
+        stationDescription: activeStation.description,
+        show: onAirShow.data,
         artworkUrl: currentTrack?.imageUrl || undefined,
-      },
+      }),
       { isLiveStream: true, showSeekForward: false, showSeekBackward: false },
     );
   }, [
@@ -357,6 +363,7 @@ export function PlayerProvider({ children }: PropsWithChildren) {
     currentTrack?.artist,
     currentTrack?.imageUrl,
     currentTrack?.title,
+    onAirShow.data,
     playbackKind,
     player,
     status.playing,

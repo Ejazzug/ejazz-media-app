@@ -1,5 +1,5 @@
 import { Router, type IRouter } from "express";
-import { eq } from "drizzle-orm";
+import { desc, eq } from "drizzle-orm";
 import {
   db,
   contentItemsTable,
@@ -9,7 +9,12 @@ import {
   hostsTable,
   insertHostSchema,
   updateHostSchema,
+  songFactsTable,
+  chartAssignmentsTable,
 } from "@workspace/db";
+import { artistKey, titleKey, listFacts } from "../lib/songFacts";
+import { isGroqConfigured } from "../lib/groq";
+import { syncSheet, lastSheetSync, validateSheetUrl } from "../lib/songFactsSheet";
 import { attemptContentPush } from "../lib/contentPush";
 import { normalizeShowInput, describeRepeat, slotsOf, daysOf } from "../lib/showSchedule";
 import { recentAutoFacts, runDaypart } from "../lib/funFacts";
@@ -332,6 +337,154 @@ router.post("/fun-facts/run", async (req, res) => {
       detail: err instanceof Error ? err.message : String(err),
     });
   }
+});
+
+// ---------------------------------------------------------------- song facts
+
+router.get("/song-facts", async (_req, res) => {
+  const config = await getAppConfig();
+  res.json({
+    items: await listFacts(),
+    autoGenerate: config.songFacts.autoGenerate,
+    geminiConfigured: isGeminiConfigured(),
+    groqConfigured: isGroqConfigured(),
+    lastSync: lastSheetSync(),
+  });
+});
+
+function factInput(body: unknown) {
+  const b = (body && typeof body === "object" ? body : {}) as Record<string, unknown>;
+  const str = (v: unknown, max: number) => (typeof v === "string" ? v.replace(/\s+/g, " ").trim().slice(0, max) : "");
+  return { artist: str(b.artist, 120), title: str(b.title, 120), body: str(b.body, 400), enabled: b.enabled !== false };
+}
+
+router.post("/song-facts", async (req, res) => {
+  const f = factInput(req.body);
+  const ak = artistKey(f.artist);
+  if (!ak || f.body.length < 10) {
+    res.status(400).json({ error: "An artist and a fact of at least 10 characters are required." });
+    return;
+  }
+  const tk = titleKey(f.title);
+  // A manual fact replaces whatever is there for this artist/song (an AI one or a "no fact" marker).
+  const [row] = await db
+    .insert(songFactsTable)
+    .values({ artistKey: ak, titleKey: tk, artist: f.artist, title: f.title, body: f.body, source: "manual", enabled: f.enabled })
+    .onConflictDoUpdate({
+      target: [songFactsTable.artistKey, songFactsTable.titleKey],
+      set: { artist: f.artist, title: f.title, body: f.body, source: "manual", enabled: f.enabled, updatedAt: new Date() },
+    })
+    .returning();
+  res.json(row);
+});
+
+/** Pull the linked Google Sheet now. The link comes from the form so it can be tested before saving. */
+router.post("/song-facts/sync", async (req, res) => {
+  const config = await getAppConfig();
+  const url = typeof req.body?.url === "string" && req.body.url.trim() ? req.body.url.trim() : config.songFacts.sheetUrl;
+  if (!url) {
+    res.status(400).json({ error: "Paste a Google Sheets link first." });
+    return;
+  }
+  const bad = validateSheetUrl(url);
+  if (bad) {
+    res.status(400).json({ error: bad });
+    return;
+  }
+  const result = await syncSheet(url);
+  res.status(result.ok ? 200 : 502).json(result.ok ? result : { error: result.message, ...result });
+});
+
+router.patch("/song-facts/:id", async (req, res) => {
+  const id = Number(req.params.id);
+  const f = factInput(req.body);
+  if (!Number.isInteger(id) || f.body.length < 10) {
+    res.status(400).json({ error: "A fact of at least 10 characters is required." });
+    return;
+  }
+  const [row] = await db
+    .update(songFactsTable)
+    .set({ body: f.body, enabled: f.enabled, source: "manual", updatedAt: new Date() })
+    .where(eq(songFactsTable.id, id))
+    .returning();
+  if (!row) {
+    res.status(404).json({ error: "Not found." });
+    return;
+  }
+  res.json(row);
+});
+
+router.delete("/song-facts/:id", async (req, res) => {
+  const id = Number(req.params.id);
+  if (!Number.isInteger(id)) {
+    res.status(400).json({ error: "Bad id." });
+    return;
+  }
+  await db.delete(songFactsTable).where(eq(songFactsTable.id, id));
+  res.json({ ok: true });
+});
+
+// ------------------------------------------------------- charts per station
+
+const DASHBOARD_CHARTS_URL = "http://127.0.0.1:9000/api/charts";
+
+/** The dashboard's charts, each with the stations it is currently assigned to. */
+router.get("/station-charts", async (_req, res) => {
+  const assigned = await db.select().from(chartAssignmentsTable).orderBy(desc(chartAssignmentsTable.assignedAt));
+  const map = new Map(assigned.map((a) => [a.chartId, a.stations]));
+  let source: { id: string; title: string; date: string; entries: unknown[] }[] = [];
+  let warning: string | null = null;
+  try {
+    const r = await fetch(DASHBOARD_CHARTS_URL, { signal: AbortSignal.timeout(8000) });
+    if (!r.ok) throw new Error("HTTP " + r.status);
+    const j = (await r.json()) as { items?: typeof source };
+    source = Array.isArray(j.items) ? j.items : [];
+  } catch (err) {
+    warning = "Could not read the dashboard's chart list (" + (err instanceof Error ? err.message : String(err)) + "). Showing assigned charts only.";
+  }
+  const seen = new Set<string>();
+  const items = source.map((c) => {
+    seen.add(c.id);
+    return { id: c.id, title: c.title, date: c.date, count: c.entries.length, stations: map.get(c.id) ?? [] };
+  });
+  // An assigned chart that the dashboard no longer lists must still be removable here.
+  for (const a of assigned) {
+    if (!seen.has(a.chartId)) items.push({ id: a.chartId, title: a.title, date: a.chartDate ?? "", count: a.entries.length, stations: a.stations });
+  }
+  res.json({ items, warning });
+});
+
+/** Assign a chart to Radio, Xtra, both or neither. [] un-assigns it. */
+router.put("/station-charts/:id", async (req, res) => {
+  const chartId = req.params.id;
+  const stations = Array.isArray(req.body?.stations)
+    ? [...new Set((req.body.stations as unknown[]).filter((s): s is "radio" | "xtra" => s === "radio" || s === "xtra"))]
+    : [];
+  if (stations.length === 0) {
+    await db.delete(chartAssignmentsTable).where(eq(chartAssignmentsTable.chartId, chartId));
+    res.json({ id: chartId, stations: [] });
+    return;
+  }
+  // Snapshot from the dashboard now, so the app never depends on the dashboard being up.
+  let chart: { id: string; title: string; date: string; entries: { position: number; title: string; artist: string }[] } | undefined;
+  try {
+    const r = await fetch(DASHBOARD_CHARTS_URL, { signal: AbortSignal.timeout(8000) });
+    const j = (await r.json()) as { items?: NonNullable<typeof chart>[] };
+    chart = (j.items ?? []).find((c) => c.id === chartId);
+  } catch {
+    res.status(502).json({ error: "Could not reach the dashboard to read this chart." });
+    return;
+  }
+  if (!chart) {
+    res.status(404).json({ error: "That chart no longer exists on the dashboard." });
+    return;
+  }
+  const entries = chart.entries.map((e) => ({ position: Number(e.position), title: String(e.title), artist: String(e.artist) }));
+  await db
+    .insert(chartAssignmentsTable)
+    .values({ chartId, title: chart.title, chartDate: chart.date, entries, stations })
+    .onConflictDoUpdate({ target: chartAssignmentsTable.chartId, set: { title: chart.title, chartDate: chart.date, entries, stations, assignedAt: new Date() } });
+  res.json({ id: chartId, stations });
 });
 
 export default router;

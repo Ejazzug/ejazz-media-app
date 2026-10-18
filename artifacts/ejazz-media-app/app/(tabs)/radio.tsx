@@ -19,6 +19,7 @@ import {
   useExtraSongSearch,
   useSongRequest,
 } from '@/lib/radio';
+import { useSongFact, useStationCharts } from '@/lib/stationExtras';
 
 type RadioView = 'radio' | 'extra' | 'podcasts';
 
@@ -81,6 +82,10 @@ export default function RadioScreen() {
   const xtraSchedule = useExtraSchedule(viewMode === 'extra' && features.schedule);
   const upcoming = (xtraSchedule.data ?? []).slice(0, 5);
   const extraRequest = useExtraSongRequest();
+  // "Clock this..." fact for the song on air, and the charts assigned to this station.
+  const songFact = useSongFact(viewingCurrentTrack?.artist, viewingCurrentTrack?.title);
+  const stationCharts = useStationCharts(viewMode === 'extra' ? 'xtra' : 'radio');
+  const charts = viewMode === 'podcasts' ? [] : (stationCharts.data ?? []);
 
   React.useEffect(() => {
     const timeout = setTimeout(() => setDebouncedExtraSearch(extraSearch.trim()), 500);
@@ -242,6 +247,13 @@ export default function RadioScreen() {
           )}
         </View>
 
+        {!isPodcasts && songFact.data ? (
+          <View style={styles.factCard}>
+            <Text style={styles.factKicker}>CLOCK THIS...</Text>
+            <Text style={styles.factText}>{songFact.data.body}</Text>
+          </View>
+        ) : null}
+
         {!isRadio && viewingNextTrack && (
           <View style={styles.nextTrackSection}>
             <Text style={styles.sectionEyebrow}>NEXT UP</Text>
@@ -281,6 +293,22 @@ export default function RadioScreen() {
             })}
           </View>
         )}
+
+        {charts.map((chart) => (
+          <View key={chart.id} style={styles.chartSection}>
+            <Text style={styles.sectionEyebrow}>CHART</Text>
+            <Text style={styles.chartTitle}>{chart.title}</Text>
+            {chart.entries.slice(0, 10).map((entry) => (
+              <View key={`${chart.id}-${entry.position}`} style={styles.chartRow}>
+                <Text style={styles.chartPos}>{entry.position}</Text>
+                <View style={styles.historyCopy}>
+                  <Text numberOfLines={1} style={styles.historyTitle}>{entry.title}</Text>
+                  {!!entry.artist && <Text numberOfLines={1} style={styles.historyArtist}>{entry.artist}</Text>}
+                </View>
+              </View>
+            ))}
+          </View>
+        ))}
 
         {viewingPreviousTracks.length > 0 && (
           <View style={styles.historySection}>
@@ -546,6 +574,13 @@ const styles = StyleSheet.create({
   metadataLoading: { flexDirection: 'row', alignItems: 'center', gap: 9, marginTop: 10 },
   metadataRetry: { alignSelf: 'flex-start', marginTop: 12, borderBottomWidth: 1, borderBottomColor: '#E43B48' },
   metadataRetryText: { color: '#FF6B6B', fontSize: 10, fontWeight: '700', letterSpacing: 0.8 },
+  factCard: { marginHorizontal: 20, marginTop: 16, padding: 14, borderLeftWidth: 2, borderLeftColor: '#FF6B6B', backgroundColor: '#0D2A57' },
+  factKicker: { color: '#FF6B6B', fontSize: 10, fontWeight: '700', letterSpacing: 1.5, marginBottom: 6 },
+  factText: { color: '#F7F9FC', fontSize: 13, lineHeight: 19 },
+  chartSection: { marginHorizontal: 20, marginTop: 26, borderTopWidth: 1, borderTopColor: '#204570', paddingTop: 18 },
+  chartTitle: { color: '#F7F9FC', fontSize: 18, fontWeight: '700', letterSpacing: -0.4, marginBottom: 8 },
+  chartRow: { flexDirection: 'row', alignItems: 'center', minHeight: 48, borderBottomWidth: 1, borderBottomColor: '#17365E', paddingVertical: 6 },
+  chartPos: { color: '#FF6B6B', fontSize: 16, fontWeight: '700', width: 30 },
   scheduleSection: { marginHorizontal: 20, marginTop: 22 },
   scheduleRow: { flexDirection: 'row', alignItems: 'center', gap: 12, paddingVertical: 9 },
   scheduleWhen: { color: '#7890AE', fontSize: 12, fontWeight: '700', width: 104 },
