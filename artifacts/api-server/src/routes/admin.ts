@@ -11,13 +11,17 @@ import {
   updateHostSchema,
   songFactsTable,
   chartAssignmentsTable,
+  countdownChartStationsTable,
 } from "@workspace/db";
+import {
+  fetchDashboardCountdowns, snapshotCountdown, clearHistory, historyStats, type DashboardCountdown,
+} from "../lib/countdownCharts";
 import { artistKey, titleKey, listFacts } from "../lib/songFacts";
 import { isGroqConfigured } from "../lib/groq";
 import { syncSheet, lastSheetSync, validateSheetUrl } from "../lib/songFactsSheet";
 import { attemptContentPush } from "../lib/contentPush";
 import { cleanHttpUrl } from "../lib/linkText";
-import { normalizeShowInput, describeRepeat, slotsOf, daysOf } from "../lib/showSchedule";
+import { normalizeShowInput, describeRepeat, slotsOf, daysOf, todayInEat } from "../lib/showSchedule";
 import { recentAutoFacts, runDaypart } from "../lib/funFacts";
 import { getAppConfig, saveAppConfig } from "../lib/appConfig";
 import { signSession, requireAdmin, ADMIN_COOKIE } from "../middlewares/adminAuth";
@@ -524,6 +528,83 @@ router.put("/station-charts/:id", async (req, res) => {
     .values({ chartId, title: chart.title, chartDate: chart.date, entries, stations })
     .onConflictDoUpdate({ target: chartAssignmentsTable.chartId, set: { title: chart.title, chartDate: chart.date, entries, stations, assignedAt: new Date() } });
   res.json({ id: chartId, stations });
+});
+
+// ------------------------------------------------- countdown charts per station
+// The dashboard's SAVED countdowns (the /countdown picker), shown on a station's Radio
+// screen. Only assigned ones are snapshotted, so history costs nothing for the rest.
+
+/** Every saved countdown, with its stations, what is on air now and what history is stored. */
+router.get("/countdown-charts", async (_req, res) => {
+  const assigned = await db.select().from(countdownChartStationsTable);
+  const stationsOf = new Map(assigned.map((a) => [a.countdownId, a.stations]));
+  const stats = new Map((await historyStats()).map((s) => [s.countdownId, s]));
+  let dash: DashboardCountdown[] = [];
+  let warning: string | null = null;
+  try {
+    dash = await fetchDashboardCountdowns();
+  } catch (err) {
+    warning = "Could not read the dashboard's countdowns (" + (err instanceof Error ? err.message : String(err)) + "). Showing assigned ones only.";
+  }
+  const seen = new Set<string>();
+  const rowFor = (id: string, name: string, onAir: number, building: boolean, error?: string) => {
+    const s = stats.get(id);
+    return {
+      id, name, onAir, building, error: error ?? null,
+      stations: stationsOf.get(id) ?? [],
+      savedDays: s?.days ?? 0, firstDay: s?.first ?? null, lastDay: s?.last ?? null, bytes: s?.bytes ?? 0,
+    };
+  };
+  const items = dash.map((c) => { seen.add(c.id); return rowFor(c.id, c.name, c.entries.length, c.building, c.error); });
+  // An assigned countdown the dashboard no longer lists must still be removable here.
+  for (const a of assigned) if (!seen.has(a.countdownId)) items.push(rowFor(a.countdownId, a.name, 0, false));
+  const all = [...stats.values()];
+  res.json({
+    items, warning,
+    totals: { savedDays: all.reduce((n, s) => n + s.days, 0), bytes: all.reduce((n, s) => n + s.bytes, 0) },
+  });
+});
+
+/** Put a countdown on Radio, Xtra, both or neither. [] takes it off the app (saved days are kept). */
+router.put("/countdown-charts/:id", async (req, res) => {
+  const countdownId = req.params.id;
+  const stations = Array.isArray(req.body?.stations)
+    ? [...new Set((req.body.stations as unknown[]).filter((s): s is "radio" | "xtra" => s === "radio" || s === "xtra"))]
+    : [];
+  if (stations.length === 0) {
+    await db.delete(countdownChartStationsTable).where(eq(countdownChartStationsTable.countdownId, countdownId));
+    res.json({ id: countdownId, stations: [] });
+    return;
+  }
+  let dash: DashboardCountdown[];
+  try {
+    dash = await fetchDashboardCountdowns();
+  } catch {
+    res.status(502).json({ error: "Could not reach the dashboard to read this countdown." });
+    return;
+  }
+  const c = dash.find((d) => d.id === countdownId);
+  if (!c) {
+    res.status(404).json({ error: "That countdown no longer exists on the dashboard." });
+    return;
+  }
+  await db
+    .insert(countdownChartStationsTable)
+    .values({ countdownId, name: c.name, stations })
+    .onConflictDoUpdate({ target: countdownChartStationsTable.countdownId, set: { name: c.name, stations } });
+  // Save today's chart now so the app has something to show straight away.
+  const snapshot = await snapshotCountdown(c, todayInEat().date);
+  res.json({ id: countdownId, stations, snapshot });
+});
+
+/** Clear saved history for one countdown (?countdown=id) or all. Today's chart is kept; history restarts from today. */
+router.delete("/countdown-charts/history", async (req, res) => {
+  if (req.query.confirm !== "yes") {
+    res.status(400).json({ error: "Add ?confirm=yes to clear saved chart history." });
+    return;
+  }
+  const countdownId = typeof req.query.countdown === "string" && req.query.countdown ? req.query.countdown : undefined;
+  res.json(await clearHistory(countdownId));
 });
 
 export default router;

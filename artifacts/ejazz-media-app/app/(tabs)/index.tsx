@@ -1,5 +1,4 @@
 import { Feather } from '@expo/vector-icons';
-import { Image } from 'expo-image';
 import { LinearGradient } from 'expo-linear-gradient';
 import { useRouter } from 'expo-router';
 import React from 'react';
@@ -10,28 +9,13 @@ import { usePlayer } from '@/context/PlayerContext';
 import { useColors } from '@/hooks/useColors';
 import { useFeaturedNews, useLatestNews } from '@/lib/news';
 import { usePulseContent } from '@/lib/pulse';
-import { useShows, classifyLineup, formatShowTime, showStationFor, type Show } from '@/lib/shows';
+import { useShows, classifyLineup, showStationFor } from '@/lib/shows';
+import { LineupRow, ShowLineupCard } from '@/components/LineupCard';
 import { FreshEjazzSection } from '@/components/FreshEjazzSection';
 import { ContinueEjazzSection } from '@/components/ContinueEjazzSection';
 import { TheTeaSection } from '@/components/TheTeaSection';
 import { FeaturedCard, PromoBanner, SponsorSlot, UpdateBanner } from '@/components/RemoteControls';
 import { useAppConfig } from '@/lib/appConfig';
-
-function LineupCard({ show, badge, live }: { show: Show; badge: string; live?: boolean }) {
-  return (
-    <View style={[styles.lineupCard, show.imageUrl ? styles.lineupCardRow : null]}>
-      {show.imageUrl ? (
-        <Image source={show.imageUrl} contentFit="cover" style={styles.lineupArtwork} />
-      ) : null}
-      <View style={styles.lineupCopy}>
-        <Text style={live ? styles.lineupBadgeLive : styles.lineupBadge}>{badge}</Text>
-        <Text style={styles.lineupShowName}>{show.name}</Text>
-        {show.hostName ? <Text style={styles.lineupHost}>{show.hostName}</Text> : null}
-        <Text style={styles.lineupTime}>{formatShowTime(show.startMinute, show.endMinute)}</Text>
-      </View>
-    </View>
-  );
-}
 
 export default function HomeScreen() {
   const colors = useColors();
@@ -46,7 +30,13 @@ export default function HomeScreen() {
     ...(latest.data?.pages.flatMap((page) => page.stories) ?? []),
   ].filter((story, index, all) => all.findIndex((item) => item.id === story.id) === index);
   const pulseContent = usePulseContent();
-  const pulseItems = (pulseContent.data ?? []).filter((item) => item.type !== 'poll');
+  // "Clock it" is for the fun fact only, and only ever one: the newest live fact. To change what
+  // it says, publish a newer fact in the Control Room. Announcements, quizzes and alerts reach
+  // people as notifications and no longer appear here.
+  const funFact =
+    (pulseContent.data ?? [])
+      .filter((item) => item.type === 'fact')
+      .sort((a, b) => Date.parse(b.createdAt) - Date.parse(a.createdAt))[0] ?? null;
   const showsQuery = useShows();
   const lineup = classifyLineup(showsQuery.data ?? [], new Date(), showStationFor(activeStation.id));
   const handleSharePulse = (item: { title: string; body: string | null }) => {
@@ -112,24 +102,22 @@ export default function HomeScreen() {
 
         {/* <FreshEjazzSection /> - temporarily hidden until backend is ready; re-enable for a future release */}
 
-        {features.pulse && pulseItems.length > 0 ? (
+        {features.pulse && funFact ? (
           <>
             <View style={styles.sectionHeading}>
               <Text style={styles.sectionTitle}>EJazz Pulse</Text>
             </View>
             <View style={styles.pulseList}>
-              {pulseItems.map((item) => (
-                <View key={item.id} style={styles.pulseCard}>
-                  <Text style={styles.pulseCardKicker}>CLOCK IT</Text>
-                  <Text style={styles.pulseCardTitle}>{item.title}</Text>
-                  {item.body ? <Text style={styles.pulseCardBody}>{item.body}</Text> : null}
-                  {features.share ? (
-                    <Pressable onPress={() => handleSharePulse(item)} hitSlop={8} style={styles.pulseShareBtn}>
-                      <Text style={styles.pulseShareLabel}>SHARE THE EJAZZ</Text>
-                    </Pressable>
-                  ) : null}
-                </View>
-              ))}
+              <View style={styles.pulseCard}>
+                <Text style={styles.pulseCardKicker}>CLOCK IT</Text>
+                <Text style={styles.pulseCardTitle}>{funFact.title}</Text>
+                {funFact.body ? <Text style={styles.pulseCardBody}>{funFact.body}</Text> : null}
+                {features.share ? (
+                  <Pressable onPress={() => handleSharePulse(funFact)} hitSlop={8} style={styles.pulseShareBtn}>
+                    <Text style={styles.pulseShareLabel}>SHARE THE EJAZZ</Text>
+                  </Pressable>
+                ) : null}
+              </View>
             </View>
           </>
         ) : null}
@@ -141,13 +129,13 @@ export default function HomeScreen() {
             <View style={styles.sectionHeading}>
               <Text style={styles.sectionTitle}>Coming Up</Text>
             </View>
-            <View style={styles.lineupList}>
-              {lineup.now ? <LineupCard show={lineup.now} badge="LIVE NOW" live /> : null}
-              {lineup.next ? <LineupCard show={lineup.next} badge="NEXT" /> : null}
+            <LineupRow>
+              {lineup.now ? <ShowLineupCard show={lineup.now} badge="LIVE NOW" live /> : null}
+              {lineup.next ? <ShowLineupCard show={lineup.next} badge="NEXT" /> : null}
               {lineup.later.map((show) => (
-                <LineupCard key={show.id} show={show} badge="LATER" />
+                <ShowLineupCard key={show.id} show={show} badge="LATER" />
               ))}
-            </View>
+            </LineupRow>
           </>
         ) : null}
 
@@ -237,21 +225,4 @@ const styles = StyleSheet.create({
   pulseCardBody: { color: '#A7B7CC', fontSize: 13, lineHeight: 19 },
   pulseShareBtn: { alignSelf: 'flex-start', marginTop: 4 },
   pulseShareLabel: { color: '#FF6B6B', fontSize: 10, fontWeight: '700', letterSpacing: 1 },
-  lineupList: { gap: 12, marginTop: 4 },
-  lineupCardRow: { flexDirection: 'row', alignItems: 'center', gap: 12 },
-  lineupCopy: { flex: 1 },
-  lineupArtwork: { width: 54, height: 54, borderRadius: 8, backgroundColor: '#123363' },
-  lineupCard: {
-    padding: 16,
-    borderRadius: 14,
-    borderWidth: 1,
-    borderColor: '#204570',
-    backgroundColor: 'rgba(255,255,255,0.04)',
-    gap: 4,
-  },
-  lineupBadgeLive: { color: '#4ADE80', fontSize: 10, fontWeight: '700', letterSpacing: 1.5 },
-  lineupBadge: { color: '#7890AE', fontSize: 10, fontWeight: '700', letterSpacing: 1.5 },
-  lineupShowName: { color: '#F7F9FC', fontSize: 16, fontWeight: '700' },
-  lineupHost: { color: '#A7B7CC', fontSize: 13 },
-  lineupTime: { color: '#7890AE', fontSize: 12, fontWeight: '600' },
 });

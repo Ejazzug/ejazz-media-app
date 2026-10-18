@@ -31,7 +31,10 @@ export type AppConfig = {
     songRequests: boolean;
     share: boolean;
     pulse: boolean;
+    /** "Coming Up" row on Home. */
     schedule: boolean;
+    /** "Coming Up" row on the Radio screen (switched separately from Home). */
+    scheduleRadio: boolean;
   };
   songRequests: { radioEnabled: boolean; xtraEnabled: boolean; closedMessage: string };
   update: { minVersion: string; latestVersion: string; message: string; storeUrl: string };
@@ -80,7 +83,7 @@ export type AppConfig = {
 };
 
 export const DEFAULT_APP_CONFIG: AppConfig = {
-  features: { news: true, podcasts: true, songRequests: true, share: true, pulse: true, schedule: true },
+  features: { news: true, podcasts: true, songRequests: true, share: true, pulse: true, schedule: true, scheduleRadio: true },
   songRequests: {
     radioEnabled: true,
     xtraEnabled: true,

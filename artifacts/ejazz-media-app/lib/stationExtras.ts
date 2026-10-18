@@ -41,12 +41,35 @@ export function useSongFact(artist: string | undefined, title: string | undefine
   });
 }
 
+export type StationChartEntry = { position: number; title: string; artist: string };
+
 export type StationChart = {
   id: string;
   title: string;
   date: string | null;
-  entries: { position: number; title: string; artist: string }[];
+  entries: StationChartEntry[];
+  /** Set on saved countdowns (today's chart); absent on charts generated on the dashboard. */
+  kind?: 'countdown';
+  countdownId?: string;
+  /** Earlier days the operator allows, newest first (YYYY-MM-DD). Empty/absent = today only. */
+  pastDates?: string[];
 };
+
+/** A countdown's chart on an earlier day. Only requested when a date chip is tapped. */
+export function usePastChart(station: 'radio' | 'xtra', countdownId: string | undefined, date: string | null) {
+  return useQuery({
+    queryKey: ['ejazz-past-chart', station, countdownId, date],
+    queryFn: async (): Promise<StationChartEntry[]> => {
+      const data = (await getJson('/api/station-charts/past', { station, countdown: countdownId ?? '', date: date ?? '' })) as {
+        entries?: StationChartEntry[];
+      };
+      return Array.isArray(data?.entries) ? data.entries : [];
+    },
+    enabled: isPulseConfigured() && Boolean(countdownId) && Boolean(date),
+    staleTime: 60 * 60 * 1000, // a past day never changes
+    retry: 0,
+  });
+}
 
 /** Charts the operator assigned to this station in the Control Room. */
 export function useStationCharts(station: 'radio' | 'xtra') {

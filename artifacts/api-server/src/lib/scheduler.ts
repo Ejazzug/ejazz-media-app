@@ -3,6 +3,7 @@ import { db, contentItemsTable } from "@workspace/db";
 import { attemptContentPush } from "./contentPush";
 import { runDueFunFacts } from "./funFacts";
 import { syncSheetIfDue } from "./songFactsSheet";
+import { syncCountdownChartsIfDue } from "./countdownCharts";
 import { logger } from "./logger";
 
 const TICK_MS = 60_000;
@@ -53,6 +54,13 @@ async function tick(): Promise<void> {
     }
   } catch (error) {
     logger.error({ err: error }, "Fun fact tick failed");
+  }
+
+  // Countdown chart snapshots: every 15 minutes at most, and only when a countdown is assigned.
+  try {
+    await syncCountdownChartsIfDue();
+  } catch (error) {
+    logger.error({ err: error }, "Countdown chart sync failed");
   }
 
   // Hourly re-sync of the linked facts sheet (no-op when none is linked).

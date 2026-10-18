@@ -1,5 +1,6 @@
 import { eq } from "drizzle-orm";
 import { db, appSettingsTable } from "@workspace/db";
+import { DEFAULT_CHARTS_CONFIG, normalizeChartsConfig, type ChartsConfig } from "./countdownChartsCore";
 
 /**
  * Remote app configuration ("app controls").
@@ -57,7 +58,10 @@ export type AppConfig = {
     songRequests: boolean;
     share: boolean;
     pulse: boolean;
+    /** "Coming Up" row on Home. */
     schedule: boolean;
+    /** "Coming Up" row on the Radio screen, switched separately from Home. */
+    scheduleRadio: boolean;
   };
   songRequests: { radioEnabled: boolean; xtraEnabled: boolean; closedMessage: string };
   update: {
@@ -119,10 +123,16 @@ export type AppConfig = {
   funFacts: FunFactsConfig;
   /** Operator-only, stripped by toPublicConfig() like funFacts. */
   songFacts: SongFactsConfig;
+  /**
+   * Operator-only, stripped by toPublicConfig(): how far back listeners may view countdown
+   * charts and how long saved days are kept. The app is told the result per chart instead.
+   */
+  charts: ChartsConfig;
 };
 
 export const DEFAULT_APP_CONFIG: AppConfig = {
-  features: { news: true, podcasts: true, songRequests: true, share: true, pulse: true, schedule: true },
+  features: { news: true, podcasts: true, songRequests: true, share: true, pulse: true, schedule: true, scheduleRadio: true },
+  charts: DEFAULT_CHARTS_CONFIG,
   songRequests: { radioEnabled: true, xtraEnabled: true, closedMessage: "Song requests are closed right now. Try again later." },
   update: { minVersion: "", latestVersion: "", message: "A new version of EJazz Media is available.", storeUrl: "" },
   maintenance: { enabled: false, title: "We'll be right back", message: "EJazz Media is being updated. Please check back shortly." },
@@ -332,6 +342,7 @@ export function normalizeAppConfig(input: unknown): AppConfig {
       share: bool(f.share, d.features.share),
       pulse: bool(f.pulse, d.features.pulse),
       schedule: bool(f.schedule, d.features.schedule),
+      scheduleRadio: bool(f.scheduleRadio, d.features.scheduleRadio),
     },
     songRequests: {
       radioEnabled: bool(sr.radioEnabled, d.songRequests.radioEnabled),
@@ -395,6 +406,7 @@ export function normalizeAppConfig(input: unknown): AppConfig {
     podcasts: podcasts(src.podcasts),
     funFacts: funFacts(src.funFacts),
     songFacts: songFactsConfig(src.songFacts),
+    charts: normalizeChartsConfig(src.charts),
   };
 }
 
@@ -413,8 +425,8 @@ function inWindow(startAt: string, endAt: string, now: number): boolean {
  * operator-only sections -- funFacts is scheduling detail the app has no use for, and
  * publishing it would hand every phone the station's posting timetable.
  */
-export function toPublicConfig(config: AppConfig, now: number = Date.now()): Omit<AppConfig, "funFacts" | "songFacts"> {
-  const { funFacts: _operatorOnly, songFacts: _operatorOnly2, ...publicConfig } = config;
+export function toPublicConfig(config: AppConfig, now: number = Date.now()): Omit<AppConfig, "funFacts" | "songFacts" | "charts"> {
+  const { funFacts: _operatorOnly, songFacts: _operatorOnly2, charts: _operatorOnly3, ...publicConfig } = config;
   return {
     ...publicConfig,
     featured: { ...config.featured, enabled: config.featured.enabled && inWindow(config.featured.startAt, config.featured.endAt, now) },

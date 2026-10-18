@@ -785,8 +785,9 @@ const CONTROL_SECTIONS = [
     ['features.podcasts', 'bool', 'Podcasts'],
     ['features.songRequests', 'bool', 'Song requests (both stations)'],
     ['features.share', 'bool', 'Share buttons'],
-    ['features.pulse', 'bool', 'EJazz Pulse cards on Home'],
-    ['features.schedule', 'bool', '"Coming Up" programme on Home'],
+    ['features.pulse', 'bool', 'Fun fact card on Home (Clock it)'],
+    ['features.schedule', 'bool', 'Coming Up row on Home'],
+    ['features.scheduleRadio', 'bool', 'Coming Up row on the Radio screen'],
   ] },
   { title: 'Song requests', hint: 'Open or close requests per station.', fields: [
     ['songRequests.radioEnabled', 'bool', 'EJazz Radio requests open'],
@@ -889,6 +890,7 @@ function renderControls() {
       '<div class="field"><textarea id="cfg_podcasts" rows="4" placeholder="The Xtreme BPM | https://anchor.fm/s/281a6d78/podcast/rss"></textarea></div>') +
     funFactsSectionHtml() +
     songFactsSectionHtml() +
+    countdownChartsSectionHtml() +
     stationChartsSectionHtml();
 }
 
@@ -940,6 +942,12 @@ function fillControls(cfg) {
   $('sf_provider').value = sfc.provider === 'groq' || sfc.provider === 'none' ? sfc.provider : 'gemini';
   $('sf_sheet').value = sfc.sheetUrl || '';
   loadSongFacts();
+  const cc = cfg.charts || {};
+  $('cfg_cc_mode').value = ['week', 'month', 'custom'].indexOf(cc.pastMode) !== -1 ? cc.pastMode : 'off';
+  $('cfg_cc_from').value = cc.customFrom || '';
+  $('cfg_cc_keep').value = cc.keepDays == null ? 365 : cc.keepDays;
+  ccToggleCustom();
+  loadCountdownCharts();
   loadStationCharts();
 }
 
@@ -1119,6 +1127,81 @@ document.addEventListener('click', async (ev) => {
   } catch (e) { err.textContent = e.message; }
 });
 
+// ---------- countdown charts ----------
+// The dashboard saved countdowns, shown on a station Radio screen. Ticking a station saves
+// that countdown chart every day from then on; the past-charts settings below are saved
+// with the page Save button, the ticks and the Clear button act immediately.
+function countdownChartsSectionHtml() {
+  return sectionHtml('Countdown charts',
+    'Show a saved countdown on a station Radio screen, with optional past days.',
+    '<p class="hint">These are the countdowns saved on the dashboard Countdown page. Tick Radio and/or Xtra to show that countdown chart (the songs on air today) in the app. ' +
+    'History is saved from the moment you tick it, so past days only exist from then on.</p>' +
+    '<div class="err" id="cc_err"></div>' +
+    '<div id="cc_list" class="items"><div class="empty">Loading…</div></div>' +
+    '<div class="field" style="margin-top:14px;"><label for="cfg_cc_mode">Past charts in the app</label><select id="cfg_cc_mode">' +
+    '<option value="off">Today only</option>' +
+    '<option value="week">Up to a week back</option>' +
+    '<option value="month">Up to a month back</option>' +
+    '<option value="custom">Back to a date I choose</option></select></div>' +
+    '<div class="field" id="cc_customWrap" style="display:none;"><label for="cfg_cc_from">Earliest date listeners can view</label><input type="date" id="cfg_cc_from"></div>' +
+    '<div class="field"><label for="cfg_cc_keep">Keep saved days for (days)</label><input type="number" id="cfg_cc_keep" min="7" max="3650">' +
+    '<p class="hint" style="margin-top:4px;">Older days are deleted automatically. A day is about half a kilobyte, and a day where the chart did not change is not stored again.</p></div>' +
+    '<p class="hint" id="cc_stats"></p>' +
+    '<div class="actions"><button type="button" class="secondary" id="cc_clear" style="width:auto;">Clear saved history</button></div>');
+}
+
+function ccFmtBytes(n) { return n < 1024 ? n + ' B' : (n / 1024).toFixed(1) + ' KB'; }
+function ccToggleCustom() { $('cc_customWrap').style.display = $('cfg_cc_mode').value === 'custom' ? '' : 'none'; }
+
+async function loadCountdownCharts() {
+  const host = $('cc_list');
+  if (!host) return;
+  try {
+    const data = await api('/countdown-charts', { method: 'GET' });
+    $('cc_err').textContent = data.warning || '';
+    const t = data.totals || { savedDays: 0, bytes: 0 };
+    $('cc_stats').textContent = 'Stored now: ' + t.savedDays + ' saved chart day(s), ' + ccFmtBytes(t.bytes) + ' in total.';
+    const items = data.items || [];
+    if (!items.length) { host.innerHTML = '<div class="empty">No saved countdowns yet. Create one on the dashboard Countdown page.</div>'; return; }
+    host.innerHTML = items.map((c) => {
+      const has = (s) => (c.stations || []).indexOf(s) !== -1;
+      const onAir = c.building ? 'being rebuilt right now' : (c.onAir ? c.onAir + ' songs on air' : 'nothing built yet');
+      const saved = c.savedDays ? c.savedDays + ' day(s) saved since ' + c.firstDay : 'no history yet';
+      return '<div class="item"><div class="lead"><div style="flex:1;min-width:0;">' +
+        '<div class="title">' + escapeHtml(c.name) + '</div>' +
+        '<div class="meta">' + escapeHtml(onAir) + ' - ' + escapeHtml(saved) + (c.error ? ' - ' + escapeHtml(c.error) : '') + '</div></div>' +
+        '<div class="actions" style="gap:12px;align-items:center;">' +
+        '<label style="white-space:nowrap;"><input type="checkbox" class="ccBox" data-id="' + escapeHtml(c.id) + '" data-st="radio"' + (has('radio') ? ' checked' : '') + '> Radio</label>' +
+        '<label style="white-space:nowrap;"><input type="checkbox" class="ccBox" data-id="' + escapeHtml(c.id) + '" data-st="xtra"' + (has('xtra') ? ' checked' : '') + '> Xtra</label>' +
+        '</div></div></div>';
+    }).join('');
+    host.querySelectorAll('.ccBox').forEach((b) => b.addEventListener('change', async () => {
+      const id = b.dataset.id;
+      const stations = Array.from(host.querySelectorAll('.ccBox')).filter((x) => x.dataset.id === id && x.checked).map((x) => x.dataset.st);
+      $('cc_err').textContent = '';
+      try { await api('/countdown-charts/' + encodeURIComponent(id), { method: 'PUT', body: JSON.stringify({ stations: stations }) }); loadCountdownCharts(); }
+      catch (e) { $('cc_err').textContent = e.message; loadCountdownCharts(); }
+    }));
+  } catch (e) {
+    host.innerHTML = '<div class="empty">Could not load the countdowns: ' + escapeHtml(e.message) + '</div>';
+  }
+}
+
+document.addEventListener('change', (ev) => {
+  if (ev.target && ev.target.id === 'cfg_cc_mode') ccToggleCustom();
+});
+
+document.addEventListener('click', async (ev) => {
+  if (!ev.target || ev.target.id !== 'cc_clear') return;
+  if (!confirm('Clear all saved chart history? Today chart stays on the app, and history starts again from today. This cannot be undone.')) return;
+  $('cc_err').textContent = '';
+  try {
+    const r = await api('/countdown-charts/history?confirm=yes', { method: 'DELETE' });
+    $('cc_err').textContent = 'Cleared ' + r.removed + ' saved day(s).';
+    loadCountdownCharts();
+  } catch (e) { $('cc_err').textContent = 'Could not clear: ' + e.message; }
+});
+
 // ---------- charts per station ----------
 // A chart reaches listeners only once it is assigned here. Assigning takes a snapshot, so
 // the app never depends on the dashboard being reachable.
@@ -1197,6 +1280,7 @@ $('saveControlsBtn').addEventListener('click', async () => {
     });
     next.funFacts = collectFunFacts();
     next.songFacts = { autoGenerate: $('sf_auto').checked, maxPerHour: Number($('sf_hour').value), maxPerDay: Number($('sf_day').value), provider: $('sf_provider').value, sheetUrl: $('sf_sheet').value.trim() };
+    next.charts = { pastMode: $('cfg_cc_mode').value, customFrom: $('cfg_cc_from').value, keepDays: Number($('cfg_cc_keep').value) };
     controlsConfig = await api('/app-config', { method: 'PUT', body: JSON.stringify(next) });
     fillControls(controlsConfig);
     msg.textContent = 'Saved. Phones pick this up the next time the app opens. Anything left blank or invalid (for example a link that is not https) was reset to the default.';

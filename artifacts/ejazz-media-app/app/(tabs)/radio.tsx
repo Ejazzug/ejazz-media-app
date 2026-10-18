@@ -3,7 +3,7 @@ import { Image } from 'expo-image';
 import { LinearGradient } from 'expo-linear-gradient';
 import { useLocalSearchParams } from 'expo-router';
 import React from 'react';
-import { ActivityIndicator, Pressable, Share, StyleSheet, Text, TextInput, View } from 'react-native';
+import { ActivityIndicator, Pressable, ScrollView, Share, StyleSheet, Text, TextInput, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { MINI_PLAYER_CLEARANCE, PlayButton, PlayingEqualizer } from '@/components/MediaComponents';
 import { KeyboardAwareScrollViewCompat } from '@/components/KeyboardAwareScrollViewCompat';
@@ -19,9 +19,77 @@ import {
   useExtraSongSearch,
   useSongRequest,
 } from '@/lib/radio';
-import { useSongFact, useStationCharts } from '@/lib/stationExtras';
+import { usePastChart, useSongFact, useStationCharts, type StationChart } from '@/lib/stationExtras';
+import { classifyLineup, useShows } from '@/lib/shows';
+import { LineupCard, LineupRow, ShowLineupCard } from '@/components/LineupCard';
 
 type RadioView = 'radio' | 'extra' | 'podcasts';
+
+const DAY_NAMES = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
+const MONTH_NAMES = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
+
+/** "Fri 17 Oct" from a YYYY-MM-DD calendar date (UTC arithmetic: it is a date, not an instant). */
+function formatChartDay(date: string): string {
+  const d = new Date(`${date}T00:00:00Z`);
+  return Number.isNaN(d.getTime()) ? date : `${DAY_NAMES[d.getUTCDay()]} ${d.getUTCDate()} ${MONTH_NAMES[d.getUTCMonth()]}`;
+}
+
+/**
+ * One chart on a station's screen. A saved countdown shows today's chart, and, only if the
+ * Control Room has allowed past days, a row of date chips to look back at an earlier day.
+ * The chips are the server's `pastDates`, so this never offers a day that cannot be shown.
+ */
+function ChartSection({ chart, station }: { chart: StationChart; station: 'radio' | 'xtra' }) {
+  const [picked, setPicked] = React.useState<string | null>(null);
+  const past = usePastChart(station, chart.countdownId, picked);
+  const dates = chart.kind === 'countdown' ? (chart.pastDates ?? []) : [];
+  const viewingPast = picked !== null && dates.includes(picked);
+  const entries = viewingPast ? (past.data ?? []) : chart.entries;
+  const shown = chart.kind === 'countdown' ? entries : entries.slice(0, 10);
+
+  return (
+    <View style={styles.chartSection}>
+      <Text style={styles.sectionEyebrow}>{viewingPast && picked ? `CHART · ${formatChartDay(picked).toUpperCase()}` : 'CHART'}</Text>
+      <Text style={styles.chartTitle}>{chart.title}</Text>
+      {dates.length > 0 ? (
+        <ScrollView
+          horizontal
+          showsHorizontalScrollIndicator={false}
+          style={styles.chartChipsScroll}
+          contentContainerStyle={styles.chartChips}
+        >
+          {[null, ...dates].map((date) => {
+            const active = (date ?? null) === (viewingPast ? picked : null);
+            return (
+              <Pressable
+                key={date ?? 'today'}
+                onPress={() => setPicked(date)}
+                accessibilityRole="button"
+                accessibilityState={{ selected: active }}
+                style={[styles.chartChip, active ? styles.chartChipActive : null]}
+              >
+                <Text style={[styles.chartChipText, active ? styles.chartChipTextActive : null]}>
+                  {date ? formatChartDay(date) : 'Today'}
+                </Text>
+              </Pressable>
+            );
+          })}
+        </ScrollView>
+      ) : null}
+      {viewingPast && past.isLoading ? <ActivityIndicator style={styles.chartStatus} /> : null}
+      {viewingPast && past.isError ? <Text style={styles.chartStatusText}>That day's chart isn't available.</Text> : null}
+      {shown.map((entry) => (
+        <View key={`${chart.id}-${entry.position}`} style={styles.chartRow}>
+          <Text style={styles.chartPos}>{entry.position}</Text>
+          <View style={styles.historyCopy}>
+            <Text numberOfLines={1} style={styles.historyTitle}>{entry.title}</Text>
+            {!!entry.artist && <Text numberOfLines={1} style={styles.historyArtist}>{entry.artist}</Text>}
+          </View>
+        </View>
+      ))}
+    </View>
+  );
+}
 
 export default function RadioScreen() {
   const colors = useColors();
@@ -77,10 +145,14 @@ export default function RadioScreen() {
   const isPodcasts = viewMode === 'podcasts';
   const radioPlaying = playbackKind === 'radio' && isPlaying && selectedStationId === viewMode;
   const extraSearchResults = useExtraSongSearch(debouncedExtraSearch, viewMode === 'extra');
-  // AzuraCast's own playlist schedule, so only EJazz Xtra has one. Gated on the same
-  // feature switch as the programme line-up on Home.
-  const xtraSchedule = useExtraSchedule(viewMode === 'extra' && features.schedule);
-  const upcoming = (xtraSchedule.data ?? []).slice(0, 5);
+  // "Coming Up" is one sideways row, switched on its own in the Control Room (separately from
+  // Home). EJazz Xtra shows what AzuraCast has scheduled; EJazz Radio has no such schedule, so
+  // it shows its Control Room programme line-up, the same source Home uses.
+  const xtraSchedule = useExtraSchedule(viewMode === 'extra' && features.scheduleRadio);
+  const upcoming = (xtraSchedule.data ?? []).slice(0, 8);
+  const showsQuery = useShows();
+  const radioLineup = classifyLineup(showsQuery.data ?? [], new Date(), 'radio');
+  const radioLineupCount = (radioLineup.now ? 1 : 0) + (radioLineup.next ? 1 : 0) + radioLineup.later.length;
   const extraRequest = useExtraSongRequest();
   // "Clock this..." fact for the song on air, and the charts assigned to this station.
   const songFact = useSongFact(viewingCurrentTrack?.artist, viewingCurrentTrack?.title);
@@ -275,39 +347,35 @@ export default function RadioScreen() {
           </View>
         )}
 
-        {!isRadio && features.schedule && upcoming.length > 0 && (
+        {!isPodcasts && features.scheduleRadio && (!isRadio ? upcoming.length > 0 : radioLineupCount > 0) && (
           <View style={styles.scheduleSection}>
             <Text style={styles.sectionEyebrow}>COMING UP</Text>
-            {upcoming.map((entry) => {
-              const length = formatScheduleLength(entry);
-              return (
-                <View key={`${entry.id}-${entry.startTimestamp}`} style={styles.scheduleRow}>
-                  <Text style={styles.scheduleWhen}>{formatScheduleWhen(entry.startTimestamp)}</Text>
-                  <View style={styles.scheduleCopy}>
-                    <Text numberOfLines={1} style={styles.historyTitle}>{entry.name}</Text>
-                    {length ? <Text style={styles.historyArtist}>{length}</Text> : null}
-                  </View>
-                  {entry.isNow ? <Text style={styles.scheduleOnAir}>ON AIR</Text> : null}
-                </View>
-              );
-            })}
+            <LineupRow>
+              {isRadio ? (
+                <>
+                  {radioLineup.now ? <ShowLineupCard show={radioLineup.now} badge="LIVE NOW" live /> : null}
+                  {radioLineup.next ? <ShowLineupCard show={radioLineup.next} badge="NEXT" /> : null}
+                  {radioLineup.later.map((show) => (
+                    <ShowLineupCard key={show.id} show={show} badge="LATER" />
+                  ))}
+                </>
+              ) : (
+                upcoming.map((entry) => (
+                  <LineupCard
+                    key={`${entry.id}-${entry.startTimestamp}`}
+                    badge={entry.isNow ? 'ON AIR' : formatScheduleWhen(entry.startTimestamp)}
+                    live={entry.isNow}
+                    name={entry.name}
+                    time={formatScheduleLength(entry) ?? undefined}
+                  />
+                ))
+              )}
+            </LineupRow>
           </View>
         )}
 
         {charts.map((chart) => (
-          <View key={chart.id} style={styles.chartSection}>
-            <Text style={styles.sectionEyebrow}>CHART</Text>
-            <Text style={styles.chartTitle}>{chart.title}</Text>
-            {chart.entries.slice(0, 10).map((entry) => (
-              <View key={`${chart.id}-${entry.position}`} style={styles.chartRow}>
-                <Text style={styles.chartPos}>{entry.position}</Text>
-                <View style={styles.historyCopy}>
-                  <Text numberOfLines={1} style={styles.historyTitle}>{entry.title}</Text>
-                  {!!entry.artist && <Text numberOfLines={1} style={styles.historyArtist}>{entry.artist}</Text>}
-                </View>
-              </View>
-            ))}
-          </View>
+          <ChartSection key={chart.id} chart={chart} station={viewMode === 'extra' ? 'xtra' : 'radio'} />
         ))}
 
         {viewingPreviousTracks.length > 0 && (
@@ -581,6 +649,14 @@ const styles = StyleSheet.create({
   chartTitle: { color: '#F7F9FC', fontSize: 18, fontWeight: '700', letterSpacing: -0.4, marginBottom: 8 },
   chartRow: { flexDirection: 'row', alignItems: 'center', minHeight: 48, borderBottomWidth: 1, borderBottomColor: '#17365E', paddingVertical: 6 },
   chartPos: { color: '#FF6B6B', fontSize: 16, fontWeight: '700', width: 30 },
+  chartChipsScroll: { marginHorizontal: -20, marginBottom: 10 },
+  chartChips: { paddingHorizontal: 20, gap: 8 },
+  chartChip: { paddingHorizontal: 12, paddingVertical: 7, borderRadius: 999, borderWidth: 1, borderColor: '#204570' },
+  chartChipActive: { backgroundColor: '#FF6B6B', borderColor: '#FF6B6B' },
+  chartChipText: { color: '#A7B7CC', fontSize: 12, fontWeight: '700' },
+  chartChipTextActive: { color: '#0B1730' },
+  chartStatus: { marginVertical: 14 },
+  chartStatusText: { color: '#A7B7CC', fontSize: 13, paddingVertical: 12 },
   scheduleSection: { marginHorizontal: 20, marginTop: 22 },
   scheduleRow: { flexDirection: 'row', alignItems: 'center', gap: 12, paddingVertical: 9 },
   scheduleWhen: { color: '#7890AE', fontSize: 12, fontWeight: '700', width: 104 },
