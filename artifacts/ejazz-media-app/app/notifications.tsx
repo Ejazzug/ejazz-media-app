@@ -4,6 +4,7 @@ import React, { useCallback, useState } from 'react';
 import { Alert, Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { MINI_PLAYER_CLEARANCE } from '@/components/MediaComponents';
+import { ShareAppButton } from '@/components/ShareAppButton';
 import { useColors } from '@/hooks/useColors';
 import { stripLinkMarkup } from '@/lib/linkText';
 import { notificationTarget, openNotification } from '@/lib/notificationOpen';
@@ -138,24 +139,29 @@ export default function NotificationsScreen() {
     <View style={[styles.screen, { backgroundColor: colors.background }]}>
       <Stack.Screen options={{ headerShown: false }} />
       <View style={[styles.topBar, { paddingTop: insets.top + 8 }]}>
-        <Pressable onPress={() => router.back()} style={styles.topButton} hitSlop={8}>
-          <Feather name="arrow-left" size={20} color={colors.foreground} />
-        </Pressable>
+        <View style={styles.topSide}>
+          <Pressable onPress={() => router.back()} style={styles.topButton} hitSlop={8}>
+            <Feather name="arrow-left" size={20} color={colors.foreground} />
+          </Pressable>
+        </View>
         <Text style={styles.topTitle}>Notifications</Text>
-        <Pressable
-          onPress={handleClearAll}
-          style={styles.topButton}
-          hitSlop={8}
-          disabled={history.length === 0}
-          accessibilityRole="button"
-          accessibilityLabel="Clear all notifications"
-        >
-          <Feather
-            name="trash-2"
-            size={19}
-            color={history.length === 0 ? colors.mutedForeground : colors.primary}
-          />
-        </Pressable>
+        <View style={[styles.topSide, styles.topSideRight]}>
+          <Pressable
+            onPress={handleClearAll}
+            style={styles.topButton}
+            hitSlop={8}
+            disabled={history.length === 0}
+            accessibilityRole="button"
+            accessibilityLabel="Clear all notifications"
+          >
+            <Feather
+              name="trash-2"
+              size={19}
+              color={history.length === 0 ? colors.mutedForeground : colors.primary}
+            />
+          </Pressable>
+          <ShareAppButton style={styles.topButton} />
+        </View>
       </View>
       <ScrollView
         showsVerticalScrollIndicator={false}
@@ -225,6 +231,9 @@ const styles = StyleSheet.create({
     backgroundColor: '#0D2A57',
   },
   topTitle: { color: '#F7F9FC', fontSize: 16, fontWeight: '700', letterSpacing: 0.4 },
+  // Equal-width sides keep the title centred now that the right side holds two buttons.
+  topSide: { width: 92, flexDirection: 'row', alignItems: 'center', gap: 8 },
+  topSideRight: { justifyContent: 'flex-end' },
   empty: {
     alignItems: 'center',
     justifyContent: 'center',

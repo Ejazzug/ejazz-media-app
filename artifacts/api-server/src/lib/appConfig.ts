@@ -110,6 +110,8 @@ export type AppConfig = {
     privacyUrl: string;
     termsUrl: string;
     shareText: string;
+    /** Wording of the "share the app" invitation. Blank = the app's built-in wording. The download link is added by the app. */
+    shareAppText: string;
     /** Each station's own socials, shown in the More tab under that station's name. */
     radio: StationLinks;
     xtra: StationLinks;
@@ -151,6 +153,7 @@ export const DEFAULT_APP_CONFIG: AppConfig = {
     privacyUrl: "",
     termsUrl: "",
     shareText: "",
+    shareAppText: "",
     radio: { instagramUrl: "", facebookUrl: "", xUrl: "", tiktokUrl: "", youtubeUrl: "", whatsappUrl: "", websiteUrl: "" },
     xtra: { instagramUrl: "", facebookUrl: "", xUrl: "", tiktokUrl: "", youtubeUrl: "", whatsappUrl: "", websiteUrl: "" },
   },
@@ -400,6 +403,7 @@ export function normalizeAppConfig(input: unknown): AppConfig {
       privacyUrl: url(lk.privacyUrl),
       termsUrl: url(lk.termsUrl),
       shareText: text(lk.shareText, "", 200),
+      shareAppText: text(lk.shareAppText, "", 200),
       radio: stationLinks(lk.radio),
       xtra: stationLinks(lk.xtra),
     },

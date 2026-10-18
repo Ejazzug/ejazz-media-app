@@ -844,7 +844,8 @@ const CONTROL_SECTIONS = [
     ['links.websiteUrl', 'text', 'Website link'],
     ['links.privacyUrl', 'text', 'Privacy policy link'],
     ['links.termsUrl', 'text', 'Terms link'],
-    ['links.shareText', 'text', 'Text added when listeners share a station'],
+    ['links.shareText', 'text', 'Message when listeners share a station (the app link is added automatically)'],
+    ['links.shareAppText', 'text', 'Message when listeners share the app (the app link is added automatically; blank = built-in wording)'],
   ] },
   { title: 'EJazz Radio socials', hint: 'Shown in the More tab under this station. Leave blank to hide. Only https links are accepted.', fields: [
     ['links.radio.instagramUrl', 'text', 'Instagram'],

@@ -76,6 +76,8 @@ export type AppConfig = {
     privacyUrl: string;
     termsUrl: string;
     shareText: string;
+    /** Wording of the "share the app" invitation; the download link is added automatically. */
+    shareAppText: string;
     radio: StationLinks;
     xtra: StationLinks;
   };
@@ -107,6 +109,7 @@ export const DEFAULT_APP_CONFIG: AppConfig = {
     privacyUrl: '',
     termsUrl: '',
     shareText: '',
+    shareAppText: '',
     radio: { instagramUrl: '', facebookUrl: '', xUrl: '', tiktokUrl: '', youtubeUrl: '', whatsappUrl: '', websiteUrl: '' },
     xtra: { instagramUrl: '', facebookUrl: '', xUrl: '', tiktokUrl: '', youtubeUrl: '', whatsappUrl: '', websiteUrl: '' },
   },

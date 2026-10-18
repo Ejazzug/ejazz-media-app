@@ -20,6 +20,7 @@ import { useColors } from '@/hooks/useColors';
 import { Station, usePlayer } from '@/context/PlayerContext';
 import { Story } from '@/lib/news';
 import { PodcastScrubber } from '@/components/PodcastScrubber';
+import { ShareAppButton } from '@/components/ShareAppButton';
 import { canEnterPictureInPicture, enterPictureInPicture } from '@/lib/pictureInPicture';
 
 export function PlayingEqualizer({
@@ -473,6 +474,8 @@ export function ScreenHeader({ eyebrow, title }: { eyebrow?: string; title: stri
         {eyebrow && <Text style={styles.headerEyebrow}>{eyebrow}</Text>}
         <Text style={styles.headerTitle}>{title}</Text>
       </View>
+      {/* Top-right corner, level with the wordmark: share the app. */}
+      <ShareAppButton style={{ position: 'absolute', right: 10, top: insets.top + 2 }} />
     </View>
   );
 }

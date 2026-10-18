@@ -3,7 +3,7 @@ import { Image } from 'expo-image';
 import { LinearGradient } from 'expo-linear-gradient';
 import { useLocalSearchParams } from 'expo-router';
 import React from 'react';
-import { ActivityIndicator, Pressable, ScrollView, Share, StyleSheet, Text, TextInput, View } from 'react-native';
+import { ActivityIndicator, Pressable, ScrollView, StyleSheet, Text, TextInput, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { MINI_PLAYER_CLEARANCE, PlayButton, PlayingEqualizer } from '@/components/MediaComponents';
 import { KeyboardAwareScrollViewCompat } from '@/components/KeyboardAwareScrollViewCompat';
@@ -22,6 +22,7 @@ import {
 import { usePastChart, useSongFact, useStationCharts, type StationChart } from '@/lib/stationExtras';
 import { classifyLineup, useShows } from '@/lib/shows';
 import { LineupCard, LineupRow, ShowLineupCard } from '@/components/LineupCard';
+import { useShareApp } from '@/lib/shareApp';
 
 type RadioView = 'radio' | 'extra' | 'podcasts';
 
@@ -110,6 +111,8 @@ export default function RadioScreen() {
   // If the Control Room switches podcasts off while someone is on that tab, fall back to the radio.
   const viewMode: RadioView = rawViewMode === 'podcasts' && !features.podcasts ? 'radio' : rawViewMode;
   const shareMessage = (fallback: string) => (links.shareText ? `${links.shareText}` : fallback);
+  // Station shares carry the app download link too (it used to be text only).
+  const { shareWithLink, shareApp } = useShareApp();
   const radioRequestsOpen = features.songRequests && songRequests.radioEnabled;
   const xtraRequestsOpen = features.songRequests && songRequests.xtraEnabled;
   const request = useSongRequest();
@@ -205,11 +208,15 @@ export default function RadioScreen() {
         <View style={styles.header}>
           <Text style={styles.eyebrow}>EJAZZ LIVE</Text>
           <Text style={styles.title}>Radio</Text>
-          {!isPodcasts && features.share && (
+          {features.share && (
             <Pressable
-              onPress={() => Share.share({ message: shareMessage(`Listen live on ${viewingStation.name} — EJazz Media App`) })}
+              onPress={() =>
+                isPodcasts
+                  ? shareApp()
+                  : shareWithLink(shareMessage(`Listen live on ${viewingStation.name} — EJazz Media App`))
+              }
               accessibilityRole="button"
-              accessibilityLabel="Share station"
+              accessibilityLabel={isPodcasts ? 'Share the EJazz Media app' : 'Share station'}
               style={styles.shareButton}
             >
               <Feather name="share-2" size={18} color={colors.foreground} />
@@ -275,7 +282,7 @@ export default function RadioScreen() {
 
         <View style={styles.controls}>
           {features.share ? (
-            <Pressable style={styles.secondaryControl} onPress={() => Share.share({ message: shareMessage(`Listen to ${viewingStation.name}`) })}>
+            <Pressable style={styles.secondaryControl} onPress={() => shareWithLink(shareMessage(`Listen to ${viewingStation.name}`))}>
               <Feather name="share-2" size={19} color={colors.mutedForeground} />
               <Text style={styles.controlText}>Share</Text>
             </Pressable>

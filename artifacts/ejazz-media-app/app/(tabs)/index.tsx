@@ -2,7 +2,7 @@ import { Feather } from '@expo/vector-icons';
 import { LinearGradient } from 'expo-linear-gradient';
 import { useRouter } from 'expo-router';
 import React from 'react';
-import { ActivityIndicator, Pressable, ScrollView, Share, StyleSheet, Text, View } from 'react-native';
+import { ActivityIndicator, Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { EJazzWordmark, MINI_PLAYER_CLEARANCE, PlayButton, StationCard, StoryCard } from '@/components/MediaComponents';
 import { usePlayer } from '@/context/PlayerContext';
@@ -11,6 +11,8 @@ import { useFeaturedNews, useLatestNews } from '@/lib/news';
 import { usePulseContent } from '@/lib/pulse';
 import { useShows, classifyLineup, showStationFor } from '@/lib/shows';
 import { LineupRow, ShowLineupCard } from '@/components/LineupCard';
+import { ShareAppButton } from '@/components/ShareAppButton';
+import { useShareApp } from '@/lib/shareApp';
 import { FreshEjazzSection } from '@/components/FreshEjazzSection';
 import { ContinueEjazzSection } from '@/components/ContinueEjazzSection';
 import { TheTeaSection } from '@/components/TheTeaSection';
@@ -39,9 +41,10 @@ export default function HomeScreen() {
       .sort((a, b) => Date.parse(b.createdAt) - Date.parse(a.createdAt))[0] ?? null;
   const showsQuery = useShows();
   const lineup = classifyLineup(showsQuery.data ?? [], new Date(), showStationFor(activeStation.id));
+  const { shareWithLink } = useShareApp();
   const handleSharePulse = (item: { title: string; body: string | null }) => {
     const suffix = links.shareText || 'via EJazz Media';
-    Share.share({ message: item.body ? `${item.title}\n\n${item.body}\n\n${suffix}` : `${item.title}\n\n${suffix}` }).catch(() => {});
+    shareWithLink(item.body ? `${item.title}\n\n${item.body}\n\n${suffix}` : `${item.title}\n\n${suffix}`);
   };
   const isLoading = featured.isLoading || latest.isLoading;
   const isError = featured.isError && latest.isError;
@@ -58,14 +61,17 @@ export default function HomeScreen() {
       >
         <View style={styles.topRow}>
           <EJazzWordmark />
-          <Pressable
-            onPress={() => router.push('/more')}
-            accessibilityRole="button"
-            accessibilityLabel="Open more"
-            style={styles.iconButton}
-          >
-            <Feather name="more-horizontal" size={22} color={colors.foreground} />
-          </Pressable>
+          <View style={styles.topActions}>
+            <ShareAppButton style={styles.iconButton} />
+            <Pressable
+              onPress={() => router.push('/more')}
+              accessibilityRole="button"
+              accessibilityLabel="Open more"
+              style={styles.iconButton}
+            >
+              <Feather name="more-horizontal" size={22} color={colors.foreground} />
+            </Pressable>
+          </View>
         </View>
 
         <UpdateBanner />
@@ -189,6 +195,7 @@ const styles = StyleSheet.create({
   content: { paddingHorizontal: 20, paddingBottom: 144 },
   topRow: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' },
   iconButton: { width: 40, height: 40, alignItems: 'center', justifyContent: 'center' },
+  topActions: { flexDirection: 'row', alignItems: 'center' },
   hero: { paddingTop: 42, paddingBottom: 35 },
   heroKicker: { color: '#FF6B6B', fontSize: 10, fontWeight: '700', letterSpacing: 1.5, marginBottom: 15 },
   heroTitle: { color: '#F7F9FC', fontSize: 40, lineHeight: 40, fontWeight: '700', letterSpacing: -1.6 },

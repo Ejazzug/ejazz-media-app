@@ -4,6 +4,7 @@ import { Stack, useLocalSearchParams, useRouter } from 'expo-router';
 import React from 'react';
 import { Linking, Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
+import { ShareAppButton } from '@/components/ShareAppButton';
 import { useColors } from '@/hooks/useColors';
 import { parseLinkText } from '@/lib/linkText';
 
@@ -31,7 +32,7 @@ export default function NotificationDetailScreen() {
           <Feather name="arrow-left" size={19} color="#F7F9FC" />
         </Pressable>
         <Text style={styles.topTitle}>MESSAGE</Text>
-        <View style={styles.topButton} />
+        <ShareAppButton style={styles.topButton} />
       </View>
       <ScrollView contentContainerStyle={{ paddingBottom: insets.bottom + 40 }} showsVerticalScrollIndicator={false}>
         {image ? <Image source={image} contentFit="cover" style={styles.image} /> : null}
