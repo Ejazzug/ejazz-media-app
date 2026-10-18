@@ -8,7 +8,7 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { MINI_PLAYER_CLEARANCE, PlayButton, PlayingEqualizer } from '@/components/MediaComponents';
 import { KeyboardAwareScrollViewCompat } from '@/components/KeyboardAwareScrollViewCompat';
 import { PodcastsPanel } from '@/components/PodcastsPanel';
-import { useAppConfig } from '@/lib/appConfig';
+import { useAppConfig, type RequestStatus } from '@/lib/appConfig';
 import { useColors } from '@/hooks/useColors';
 import { usePlayer } from '@/context/PlayerContext';
 import {
@@ -92,6 +92,28 @@ function ChartSection({ chart, station }: { chart: StationChart; station: 'radio
   );
 }
 
+/**
+ * When requests close or open again, under a request panel. The server computes this from
+ * the windows set in the Control Room (lib/requestWindows.ts on the API side); nothing
+ * here knows the rules, only the answer.
+ */
+function RequestHours({ status }: { status: RequestStatus }) {
+  if (!status.nextChangeLabel && !status.schedule.length) return null;
+  return (
+    <View style={styles.requestHours}>
+      {status.nextChangeLabel ? <Text style={styles.requestHoursLead}>{status.nextChangeLabel}</Text> : null}
+      {status.schedule.length ? (
+        <>
+          <Text style={styles.requestHoursLead}>When requests are open</Text>
+          {status.schedule.map((line) => (
+            <Text key={line} style={styles.requestHoursLine}>{line}</Text>
+          ))}
+        </>
+      ) : null}
+    </View>
+  );
+}
+
 export default function RadioScreen() {
   const colors = useColors();
   const insets = useSafeAreaInsets();
@@ -113,6 +135,8 @@ export default function RadioScreen() {
   const shareMessage = (fallback: string) => (links.shareText ? `${links.shareText}` : fallback);
   // Station shares carry the app download link too (it used to be text only).
   const { shareWithLink, shareApp } = useShareApp();
+  // Already includes the request window: the server applies the schedule before it
+  // answers, so these two booleans are the whole gate.
   const radioRequestsOpen = features.songRequests && songRequests.radioEnabled;
   const xtraRequestsOpen = features.songRequests && songRequests.xtraEnabled;
   const request = useSongRequest();
@@ -438,6 +462,7 @@ export default function RadioScreen() {
             <Text style={styles.sectionEyebrow}>YOUR SONG, ON AIR</Text>
             <Text style={styles.requestTitle}>Requests are closed</Text>
             <Text style={styles.requestIntro}>{songRequests.closedMessage}</Text>
+            <RequestHours status={songRequests.radioStatus} />
           </View>
         )}
 
@@ -446,6 +471,7 @@ export default function RadioScreen() {
             <Text style={styles.sectionEyebrow}>YOUR SONG, ON AIR</Text>
             <Text style={styles.requestTitle}>Request a track</Text>
             <Text style={styles.requestIntro}>Tell the EJazz team what you want to hear next.</Text>
+            <RequestHours status={songRequests.radioStatus} />
 
             <View style={styles.fieldRow}>
               <TextInput
@@ -535,6 +561,7 @@ export default function RadioScreen() {
             <Text style={styles.sectionEyebrow}>FIND IT. REQUEST IT.</Text>
             <Text style={styles.requestTitle}>Requests are closed</Text>
             <Text style={styles.requestIntro}>{songRequests.closedMessage}</Text>
+            <RequestHours status={songRequests.xtraStatus} />
           </View>
         )}
 
@@ -543,6 +570,7 @@ export default function RadioScreen() {
             <Text style={styles.sectionEyebrow}>FIND IT. REQUEST IT.</Text>
             <Text style={styles.requestTitle}>Request on EJazz Xtra</Text>
             <Text style={styles.requestIntro}>Search the station library, then request the track you want.</Text>
+            <RequestHours status={songRequests.xtraStatus} />
             <View style={styles.searchInputWrap}>
               <Feather name="search" size={17} color={colors.mutedForeground} />
               <TextInput
@@ -696,6 +724,9 @@ const styles = StyleSheet.create({
   requestSection: { marginHorizontal: 20, marginTop: 30, padding: 18, borderWidth: 1, borderColor: '#2C4B75', backgroundColor: 'rgba(13,42,87,0.75)' },
   requestTitle: { color: '#F7F9FC', fontSize: 24, fontWeight: '700', letterSpacing: -0.7 },
   requestIntro: { color: '#A7B7CC', fontSize: 12, lineHeight: 18, marginTop: 6, marginBottom: 18 },
+  requestHours: { marginTop: -8, marginBottom: 18 },
+  requestHoursLead: { color: '#F7F9FC', fontSize: 12, fontWeight: '600', lineHeight: 18 },
+  requestHoursLine: { color: '#A7B7CC', fontSize: 12, lineHeight: 18 },
   fieldRow: { flexDirection: 'row', gap: 10 },
   input: { minHeight: 48, marginBottom: 10, paddingHorizontal: 13, borderWidth: 1, borderColor: '#2C4B75', backgroundColor: '#071B3A', color: '#F7F9FC', fontSize: 13 },
   halfInput: { flex: 1, minWidth: 0 },

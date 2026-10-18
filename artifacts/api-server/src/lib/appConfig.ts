@@ -1,6 +1,13 @@
 import { eq } from "drizzle-orm";
 import { db, appSettingsTable } from "@workspace/db";
 import { DEFAULT_CHARTS_CONFIG, normalizeChartsConfig, type ChartsConfig } from "./countdownChartsCore";
+import {
+  DEFAULT_STATION_SCHEDULE,
+  normalizeStationSchedule,
+  requestStatus,
+  type RequestStatus,
+  type StationRequestSchedule,
+} from "./requestWindows";
 
 /**
  * Remote app configuration ("app controls").
@@ -63,7 +70,19 @@ export type AppConfig = {
     /** "Coming Up" row on the Radio screen, switched separately from Home. */
     scheduleRadio: boolean;
   };
-  songRequests: { radioEnabled: boolean; xtraEnabled: boolean; closedMessage: string };
+  /**
+   * Song requests. `radioEnabled`/`xtraEnabled` are the operator's own switch for the
+   * station; `radio`/`xtra` say WHEN it takes requests ("always", or only inside the
+   * windows). The public config turns the pair into a plain open/closed answer plus a
+   * status -- see toPublicConfig(); the windows themselves never leave this side.
+   */
+  songRequests: {
+    radioEnabled: boolean;
+    xtraEnabled: boolean;
+    closedMessage: string;
+    radio: StationRequestSchedule;
+    xtra: StationRequestSchedule;
+  };
   update: {
     /** Apps older than this must update before continuing (blocking screen). */
     minVersion: string;
@@ -135,7 +154,13 @@ export type AppConfig = {
 export const DEFAULT_APP_CONFIG: AppConfig = {
   features: { news: true, podcasts: true, songRequests: true, share: true, pulse: true, schedule: true, scheduleRadio: true },
   charts: DEFAULT_CHARTS_CONFIG,
-  songRequests: { radioEnabled: true, xtraEnabled: true, closedMessage: "Song requests are closed right now. Try again later." },
+  songRequests: {
+    radioEnabled: true,
+    xtraEnabled: true,
+    closedMessage: "Song requests are closed right now. Try again later.",
+    radio: DEFAULT_STATION_SCHEDULE,
+    xtra: DEFAULT_STATION_SCHEDULE,
+  },
   update: { minVersion: "", latestVersion: "", message: "A new version of EJazz Media is available.", storeUrl: "" },
   maintenance: { enabled: false, title: "We'll be right back", message: "EJazz Media is being updated. Please check back shortly." },
   streams: {
@@ -351,6 +376,8 @@ export function normalizeAppConfig(input: unknown): AppConfig {
       radioEnabled: bool(sr.radioEnabled, d.songRequests.radioEnabled),
       xtraEnabled: bool(sr.xtraEnabled, d.songRequests.xtraEnabled),
       closedMessage: text(sr.closedMessage, d.songRequests.closedMessage, 200) || d.songRequests.closedMessage,
+      radio: normalizeStationSchedule(sr.radio),
+      xtra: normalizeStationSchedule(sr.xtra),
     },
     update: {
       minVersion: version(up.minVersion),
@@ -424,18 +451,58 @@ function inWindow(startAt: string, endAt: string, now: number): boolean {
  * What the mobile app receives: the stored config with time windows applied
  * server-side, so an expired banner disappears even for apps with a stale cache clock.
  */
+export type PublicSongRequests = {
+  /** Effective: the station switch and the schedule, as one answer. */
+  radioEnabled: boolean;
+  xtraEnabled: boolean;
+  closedMessage: string;
+  radioStatus: RequestStatus;
+  xtraStatus: RequestStatus;
+};
+
+export type PublicAppConfig =
+  Omit<AppConfig, "funFacts" | "songFacts" | "charts" | "songRequests"> & {
+    songRequests: PublicSongRequests;
+  };
+
 /**
  * The device-facing view of the config. Besides gating the timed banners, this DROPS
  * operator-only sections -- funFacts is scheduling detail the app has no use for, and
  * publishing it would hand every phone the station's posting timetable.
  */
-export function toPublicConfig(config: AppConfig, now: number = Date.now()): Omit<AppConfig, "funFacts" | "songFacts" | "charts"> {
+export function toPublicConfig(config: AppConfig, now: number = Date.now()): PublicAppConfig {
   const { funFacts: _operatorOnly, songFacts: _operatorOnly2, charts: _operatorOnly3, ...publicConfig } = config;
   return {
     ...publicConfig,
+    songRequests: publicSongRequests(config, now),
     featured: { ...config.featured, enabled: config.featured.enabled && inWindow(config.featured.startAt, config.featured.endAt, now) },
     banner: { ...config.banner, enabled: config.banner.enabled && inWindow(config.banner.startAt, config.banner.endAt, now) },
     sponsor: { ...config.sponsor, enabled: config.sponsor.enabled && inWindow(config.sponsor.startAt, config.sponsor.endAt, now) },
+  };
+}
+
+/**
+ * Song requests as a client sees them.
+ *
+ * `radioEnabled`/`xtraEnabled` are deliberately EFFECTIVE here, not the stored switch:
+ * the station switch AND the schedule, decided server-side. Every app build already
+ * reads those two booleans, so a request window closes the form on phones that are
+ * already installed, with no new release. `radioStatus`/`xtraStatus` carry the detail a
+ * newer build (and the website embed) can show -- when it closes, when it next opens,
+ * and the opening times in words. The windows themselves stay on this side: they are
+ * operator scheduling detail, and the answer, not the rules, is what a client needs.
+ */
+function publicSongRequests(config: AppConfig, now: number): PublicSongRequests {
+  const sr = config.songRequests;
+  const at = new Date(now);
+  const radio = requestStatus(sr.radio, sr.radioEnabled, at);
+  const xtra = requestStatus(sr.xtra, sr.xtraEnabled, at);
+  return {
+    radioEnabled: radio.open,
+    xtraEnabled: xtra.open,
+    closedMessage: sr.closedMessage,
+    radioStatus: radio,
+    xtraStatus: xtra,
   };
 }
 

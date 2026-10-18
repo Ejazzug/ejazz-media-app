@@ -14,6 +14,20 @@ import { isPulseConfigured } from '@/lib/pulse';
 
 export type StreamConfig = { url: string; backupUrl: string };
 
+/**
+ * Empty strings rather than nulls for the two instants: mergeDefaults() below keeps a
+ * remote value only when its type matches the default's, and typeof null is "object", so
+ * a null default would throw the server's ISO string away.
+ */
+export type RequestStatus = {
+  open: boolean;
+  mode: 'always' | 'scheduled';
+  closesAt: string;
+  opensAt: string;
+  nextChangeLabel: string;
+  schedule: string[];
+};
+
 export type StationLinks = {
   instagramUrl: string;
   facebookUrl: string;
@@ -36,7 +50,19 @@ export type AppConfig = {
     /** "Coming Up" row on the Radio screen (switched separately from Home). */
     scheduleRadio: boolean;
   };
-  songRequests: { radioEnabled: boolean; xtraEnabled: boolean; closedMessage: string };
+  /**
+   * `radioEnabled`/`xtraEnabled` are the EFFECTIVE answer: the server has already applied
+   * the station switch and the request-window schedule set in the Control Room, so a
+   * closed window closes the form here without the app knowing the rules. The status
+   * carries what to say about it -- when it closes, when it opens next, the hours.
+   */
+  songRequests: {
+    radioEnabled: boolean;
+    xtraEnabled: boolean;
+    closedMessage: string;
+    radioStatus: RequestStatus;
+    xtraStatus: RequestStatus;
+  };
   update: { minVersion: string; latestVersion: string; message: string; storeUrl: string };
   maintenance: { enabled: boolean; title: string; message: string };
   streams: { radio: StreamConfig; xtra: StreamConfig };
@@ -84,12 +110,19 @@ export type AppConfig = {
   podcasts: PodcastConfig[];
 };
 
+/** Open, with nothing to say about hours: how the app behaved before windows existed. */
+const DEFAULT_REQUEST_STATUS: RequestStatus = {
+  open: true, mode: 'always', closesAt: '', opensAt: '', nextChangeLabel: '', schedule: [],
+};
+
 export const DEFAULT_APP_CONFIG: AppConfig = {
   features: { news: true, podcasts: true, songRequests: true, share: true, pulse: true, schedule: true, scheduleRadio: true },
   songRequests: {
     radioEnabled: true,
     xtraEnabled: true,
     closedMessage: 'Song requests are closed right now. Try again later.',
+    radioStatus: DEFAULT_REQUEST_STATUS,
+    xtraStatus: DEFAULT_REQUEST_STATUS,
   },
   update: { minVersion: '', latestVersion: '', message: 'A new version of EJazz Media is available.', storeUrl: '' },
   maintenance: {
@@ -151,6 +184,13 @@ export function parseAppConfig(input: unknown): AppConfig {
       typeof show.feedUrl === 'string' &&
       /^https?:\/\//i.test(show.feedUrl),
   );
+  // The opening-hours lines are rendered as text, so anything that is not a string is
+  // dropped rather than handed to <Text>.
+  for (const status of [config.songRequests.radioStatus, config.songRequests.xtraStatus]) {
+    status.schedule = (Array.isArray(status.schedule) ? status.schedule : [])
+      .filter((line): line is string => typeof line === 'string' && line.length > 0)
+      .slice(0, 12);
+  }
   return config;
 }
 

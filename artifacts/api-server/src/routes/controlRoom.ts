@@ -120,6 +120,14 @@ const PAGE = `<!doctype html>
   .slotrow input { width: auto; }
   .slotrow .dash { color: #8A93C4; font-size: 12px; }
   .slotrow button { background: transparent; border: 1px solid rgba(242,244,255,0.2); color: #FF0056; padding: 6px 9px; }
+  /* A request window: one repeat pattern plus its times of day. */
+  .wcard { border: 1px solid rgba(242,244,255,0.14); border-radius: 8px; padding: 10px 12px; margin: 10px 0; }
+  .wcard-head { display:flex; align-items:center; gap: 8px; margin-bottom: 4px; }
+  .wcard-head input[type=text] { flex: 1; }
+  .wcard-head .wcard-on { display:inline-flex; align-items:center; gap: 5px; font-size: 12px; color: #8A93C4; white-space: nowrap; margin: 0; }
+  .wcard-head .wcard-on input { width: auto; margin: 0; }
+  .srnow { font-size: 12px; color: #8A93C4; margin-bottom: 8px; }
+  .srnow.open { color: #519DC5; }
   .thumb { width: 42px; height: 42px; border-radius: 7px; object-fit: cover; background: rgba(242,244,255,0.06); flex-shrink: 0; }
   .item .lead { display:flex; gap: 10px; align-items: flex-start; }
 </style>
@@ -848,11 +856,11 @@ const CONTROL_SECTIONS = [
     ['features.schedule', 'bool', 'Coming Up row on Home'],
     ['features.scheduleRadio', 'bool', 'Coming Up row on the Radio screen'],
   ] },
-  { title: 'Song requests', hint: 'Open or close requests per station.', fields: [
-    ['songRequests.radioEnabled', 'bool', 'EJazz Radio requests open'],
-    ['songRequests.xtraEnabled', 'bool', 'EJazz Xtra requests open'],
+  { title: 'Song requests', hint: 'Open or close requests per station, and set the hours they are open.', fields: [
+    ['songRequests.radioEnabled', 'bool', 'EJazz Radio takes requests'],
+    ['songRequests.xtraEnabled', 'bool', 'EJazz Xtra takes requests'],
     ['songRequests.closedMessage', 'text', 'Message shown when closed'],
-  ] },
+  ], extra: () => songRequestsExtraHtml() },
   { title: 'Updates & maintenance', hint: 'Maintenance mode blocks the whole app with your message. Minimum version forces older apps to update; latest version only shows a dismissible banner. Versions look like 2.0.5.', fields: [
     ['maintenance.enabled', 'bool', 'Maintenance mode ON (blocks the app)'],
     ['maintenance.title', 'text', 'Maintenance title'],
@@ -943,7 +951,8 @@ function renderControls() {
       const type = f[1] === 'datetime' ? 'datetime-local' : 'text';
       return '<div class="field"><label for="' + id + '">' + escapeHtml(f[2]) + '</label><input type="' + type + '" id="' + id + '"></div>';
     }).join('');
-    return sectionHtml(sec.title, sec.hint, fields);
+    // A section may add markup its field list cannot express (the request windows).
+    return sectionHtml(sec.title, sec.hint, fields + (sec.extra ? sec.extra() : ''));
   }).join('') +
     sectionHtml('Podcasts',
       'One show per line: Name | feed link. Leave empty to keep the podcasts built into the app. Up to 12.',
@@ -994,6 +1003,7 @@ function fillControls(cfg) {
   }));
   const nl = String.fromCharCode(10);
   $('cfg_podcasts').value = (cfg.podcasts || []).map((p) => p.name + ' | ' + p.feedUrl).join(nl);
+  fillSongRequests(cfg);
   fillFunFacts(cfg.funFacts || {});
   const sfc = cfg.songFacts || {};
   $('sf_auto').checked = sfc.autoGenerate !== false;
@@ -1312,7 +1322,7 @@ $('collapseAll').addEventListener('click', (e) => { e.preventDefault(); setAllSe
 async function loadControls() {
   $('controlsMsg').textContent = '';
   try {
-    if (!$('controlsForm').innerHTML) renderControls();
+    if (!$('controlsForm').innerHTML) { renderControls(); srWire(); }
     controlsConfig = await api('/app-config', { method: 'GET' });
     fillControls(controlsConfig);
   } catch (e) {
@@ -1341,6 +1351,10 @@ $('saveControlsBtn').addEventListener('click', async () => {
     next.funFacts = collectFunFacts();
     next.songFacts = { autoGenerate: $('sf_auto').checked, maxPerHour: Number($('sf_hour').value), maxPerDay: Number($('sf_day').value), provider: $('sf_provider').value, sheetUrl: $('sf_sheet').value.trim() };
     next.charts = { pastMode: $('cfg_cc_mode').value, customFrom: $('cfg_cc_from').value, keepDays: Number($('cfg_cc_keep').value) };
+    // Merged, not replaced: the switches and the closed message were just set by the loop
+    // above, and this adds only the schedules. It throws on a half-finished window, before
+    // anything is sent.
+    next.songRequests = Object.assign({}, next.songRequests, collectSongRequests());
     controlsConfig = await api('/app-config', { method: 'PUT', body: JSON.stringify(next) });
     fillControls(controlsConfig);
     msg.textContent = 'Saved. Phones pick this up the next time the app opens. Anything left blank or invalid (for example a link that is not https) was reset to the default.';
@@ -1349,6 +1363,423 @@ $('saveControlsBtn').addEventListener('click', async () => {
     msg.textContent = 'Could not save: ' + e.message;
   }
 });
+
+// ---------- song request windows ----------
+// When each station takes requests. One window is one repeat pattern plus the times of
+// day inside it, so "weekdays 10-13 and 16-19, all day Saturday" is two windows. The
+// rules live server-side in lib/requestWindows.ts; this is only the editor for them.
+// Held as state and re-rendered on every structural change, because a window's fields
+// depend on its repeat type. Text and time inputs write back on 'change' and do NOT
+// re-render, so typing is never interrupted.
+const REQ_STATIONS = [['radio', 'EJazz Radio'], ['xtra', 'EJazz Xtra']];
+const REQ_REPEATS = [
+  ['daily', 'Every day'],
+  ['weekly', 'Days of the week'],
+  ['monthly', 'Dates of the month'],
+  ['dates', 'Specific dates'],
+];
+let srState = { radio: { mode: 'always', windows: [] }, xtra: { mode: 'always', windows: [] } };
+
+function srMinutes(value) {
+  const parts = String(value || '').split(':');
+  const h = Number(parts[0]);
+  const m = Number(parts[1]);
+  if (!Number.isInteger(h) || !Number.isInteger(m)) return null;
+  return h * 60 + m;
+}
+function srTime(minute) {
+  if (minute >= 1440) return '23:59';
+  return pad2(Math.floor(minute / 60)) + ':' + pad2(minute % 60);
+}
+function srBlankWindow() {
+  return { id: '', label: '', repeatMode: 'daily', daysOfWeek: [1, 2, 3, 4, 5], datesOfMonth: [1], dates: [], slots: [{ startMinute: 600, endMinute: 780 }], enabled: true };
+}
+
+/** The part of the Song requests section that the declarative field list cannot express. */
+function songRequestsExtraHtml() {
+  const blocks = REQ_STATIONS.map((s) => {
+    const key = s[0];
+    return '<div style="margin-top:16px;padding-top:12px;border-top:1px solid rgba(242,244,255,0.08);">' +
+      '<h3>' + escapeHtml(s[1]) + '</h3>' +
+      '<div class="srnow" id="sr_now_' + key + '">Checking…</div>' +
+      '<div class="field"><label for="sr_mode_' + key + '">When requests are taken</label>' +
+      '<select id="sr_mode_' + key + '">' +
+      '<option value="always">Any time the switch above is on</option>' +
+      '<option value="scheduled">Only at the times below</option>' +
+      '</select></div>' +
+      '<div id="sr_wins_' + key + '"></div>' +
+      '<button type="button" class="secondary" id="sr_add_' + key + '">Add a request window</button>' +
+      '</div>';
+  }).join('');
+  return '<p class="hint">The switches above are each station’s own on/off. The hours below apply only to a station set to ' +
+    '"Only at the times below" — outside them the app and the website widget say requests are closed and show no form. ' +
+    'Times are East Africa Time. Several windows per station, several times a day, repeating daily, on chosen weekdays, ' +
+    'on dates of the month, or on exact dates.</p>' +
+    '<p class="hint">A window closes the FORM. The station’s own request API stays reachable, so this is a published ' +
+    'opening time, not a lock — which is all a song request needs.</p>' +
+    blocks +
+    '<div style="margin-top:16px;padding-top:12px;border-top:1px solid rgba(242,244,255,0.08);">' +
+    '<h3>Put the request form on the website</h3>' +
+    '<p class="hint">This replaces the AzuraCast request page the site embeds now, which takes requests around the clock ' +
+    'because it knows nothing about the hours above. Paste one of these into a Custom HTML block (WP Admin &rarr; the page ' +
+    'or widget area) in place of the old iframe. It closes itself when a window ends, with no reload.</p>' +
+    '<div class="field"><label for="sr_snippet_station">Snippet for</label>' +
+    '<select id="sr_snippet_station"><option value="xtra">EJazz Xtra (searchable library)</option><option value="radio">EJazz Radio (written request)</option></select></div>' +
+    '<textarea id="sr_snippet" rows="7" readonly style="font-family:ui-monospace,Menlo,Consolas,monospace;font-size:11.5px;"></textarea>' +
+    '<button type="button" class="secondary" id="sr_copy">Copy the snippet</button>' +
+    '<span class="okmsg" id="sr_copied"></span></div>';
+}
+
+function srSnippet(station) {
+  const src = 'https://control.ejazzug.com/embed/requests?station=' + station;
+  const nl = String.fromCharCode(10);
+  return [
+    '<iframe src="' + src + '" title="Song requests" id="ejazzRequests"',
+    '        style="width:100%;border:0;min-height:420px" height="480" loading="lazy"></iframe>',
+    '<script>',
+    'window.addEventListener("message", function (e) {',
+    '  if (e.origin !== "https://control.ejazzug.com") return;',
+    '  var h = e.data && e.data.ejazzRequestsHeight;',
+    '  var f = document.getElementById("ejazzRequests");',
+    '  if (h && f) f.style.height = h + "px";',
+    '});',
+    '<' + '/script>',
+  ].join(nl);
+}
+
+function srRenderSnippet() {
+  $('sr_snippet').value = srSnippet($('sr_snippet_station').value);
+  $('sr_copied').textContent = '';
+}
+
+/** What the station is doing right now, read back from the public endpoint. */
+function srLoadStatus() {
+  REQ_STATIONS.forEach((s) => {
+    const key = s[0];
+    const box = $('sr_now_' + key);
+    if (!box) return;
+    fetch('/api/song-requests?station=' + key, { headers: { Accept: 'application/json' } })
+      .then((r) => r.json())
+      .then((d) => {
+        const label = d.open ? 'Open right now' : 'Closed right now';
+        box.textContent = d.nextChangeLabel ? label + ' — ' + d.nextChangeLabel.toLowerCase() : label;
+        box.className = 'srnow' + (d.open ? ' open' : '');
+      })
+      .catch(() => { box.textContent = 'Could not read the current state.'; box.className = 'srnow'; });
+  });
+}
+
+function srRender(station) {
+  const host = $('sr_wins_' + station);
+  if (!host) return;
+  const state = srState[station];
+  $('sr_mode_' + station).value = state.mode;
+  host.innerHTML = '';
+  // The windows only matter on a scheduled station; hiding them on "any time" keeps a
+  // schedule that is not in force from reading as if it were.
+  host.style.display = state.mode === 'scheduled' ? '' : 'none';
+  $('sr_add_' + station).style.display = state.mode === 'scheduled' ? '' : 'none';
+  if (state.mode !== 'scheduled') return;
+  if (!state.windows.length) {
+    const empty = document.createElement('div');
+    empty.className = 'empty';
+    empty.textContent = 'No windows yet, so requests never open. Add one.';
+    host.appendChild(empty);
+  }
+  state.windows.forEach((win, index) => host.appendChild(srWindowCard(station, win, index)));
+}
+
+function srWindowCard(station, win, index) {
+  const card = document.createElement('div');
+  card.className = 'wcard';
+
+  const head = document.createElement('div');
+  head.className = 'wcard-head';
+  const label = document.createElement('input');
+  label.type = 'text';
+  label.placeholder = 'Name this window (optional, e.g. Drive time)';
+  label.maxLength = 60;
+  label.value = win.label || '';
+  label.onchange = () => { win.label = label.value; };
+  head.appendChild(label);
+
+  const onBox = document.createElement('label');
+  onBox.className = 'wcard-on';
+  const on = document.createElement('input');
+  on.type = 'checkbox';
+  on.checked = win.enabled !== false;
+  on.onchange = () => { win.enabled = on.checked; srRender(station); };
+  onBox.appendChild(on);
+  onBox.appendChild(document.createTextNode('On'));
+  head.appendChild(onBox);
+
+  const del = document.createElement('button');
+  del.type = 'button';
+  del.className = 'secondary';
+  del.textContent = 'Remove';
+  del.onclick = () => { srState[station].windows.splice(index, 1); srRender(station); };
+  head.appendChild(del);
+  card.appendChild(head);
+
+  const repeatField = document.createElement('div');
+  repeatField.className = 'field';
+  const repeatLabel = document.createElement('label');
+  repeatLabel.textContent = 'Repeats';
+  const repeat = document.createElement('select');
+  REQ_REPEATS.forEach((r) => {
+    const opt = document.createElement('option');
+    opt.value = r[0];
+    opt.textContent = r[1];
+    repeat.appendChild(opt);
+  });
+  repeat.value = win.repeatMode || 'daily';
+  repeat.onchange = () => { win.repeatMode = repeat.value; srRender(station); };
+  repeatField.appendChild(repeatLabel);
+  repeatField.appendChild(repeat);
+  card.appendChild(repeatField);
+
+  if (win.repeatMode === 'weekly') {
+    const field = document.createElement('div');
+    field.className = 'field';
+    const lab = document.createElement('label');
+    lab.textContent = 'Which days';
+    field.appendChild(lab);
+    const grid = document.createElement('div');
+    grid.className = 'pickgrid';
+    DAY_SHORT.forEach((name, day) => {
+      const wrap = document.createElement('label');
+      const box = document.createElement('input');
+      box.type = 'checkbox';
+      box.checked = (win.daysOfWeek || []).indexOf(day) !== -1;
+      box.onchange = () => {
+        const days = (win.daysOfWeek || []).filter((d) => d !== day);
+        if (box.checked) days.push(day);
+        win.daysOfWeek = days.sort((a, b) => a - b);
+        srRender(station);
+      };
+      wrap.appendChild(box);
+      wrap.appendChild(document.createTextNode(name));
+      grid.appendChild(wrap);
+    });
+    field.appendChild(grid);
+    const picks = document.createElement('p');
+    picks.className = 'hint';
+    picks.style.margin = '6px 0 0';
+    [['every day', [0, 1, 2, 3, 4, 5, 6]], ['Mon–Fri', [1, 2, 3, 4, 5]], ['weekend', [0, 6]]].forEach((p, i) => {
+      if (i) picks.appendChild(document.createTextNode(' · '));
+      const a = document.createElement('a');
+      a.href = '#';
+      a.textContent = p[0];
+      a.onclick = (e) => { e.preventDefault(); win.daysOfWeek = p[1].slice(); srRender(station); };
+      picks.appendChild(a);
+    });
+    field.appendChild(picks);
+    card.appendChild(field);
+  }
+
+  if (win.repeatMode === 'monthly') {
+    const field = document.createElement('div');
+    field.className = 'field';
+    const lab = document.createElement('label');
+    lab.textContent = 'Which dates of the month';
+    field.appendChild(lab);
+    const grid = document.createElement('div');
+    grid.className = 'pickgrid';
+    for (let date = 1; date <= 31; date += 1) {
+      const day = date;
+      const wrap = document.createElement('label');
+      const box = document.createElement('input');
+      box.type = 'checkbox';
+      box.checked = (win.datesOfMonth || []).indexOf(day) !== -1;
+      box.onchange = () => {
+        const dates = (win.datesOfMonth || []).filter((d) => d !== day);
+        if (box.checked) dates.push(day);
+        win.datesOfMonth = dates.sort((a, b) => a - b);
+        srRender(station);
+      };
+      wrap.appendChild(box);
+      wrap.appendChild(document.createTextNode(String(day)));
+      grid.appendChild(wrap);
+    }
+    field.appendChild(grid);
+    const note = document.createElement('p');
+    note.className = 'hint';
+    note.style.margin = '6px 0 0';
+    note.textContent = 'A month without that date (the 31st, say) simply skips it.';
+    field.appendChild(note);
+    card.appendChild(field);
+  }
+
+  if (win.repeatMode === 'dates') {
+    const field = document.createElement('div');
+    field.className = 'field';
+    const lab = document.createElement('label');
+    lab.textContent = 'Exact dates';
+    field.appendChild(lab);
+    const row = document.createElement('div');
+    row.className = 'slotrow';
+    const pick = document.createElement('input');
+    pick.type = 'date';
+    const add = document.createElement('button');
+    add.type = 'button';
+    add.className = 'secondary';
+    add.textContent = 'Add this date';
+    add.onclick = () => {
+      const value = pick.value;
+      if (!value) return;
+      const dates = (win.dates || []).slice();
+      if (dates.indexOf(value) === -1) dates.push(value);
+      win.dates = dates.sort();
+      srRender(station);
+    };
+    row.appendChild(pick);
+    row.appendChild(add);
+    field.appendChild(row);
+    const chips = document.createElement('div');
+    chips.className = 'chips';
+    (win.dates || []).forEach((date) => {
+      const chip = document.createElement('span');
+      chip.className = 'chip';
+      chip.appendChild(document.createTextNode(date));
+      const x = document.createElement('button');
+      x.type = 'button';
+      x.textContent = '×';
+      x.onclick = () => { win.dates = (win.dates || []).filter((d) => d !== date); srRender(station); };
+      chip.appendChild(x);
+      chips.appendChild(chip);
+    });
+    field.appendChild(chips);
+    card.appendChild(field);
+  }
+
+  const times = document.createElement('div');
+  times.className = 'field';
+  const timesLabel = document.createElement('label');
+  timesLabel.textContent = 'Open from / to';
+  times.appendChild(timesLabel);
+  (win.slots || []).forEach((slot, slotIndex) => {
+    const row = document.createElement('div');
+    row.className = 'slotrow';
+    const from = document.createElement('input');
+    from.type = 'time';
+    from.value = srTime(slot.startMinute);
+    from.onchange = () => { const m = srMinutes(from.value); if (m !== null) slot.startMinute = m; };
+    const dash = document.createElement('span');
+    dash.className = 'dash';
+    dash.textContent = 'to';
+    const to = document.createElement('input');
+    to.type = 'time';
+    to.value = srTime(slot.endMinute);
+    to.onchange = () => { const m = srMinutes(to.value); if (m !== null) slot.endMinute = m; };
+    row.appendChild(from);
+    row.appendChild(dash);
+    row.appendChild(to);
+    if ((win.slots || []).length > 1) {
+      const drop = document.createElement('button');
+      drop.type = 'button';
+      drop.textContent = 'Remove';
+      drop.onclick = () => { win.slots.splice(slotIndex, 1); srRender(station); };
+      row.appendChild(drop);
+    }
+    times.appendChild(row);
+  });
+  const addTime = document.createElement('button');
+  addTime.type = 'button';
+  addTime.className = 'secondary';
+  addTime.textContent = 'Add another time';
+  addTime.onclick = () => {
+    win.slots = (win.slots || []).concat([{ startMinute: 960, endMinute: 1140 }]);
+    srRender(station);
+  };
+  times.appendChild(addTime);
+  const timeHint = document.createElement('p');
+  timeHint.className = 'hint';
+  timeHint.style.margin = '6px 0 0';
+  timeHint.textContent = 'Several times in the same day are fine. A window cannot cross midnight: '
+    + 'for 23:00 to 01:00, use 23:00 to 23:59 and a second time from 00:00 to 01:00.';
+  times.appendChild(timeHint);
+  card.appendChild(times);
+  return card;
+}
+
+function fillSongRequests(cfg) {
+  const sr = cfg.songRequests || {};
+  REQ_STATIONS.forEach((s) => {
+    const key = s[0];
+    const stored = sr[key] || {};
+    srState[key] = {
+      mode: stored.mode === 'scheduled' ? 'scheduled' : 'always',
+      windows: (stored.windows || []).map((w) => ({
+        id: w.id || '',
+        label: w.label || '',
+        repeatMode: w.repeatMode || 'daily',
+        daysOfWeek: (w.daysOfWeek || []).slice(),
+        datesOfMonth: (w.datesOfMonth || []).slice(),
+        dates: (w.dates || []).slice(),
+        slots: (w.slots || []).map((sl) => ({ startMinute: sl.startMinute, endMinute: sl.endMinute })),
+        enabled: w.enabled !== false,
+      })),
+    };
+    srRender(key);
+  });
+  srRenderSnippet();
+  srLoadStatus();
+}
+
+/**
+ * Refuse rather than quietly fix. normalizeStationSchedule() on the server coerces a
+ * half-finished window (a weekly pattern with no days becomes every day) so one bad
+ * window cannot take the whole config down -- which is right for a save that has already
+ * happened, and wrong for one the operator is making now: nobody checks the app until a
+ * listener notices requests are open on the wrong day.
+ */
+function collectSongRequests() {
+  const out = {};
+  REQ_STATIONS.forEach((s) => {
+    const key = s[0];
+    const name = s[1];
+    const state = srState[key];
+    if (state.mode === 'scheduled' && !state.windows.filter((w) => w.enabled !== false).length) {
+      throw new Error(name + ' is set to open only at the times below, but has no window switched on, so requests would never open.');
+    }
+    state.windows.forEach((win, i) => {
+      const where = name + ', window ' + (i + 1) + (win.label ? ' (' + win.label + ')' : '');
+      if (!win.slots.length) throw new Error(where + ' has no times.');
+      win.slots.forEach((slot) => {
+        if (!Number.isInteger(slot.startMinute) || !Number.isInteger(slot.endMinute) || slot.endMinute <= slot.startMinute) {
+          throw new Error(where + ': each time must end after it starts, inside the same day.');
+        }
+      });
+      if (win.repeatMode === 'weekly' && !win.daysOfWeek.length) throw new Error(where + ': pick at least one day of the week.');
+      if (win.repeatMode === 'monthly' && !win.datesOfMonth.length) throw new Error(where + ': pick at least one date of the month.');
+      if (win.repeatMode === 'dates' && !win.dates.length) throw new Error(where + ': add at least one date.');
+    });
+    out[key] = { mode: state.mode, windows: state.windows };
+  });
+  return out;
+}
+
+/** Wired once, right after the controls form is built (it is rendered only once). */
+function srWire() {
+  REQ_STATIONS.forEach((st) => {
+    const key = st[0];
+    $('sr_mode_' + key).onchange = () => { srState[key].mode = $('sr_mode_' + key).value; srRender(key); };
+    $('sr_add_' + key).onclick = () => {
+      srState[key].windows = srState[key].windows.concat([srBlankWindow()]);
+      srRender(key);
+    };
+  });
+  $('sr_snippet_station').onchange = srRenderSnippet;
+  $('sr_copy').onclick = () => {
+    const box = $('sr_snippet');
+    box.select();
+    // navigator.clipboard needs a secure context and a permission the admin page may not
+    // have; the textarea is selected either way, so Ctrl+C always works.
+    let copied = false;
+    try { copied = document.execCommand('copy'); } catch (e) { copied = false; }
+    $('sr_copied').textContent = copied ? 'Copied.' : 'Selected — press Ctrl+C to copy.';
+  };
+}
 
 // ---------- programme line-up ----------
 // One entry per show-on-a-station, with a repeat pattern and one or more times in the
