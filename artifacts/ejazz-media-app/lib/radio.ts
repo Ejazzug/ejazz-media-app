@@ -302,6 +302,105 @@ async function fetchExtraNowPlaying(): Promise<ExtraNowPlaying> {
   };
 }
 
+/**
+ * What EJazz Xtra has scheduled next, from AzuraCast's own playlist schedule.
+ *
+ * Distinct from the programme line-up on Home, which comes from the Control Room's
+ * `shows` table: this is what the station itself is set to play, so a show only appears
+ * here once it has a scheduled playlist on AzuraCast.
+ *
+ * Two things the endpoint does that have to be handled here:
+ *  - with no parameters it answers with only the next few entries, so a window is asked
+ *    for explicitly;
+ *  - the entries come back **unsorted** (a date four days out can precede today's), so
+ *    they are sorted by start time rather than trusted in order.
+ */
+export type ExtraScheduleEntry = {
+  id: number;
+  name: string;
+  startTimestamp: number;
+  endTimestamp: number;
+  isNow: boolean;
+};
+
+const SCHEDULE_WINDOW_DAYS = 8;
+
+function ymd(date: Date): string {
+  return date.getFullYear() + '-'
+    + String(date.getMonth() + 1).padStart(2, '0') + '-'
+    + String(date.getDate()).padStart(2, '0');
+}
+
+async function fetchExtraSchedule(): Promise<ExtraScheduleEntry[]> {
+  const now = new Date();
+  const until = new Date(now.getTime() + SCHEDULE_WINDOW_DAYS * 24 * 60 * 60 * 1000);
+  const url = `${EXTRA_API_URL}/api/station/${EXTRA_STATION_ID}/schedule`
+    + `?start=${ymd(now)}&end=${ymd(until)}`;
+  const payload = await extraGet(url);
+  if (!Array.isArray(payload)) throw new Error('Unexpected EJazz Xtra schedule response');
+
+  const cutoff = Math.floor(now.getTime() / 1000);
+  return payload
+    .map((value): ExtraScheduleEntry | null => {
+      if (!value || typeof value !== 'object') return null;
+      const item = value as Record<string, unknown>;
+      const start = numberOr(item.start_timestamp, 0);
+      const name = cleanTagText(item.name) || cleanTagText(item.title);
+      if (!start || !name) return null;
+      return {
+        id: numberOr(item.id, start),
+        name,
+        startTimestamp: start,
+        endTimestamp: numberOr(item.end_timestamp, 0),
+        isNow: item.is_now === true,
+      };
+    })
+    .filter((entry): entry is ExtraScheduleEntry => entry !== null)
+    // Anything already finished is not "coming up". An entry on air stays.
+    .filter((entry) => entry.isNow || entry.startTimestamp >= cutoff)
+    .sort((a, b) => a.startTimestamp - b.startTimestamp);
+}
+
+/** "Today 4:00 PM", "Tomorrow 6:30 PM", "Wed 4:30 PM" -- in the device's own timezone. */
+export function formatScheduleWhen(startTimestamp: number, now: Date = new Date()): string {
+  const at = new Date(startTimestamp * 1000);
+  // `numeric`, not `2-digit`: the latter reads "04:00 PM", unlike formatShowTime elsewhere.
+  const time = at.toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' });
+  const startOfDay = (d: Date) => new Date(d.getFullYear(), d.getMonth(), d.getDate()).getTime();
+  const days = Math.round((startOfDay(at) - startOfDay(now)) / (24 * 60 * 60 * 1000));
+  if (days <= 0) return `Today ${time}`;
+  if (days === 1) return `Tomorrow ${time}`;
+  return `${at.toLocaleDateString([], { weekday: 'short' })} ${time}`;
+}
+
+/**
+ * How long it runs, or null when the station has no end time for it.
+ * Most playlists here are scheduled at a start time only, which the API reports as
+ * `end == start` -- showing that as a zero-minute programme would be worse than showing
+ * nothing, so it is left off.
+ */
+export function formatScheduleLength(entry: ExtraScheduleEntry): string | null {
+  const seconds = entry.endTimestamp - entry.startTimestamp;
+  if (seconds < 60) return null;
+  const minutes = Math.round(seconds / 60);
+  if (minutes < 60) return `${minutes} min`;
+  const hours = Math.floor(minutes / 60);
+  const rest = minutes % 60;
+  return rest ? `${hours}h ${rest}m` : `${hours}h`;
+}
+
+export function useExtraSchedule(enabled: boolean) {
+  return useQuery({
+    queryKey: ['radio', 'extra', 'schedule'],
+    queryFn: fetchExtraSchedule,
+    enabled,
+    // A playlist schedule changes when an operator edits it, not minute to minute.
+    staleTime: 10 * 60_000,
+    refetchInterval: enabled ? 15 * 60_000 : false,
+    retry: 1,
+  });
+}
+
 async function searchExtraSongs(query: string): Promise<ExtraSearchResult> {
   const url = `${EXTRA_API_URL}/api/station/${EXTRA_STATION_ID}/requests`
     + `?searchPhrase=${encodeURIComponent(query)}&rowCount=25&current=1`;

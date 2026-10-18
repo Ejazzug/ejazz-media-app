@@ -11,7 +11,14 @@ import { PodcastsPanel } from '@/components/PodcastsPanel';
 import { useAppConfig } from '@/lib/appConfig';
 import { useColors } from '@/hooks/useColors';
 import { usePlayer } from '@/context/PlayerContext';
-import { useExtraSongRequest, useExtraSongSearch, useSongRequest } from '@/lib/radio';
+import {
+  formatScheduleLength,
+  formatScheduleWhen,
+  useExtraSchedule,
+  useExtraSongRequest,
+  useExtraSongSearch,
+  useSongRequest,
+} from '@/lib/radio';
 
 type RadioView = 'radio' | 'extra' | 'podcasts';
 
@@ -69,6 +76,10 @@ export default function RadioScreen() {
   const isPodcasts = viewMode === 'podcasts';
   const radioPlaying = playbackKind === 'radio' && isPlaying && selectedStationId === viewMode;
   const extraSearchResults = useExtraSongSearch(debouncedExtraSearch, viewMode === 'extra');
+  // AzuraCast's own playlist schedule, so only EJazz Xtra has one. Gated on the same
+  // feature switch as the programme line-up on Home.
+  const xtraSchedule = useExtraSchedule(viewMode === 'extra' && features.schedule);
+  const upcoming = (xtraSchedule.data ?? []).slice(0, 5);
   const extraRequest = useExtraSongRequest();
 
   React.useEffect(() => {
@@ -249,6 +260,25 @@ export default function RadioScreen() {
                 )}
               </View>
             </View>
+          </View>
+        )}
+
+        {!isRadio && features.schedule && upcoming.length > 0 && (
+          <View style={styles.scheduleSection}>
+            <Text style={styles.sectionEyebrow}>COMING UP</Text>
+            {upcoming.map((entry) => {
+              const length = formatScheduleLength(entry);
+              return (
+                <View key={`${entry.id}-${entry.startTimestamp}`} style={styles.scheduleRow}>
+                  <Text style={styles.scheduleWhen}>{formatScheduleWhen(entry.startTimestamp)}</Text>
+                  <View style={styles.scheduleCopy}>
+                    <Text numberOfLines={1} style={styles.historyTitle}>{entry.name}</Text>
+                    {length ? <Text style={styles.historyArtist}>{length}</Text> : null}
+                  </View>
+                  {entry.isNow ? <Text style={styles.scheduleOnAir}>ON AIR</Text> : null}
+                </View>
+              );
+            })}
           </View>
         )}
 
@@ -516,6 +546,11 @@ const styles = StyleSheet.create({
   metadataLoading: { flexDirection: 'row', alignItems: 'center', gap: 9, marginTop: 10 },
   metadataRetry: { alignSelf: 'flex-start', marginTop: 12, borderBottomWidth: 1, borderBottomColor: '#E43B48' },
   metadataRetryText: { color: '#FF6B6B', fontSize: 10, fontWeight: '700', letterSpacing: 0.8 },
+  scheduleSection: { marginHorizontal: 20, marginTop: 22 },
+  scheduleRow: { flexDirection: 'row', alignItems: 'center', gap: 12, paddingVertical: 9 },
+  scheduleWhen: { color: '#7890AE', fontSize: 12, fontWeight: '700', width: 104 },
+  scheduleCopy: { flex: 1 },
+  scheduleOnAir: { color: '#4ADE80', fontSize: 10, fontWeight: '700', letterSpacing: 1 },
   historySection: { marginHorizontal: 20, marginTop: 26, borderTopWidth: 1, borderTopColor: '#204570', paddingTop: 18 },
   nextTrackSection: { marginHorizontal: 20, marginTop: 22, padding: 14, borderLeftWidth: 2, borderLeftColor: '#E43B48', backgroundColor: '#0D2A57' },
   nextTrackRow: { flexDirection: 'row', alignItems: 'center' },
