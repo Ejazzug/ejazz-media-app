@@ -83,15 +83,26 @@ async function underBudget(maxPerHour: number, maxPerDay: number): Promise<boole
   return (h?.n ?? 0) < maxPerHour && (d?.n ?? 0) < maxPerDay;
 }
 
+/**
+ * "Clock this..." is meant to make a listener look up, so the prompt asks for the thing a fan
+ * would not already know: what happened while the song was made, what the artist has said
+ * about it, an unexpected connection. The obvious card -- release year, chart position, award
+ * list, who featured -- is explicitly ruled out, because anyone can find it and nobody stops
+ * for it. The accuracy rules stay as strict as before (NONE when unsure, never invent a quote):
+ * a livelier remit is exactly where a model starts making things up, and one already did.
+ */
 function buildPrompt(artist: string, title: string): string {
   return [
-    "You write one short 'Clock this...' fact for a radio app, shown under the player while a song plays.",
+    "You write one 'Clock this...' line for a radio app, shown under the player while a song plays.",
     `Song: "${title}" by ${artist}.`,
+    "Make it fascinating: the story behind the song, something that happened while it was made or after it came out, what the artist themselves has said about it, an unexpected connection, a detail that surprises even a fan.",
     "Rules:",
-    "- One or two sentences, at most 45 words, plain text, no emoji, no quotation of lyrics.",
-    "- Only state something you are genuinely confident is true about this song or this artist. Prefer verifiable facts: release year, chart performance, collaborators, awards, origin of the title.",
-    "- Do NOT guess, embellish or invent. If you are not confident of any specific fact, reply with exactly: NONE",
-    "- Reply with the fact only, or NONE.",
+    "- NOT the obvious. No bare release year, chart position, award list, streaming numbers, genre label or feature credit -- unless that fact is itself the surprise and you say what makes it surprising.",
+    "- A short quote from the artist about the song is welcome: their real words only, and name them as the speaker. Never quote the lyrics.",
+    "- One or two sentences, at most 45 words, plain text, no emoji, no hashtags.",
+    "- Say only what you are genuinely confident is true. Do NOT guess, embellish, or invent a story, a quote, a name or a number.",
+    "- If you know nothing fascinating about this song or artist that you are sure of, reply with exactly: NONE. A true but dull line is a NONE too.",
+    "- Reply with the line only, or NONE.",
   ].join("\n");
 }
 

@@ -9,6 +9,7 @@ import { useColors } from '@/hooks/useColors';
 import { stripLinkMarkup } from '@/lib/linkText';
 import { notificationTarget, openNotification } from '@/lib/notificationOpen';
 import {
+  clearNotificationHistory,
   getNotificationHistory,
   type StoredNotification,
 } from '@/lib/notificationHistory';
@@ -65,18 +66,23 @@ export default function NotificationsScreen() {
     (async () => {
       const dismissed = new Set(await getDismissedIds());
       let items: StoredNotification[] = [];
+      let serverAnswered = false;
       try {
         if (!isNotificationFeedConfigured()) throw new Error('Notification feed is not configured.');
         items = toStored(await fetchServerNotifications());
+        serverAnswered = true;
       } catch {
         items = [];
       }
-      // Fall back to the on-device history when the server has nothing to show -- the
-      // request failed, the feed is not configured, or the server list is genuinely empty
-      // (every install was local-only before this screen moved to the API, and those
-      // notifications should not vanish the first time it loads).
-      if (items.length === 0) {
+      if (!serverAnswered) {
+        // Offline, or the feed is not configured: show what this device kept, so the screen
+        // is not empty just because there is no signal.
         items = await getNotificationHistory();
+      } else if (items.length === 0) {
+        // The server answered, and the answer is "nothing" -- everything was retracted or has
+        // expired. That is the truth, so the local copies go too: keeping them here is what
+        // made retracted notifications reappear on the phone once the list emptied.
+        await clearNotificationHistory();
       }
       if (cancelled) return;
       setHistory(items.filter((item) => !dismissed.has(item.id)));

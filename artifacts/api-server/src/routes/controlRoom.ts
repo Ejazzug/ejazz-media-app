@@ -254,8 +254,23 @@ const PAGE = `<!doctype html>
     <div class="err" id="createErr"></div>
   </div>
 
-  <h2>Live &amp; Draft content</h2>
-  <div class="items" id="itemsList"><div class="empty">Loading…</div></div>
+  <details class="card section" id="itemsBox">
+    <summary>Live &amp; Draft content<span class="sumhint" id="itemsHint">Loading…</span></summary>
+    <div class="section-body">
+      <p class="meta" style="margin:0 0 10px;">
+        Everything created here, oldest first. <strong>Withdraw</strong> takes an item out of the app
+        and keeps the row; <strong>Delete</strong> removes the row for good. Neither recalls a push
+        already delivered to a phone's tray, which nothing can. Clearing rows does not touch the
+        Notifications log, which is the record of what was actually sent.
+      </p>
+      <div class="actions" style="gap:8px; flex-wrap:wrap;">
+        <button type="button" class="secondary" id="clearWithdrawnBtn" style="width:auto;">Clear what has gone out</button>
+        <button type="button" class="secondary" id="clearAllContentBtn" style="width:auto;">Clear everything</button>
+      </div>
+      <div class="err" id="itemsErr"></div>
+      <div class="items" id="itemsList"><div class="empty">Loading…</div></div>
+    </div>
+  </details>
   </section>
 
   <section id="panel-controls" class="panel">
@@ -636,6 +651,11 @@ async function setStatus(id, status) {
 async function loadItems() {
   const items = await api('/content', { method: 'GET' });
   const list = $('itemsList');
+  // The section is collapsed by default, so its summary has to say what is inside.
+  const count = (st) => items.filter((i) => i.status === st).length;
+  $('itemsHint').textContent = items.length
+    ? items.length + ' item(s) - ' + count('live') + ' live, ' + count('draft') + ' draft, ' + count('withdrawn') + ' gone out'
+    : 'Nothing yet';
   if (!items.length) {
     list.innerHTML = '<div class="empty">Nothing yet — create something above.</div>';
     return;
@@ -648,6 +668,7 @@ async function loadItems() {
     const actions = [];
     if (item.status !== 'live') actions.push('<button data-id="' + item.id + '" data-status="live" class="setStatus">Publish</button>');
     if (item.status === 'live') actions.push('<button data-id="' + item.id + '" data-status="withdrawn" class="secondary setStatus">Withdraw</button>');
+    actions.push('<button data-id="' + item.id + '" data-title="' + escapeHtml(item.title) + '" class="secondary delItem">Delete</button>');
     return '<div class="item">' +
       '<div><div><strong>' + escapeHtml(item.title) + '</strong> <span class="badge ' + item.status + '">' + item.status + '</span></div>' +
       '<div class="meta">' + escapeHtml(meta) + '</div></div>' +
@@ -656,7 +677,43 @@ async function loadItems() {
   document.querySelectorAll('.setStatus').forEach((btn) => {
     btn.addEventListener('click', () => setStatus(btn.getAttribute('data-id'), btn.getAttribute('data-status')));
   });
+  document.querySelectorAll('.delItem').forEach((btn) => {
+    btn.addEventListener('click', () => deleteItem(btn.getAttribute('data-id'), btn.getAttribute('data-title')));
+  });
 }
+
+async function deleteItem(id, title) {
+  if (!confirm('Delete "' + title + '" for good? It disappears from the app and from this list.')) return;
+  $('itemsErr').textContent = '';
+  try {
+    await api('/content/' + id, { method: 'DELETE' });
+    await loadItems();
+  } catch (e) { $('itemsErr').textContent = 'Could not delete: ' + e.message; }
+}
+
+// Clearing the list. Line breaks in these warnings are built with String.fromCharCode(10),
+// never a backslash escape: this page is one template literal, and such an escape reaches
+// the browser as a real newline inside a quoted string -- a SyntaxError that kills every
+// listener on the page. Same reason as the notification log's own Clear all below.
+async function clearContent(onlyWithdrawn) {
+  const br = String.fromCharCode(10);
+  const warning = onlyWithdrawn
+    ? 'Clear everything that has gone out?' + br + br
+      + 'Only withdrawn items are removed. Anything still live or draft stays exactly as it is.'
+    : 'Clear the WHOLE content list?' + br + br
+      + 'Live items are removed too, so they stop showing in the app. The Notifications log keeps '
+      + 'the record of what was sent, and a push already in a phone tray cannot be recalled.';
+  if (!confirm(warning)) return;
+  $('itemsErr').textContent = '';
+  try {
+    const r = await api('/content?confirm=yes' + (onlyWithdrawn ? '&only=withdrawn' : ''), { method: 'DELETE' });
+    await loadItems();
+    $('itemsErr').textContent = 'Removed ' + r.deleted + ' item(s).';
+  } catch (e) { $('itemsErr').textContent = 'Could not clear: ' + e.message; }
+}
+
+$('clearWithdrawnBtn').addEventListener('click', () => clearContent(true));
+$('clearAllContentBtn').addEventListener('click', () => clearContent(false));
 
 function escapeHtml(s) {
   return String(s || '').replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));

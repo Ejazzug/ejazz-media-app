@@ -174,6 +174,47 @@ router.patch("/content/:id", async (req, res) => {
 });
 
 /**
+ * DELETE /api/admin/content/:id -- remove one content item for good.
+ *
+ * Withdrawing hides an item from the app and keeps it in the list; this drops the row. The
+ * notification log is untouched: `notifications.content_item_id` is deliberately not a
+ * foreign key, so the record that a push went out survives the content item it was for.
+ * Nothing is recalled from a phone's tray by either action.
+ */
+router.delete("/content/:id", async (req, res) => {
+  const id = Number(req.params.id);
+  if (!Number.isInteger(id)) {
+    res.status(400).json({ error: "invalid id" });
+    return;
+  }
+  const [item] = await db.delete(contentItemsTable).where(eq(contentItemsTable.id, id)).returning();
+  if (!item) {
+    res.status(404).json({ error: "not found" });
+    return;
+  }
+  res.json({ ok: true, deleted: 1 });
+});
+
+/**
+ * DELETE /api/admin/content?confirm=yes -- clear the whole content list.
+ *
+ * `?only=withdrawn` keeps anything still live or draft, which is the safe everyday
+ * "tidy up what has gone out" and what the Control Room's button sends by default.
+ * Requires ?confirm=yes either way, the same guard the notification log uses, so a
+ * mistyped URL cannot empty the list.
+ */
+router.delete("/content", async (req, res) => {
+  if (req.query.confirm !== "yes") {
+    res.status(400).json({ error: "Add ?confirm=yes to clear the content list." });
+    return;
+  }
+  const rows = req.query.only === "withdrawn"
+    ? await db.delete(contentItemsTable).where(eq(contentItemsTable.status, "withdrawn")).returning({ id: contentItemsTable.id })
+    : await db.delete(contentItemsTable).returning({ id: contentItemsTable.id });
+  res.json({ ok: true, deleted: rows.length });
+});
+
+/**
  * The stored programme ENTRIES (not the flattened per-day rows GET /api/shows returns),
  * so the Control Room can edit a show as the one thing the operator created. Each entry
  * carries a plain-English summary of its repeat pattern, built from the same rules the
