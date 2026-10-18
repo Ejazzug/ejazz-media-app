@@ -24,6 +24,9 @@ export type ServerNotification = {
   body: string;
   topic: string;
   sentAt: number;
+  imageUrl: string;
+  linkUrl: string;
+  openMode: 'details' | 'link';
 };
 
 export function isNotificationFeedConfigured(): boolean {
@@ -44,6 +47,9 @@ function toServerNotification(raw: unknown): ServerNotification | null {
     title: r.title,
     body: typeof r.body === 'string' ? r.body : '',
     topic: typeof r.topic === 'string' ? r.topic : 'all',
+    imageUrl: typeof r.imageUrl === 'string' ? r.imageUrl : '',
+    linkUrl: typeof r.linkUrl === 'string' ? r.linkUrl : '',
+    openMode: r.openMode === 'link' ? 'link' : 'details',
     sentAt: Number.isNaN(sentAt) ? Date.now() : sentAt,
   };
 }

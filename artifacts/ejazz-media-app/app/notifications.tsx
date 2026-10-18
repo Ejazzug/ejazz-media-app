@@ -5,6 +5,8 @@ import { Alert, Pressable, ScrollView, StyleSheet, Text, View } from 'react-nati
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { MINI_PLAYER_CLEARANCE } from '@/components/MediaComponents';
 import { useColors } from '@/hooks/useColors';
+import { stripLinkMarkup } from '@/lib/linkText';
+import { notificationTarget, openNotification } from '@/lib/notificationOpen';
 import {
   getNotificationHistory,
   type StoredNotification,
@@ -49,8 +51,15 @@ export default function NotificationsScreen() {
    */
   const loadHistory = useCallback(() => {
     let cancelled = false;
-    const toStored = (list: { id: string; title: string; body: string; sentAt: number }[]) =>
-      list.map((n) => ({ id: n.id, title: n.title, body: n.body, receivedAt: n.sentAt }));
+    const toStored = (list: Awaited<ReturnType<typeof fetchServerNotifications>>) =>
+      list.map((n) => ({
+        id: n.id,
+        title: n.title,
+        body: n.body,
+        receivedAt: n.sentAt,
+        // What a tap needs to open the full message or go straight to the link.
+        data: { fullTitle: n.title, fullBody: n.body, image: n.imageUrl, url: n.linkUrl, openMode: n.openMode },
+      }));
 
     (async () => {
       const dismissed = new Set(await getDismissedIds());
@@ -164,13 +173,21 @@ export default function NotificationsScreen() {
         ) : (
           <View style={styles.list}>
             {history.map((item) => (
-              <View key={item.id} style={styles.item}>
+              <Pressable
+                key={item.id}
+                style={styles.item}
+                onPress={() =>
+                  openNotification(router, notificationTarget(item.data, { title: item.title, body: item.body }))
+                }
+                accessibilityRole="button"
+                accessibilityLabel={`Open notification: ${item.title}`}
+              >
                 <View style={styles.itemIcon}>
                   <Feather name="bell" size={16} color={colors.primary} />
                 </View>
                 <View style={styles.itemCopy}>
                   <Text style={styles.itemTitle}>{item.title}</Text>
-                  {item.body ? <Text style={styles.itemBody}>{item.body}</Text> : null}
+                  {item.body ? <Text numberOfLines={3} style={styles.itemBody}>{stripLinkMarkup(item.body)}</Text> : null}
                   <Text style={styles.itemTime}>{formatReceivedAt(item.receivedAt)}</Text>
                 </View>
                 <Pressable
@@ -182,7 +199,7 @@ export default function NotificationsScreen() {
                 >
                   <Feather name="x" size={16} color={colors.mutedForeground} />
                 </Pressable>
-              </View>
+              </Pressable>
             ))}
           </View>
         )}

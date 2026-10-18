@@ -1,13 +1,17 @@
 import { useEffect } from 'react';
 import {
+  getInitialNotification,
   getMessaging,
   onMessage,
+  onNotificationOpenedApp,
   subscribeToTopic,
 } from '@react-native-firebase/messaging';
+import { useRouter } from 'expo-router';
 import * as Notifications from 'expo-notifications';
 import { PermissionsAndroid, Platform } from 'react-native';
 
 import { appendNotificationToHistory } from './notificationHistory';
+import { notificationTarget, openNotification } from './notificationOpen';
 
 const NOTIFICATION_CHANNEL_ID = 'default';
 const FCM_TOPICS = ['all', 'radio', 'xtra'] as const;
@@ -72,6 +76,62 @@ async function showForegroundMessage(
 }
 
 export function usePushNotifications(): void {
+  const router = useRouter();
+
+  // A tap on a notification: open the full message, or go straight to its link. Three
+  // routes in, all funnelled through one function:
+  //  - app killed, notification tapped          -> getInitialNotification
+  //  - app in the background, tapped            -> onNotificationOpenedApp
+  //  - shown by us while the app was open       -> expo-notifications response listener
+  // The same tap must never open twice, so a recent id is remembered.
+  useEffect(() => {
+    const firebaseMessaging = getMessaging();
+    let lastOpened = '';
+    let lastOpenedAt = 0;
+    // Two listeners can both report one tap with different ids; treat taps within 3 s as one.
+    const isDuplicate = (key: string) => {
+      const now = Date.now();
+      const dup = key === lastOpened || now - lastOpenedAt < 3000;
+      if (!dup) {
+        lastOpened = key;
+        lastOpenedAt = now;
+      }
+      return dup;
+    };
+    const handle = (message: RemoteMessage | null | undefined, delayMs = 0) => {
+      if (!message) return;
+      const text = getMessageText(message);
+      const key = String(message.messageId ?? message.data?.contentId ?? text.title);
+      if (isDuplicate(key)) return;
+      const target = notificationTarget(message.data as Record<string, unknown> | undefined, text);
+      // On a cold start the navigator is not ready for a moment.
+      setTimeout(() => openNotification(router, target), delayMs);
+    };
+
+    getInitialNotification(firebaseMessaging)
+      .then((message) => handle(message as RemoteMessage | null, 700))
+      .catch(() => undefined);
+    const unsubscribeOpened = onNotificationOpenedApp(firebaseMessaging, (message) =>
+      handle(message as RemoteMessage),
+    );
+    const responseSub = Notifications.addNotificationResponseReceivedListener((response) => {
+      const content = response.notification.request.content;
+      const key = response.notification.request.identifier;
+      if (isDuplicate(key)) return;
+      openNotification(
+        router,
+        notificationTarget(content.data as Record<string, unknown> | undefined, {
+          title: content.title ?? undefined,
+          body: content.body ?? undefined,
+        }),
+      );
+    });
+    return () => {
+      unsubscribeOpened();
+      responseSub.remove();
+    };
+  }, [router]);
+
   useEffect(() => {
     let isMounted = true;
     const firebaseMessaging = getMessaging();

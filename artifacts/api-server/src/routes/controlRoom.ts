@@ -223,6 +223,25 @@ const PAGE = `<!doctype html>
         <option value="xtra">EJazz Xtra</option>
       </select>
     </div>
+    <div id="pushExtraFields" style="display:none;">
+      <div class="field" style="margin-top:10px;">
+        <label for="f_image">Notification image (optional, https link)</label>
+        <input type="text" id="f_image" placeholder="https://.../poster.jpg">
+      </div>
+      <div class="field">
+        <label for="f_link">Link (optional)</label>
+        <input type="text" id="f_link" placeholder="https://play.google.com/store/apps/details?id=...">
+      </div>
+      <div class="field">
+        <label for="f_openMode">When someone taps the notification</label>
+        <select id="f_openMode">
+          <option value="details">Open the full message in the app</option>
+          <option value="link">Go straight to the link</option>
+        </select>
+      </div>
+      <button type="button" class="secondary" id="insertLinkBtn" style="width:auto;margin-bottom:6px;">Insert a link in the body</button>
+      <p class="hint">A notification tray cannot hold a tappable word, so it shows the plain words (for example "Click Here"). In the app the words become a real link. Insert one with the button, or type it as [Click Here](https://...).</p>
+    </div>
     <div class="field" style="margin-top:10px;">
       <label for="f_schedule">Send later (optional) - saves as a draft and publishes + sends the push at this time</label>
       <input type="datetime-local" id="f_schedule">
@@ -524,6 +543,19 @@ function showPushDelivery(delivery) {
 
 $('f_push').addEventListener('change', () => {
   $('pushTopicField').style.display = $('f_push').checked ? 'block' : 'none';
+  $('pushExtraFields').style.display = $('f_push').checked ? 'block' : 'none';
+});
+
+$('insertLinkBtn').addEventListener('click', () => {
+  const label = window.prompt('The words people will tap, for example: Click Here');
+  if (!label) return;
+  const target = window.prompt('Where should it go? A full address, for example https://...');
+  if (!target || target.indexOf('http') !== 0) { $('createErr').textContent = 'The link must start with https://'; return; }
+  const box = $('f_body');
+  const markup = '[' + label.trim() + '](' + target.trim() + ')';
+  const at = box.selectionStart == null ? box.value.length : box.selectionStart;
+  box.value = box.value.slice(0, at) + markup + box.value.slice(at);
+  if (!$('f_link').value) $('f_link').value = target.trim();
 });
 
 $('createBtn').addEventListener('click', async () => {
@@ -541,6 +573,9 @@ $('createBtn').addEventListener('click', async () => {
     pushEnabled: $('f_push').checked,
     pushTopic: $('f_pushTopic').value,
     placement: 'home',
+    imageUrl: $('f_image').value.trim() || null,
+    linkUrl: $('f_link').value.trim() || null,
+    openMode: $('f_openMode').value,
   };
   if ($('f_schedule').value) {
     payload.status = 'draft';
@@ -582,6 +617,8 @@ $('createBtn').addEventListener('click', async () => {
     $('f_quizCorrect').value = '';
     $('p_element').value = ''; $('p_chart').value = ''; $('p_songWrap').style.display = 'none';
     $('pushTopicField').style.display = 'none';
+    $('pushExtraFields').style.display = 'none';
+    $('f_image').value = ''; $('f_link').value = ''; $('f_openMode').value = 'details';
     await loadItems();
   } catch (e) {
     $('createErr').textContent = 'Could not create: ' + e.message;
@@ -799,7 +836,7 @@ const CONTROL_SECTIONS = [
     ['sponsor.startAt', 'datetime', 'Show from (optional)'],
     ['sponsor.endAt', 'datetime', 'Hide after (optional)'],
   ] },
-  { title: 'Contact & social links', hint: 'Shown in the More tab. Leave blank to keep the app defaults. Only https links are accepted.', fields: [
+  { title: 'Contact & general links', hint: 'Shown in the More tab for the whole app (each station has its own social sections below). Leave blank to keep the app defaults. Only https links are accepted.', fields: [
     ['links.contactEmail', 'text', 'Contact email'],
     ['links.instagramUrl', 'text', 'Instagram link'],
     ['links.whatsappUrl', 'text', 'WhatsApp link (https://wa.me/...)'],
@@ -807,6 +844,24 @@ const CONTROL_SECTIONS = [
     ['links.privacyUrl', 'text', 'Privacy policy link'],
     ['links.termsUrl', 'text', 'Terms link'],
     ['links.shareText', 'text', 'Text added when listeners share a station'],
+  ] },
+  { title: 'EJazz Radio socials', hint: 'Shown in the More tab under this station. Leave blank to hide. Only https links are accepted.', fields: [
+    ['links.radio.instagramUrl', 'text', 'Instagram'],
+    ['links.radio.facebookUrl', 'text', 'Facebook'],
+    ['links.radio.xUrl', 'text', 'X (Twitter)'],
+    ['links.radio.tiktokUrl', 'text', 'TikTok'],
+    ['links.radio.youtubeUrl', 'text', 'YouTube'],
+    ['links.radio.whatsappUrl', 'text', 'WhatsApp (https://wa.me/...)'],
+    ['links.radio.websiteUrl', 'text', 'Website'],
+  ] },
+  { title: 'EJazz Xtra socials', hint: 'Shown in the More tab under this station. Leave blank to hide. Only https links are accepted.', fields: [
+    ['links.xtra.instagramUrl', 'text', 'Instagram'],
+    ['links.xtra.facebookUrl', 'text', 'Facebook'],
+    ['links.xtra.xUrl', 'text', 'X (Twitter)'],
+    ['links.xtra.tiktokUrl', 'text', 'TikTok'],
+    ['links.xtra.youtubeUrl', 'text', 'YouTube'],
+    ['links.xtra.whatsappUrl', 'text', 'WhatsApp (https://wa.me/...)'],
+    ['links.xtra.websiteUrl', 'text', 'Website'],
   ] },
 ];
 
@@ -979,11 +1034,15 @@ function songFactsSectionHtml() {
     '<p class="hint">Written by AI the first time a song plays, or typed here. A fact you type always wins and is never overwritten. Leave the song title blank for a fact about the artist that suits any of their songs.</p>' +
     '<div class="checkbox" style="margin-bottom:10px;"><input type="checkbox" id="sf_auto"><label for="sf_auto" style="margin:0;">Write a fact with AI the first time a song plays (saved with the Save button below)</label></div>' +
     '<div class="field"><label for="sf_provider">AI that writes the facts</label><select id="sf_provider">' +
-    '<option value="gemini">Gemini (checks the web first when it can)</option><option value="groq">Groq (faster, no web check - leave facts you are unsure about to the sheet)</option>' +
+    '<option value="gemini">Gemini (checks the web first when it can)</option><option value="none">No AI - only the sheet and facts I type</option><option value="groq">Groq (faster, no web check - leave facts you are unsure about to the sheet)</option>' +
     '</select><div class="hint" id="sf_provhint" style="margin-top:4px;"></div></div>' +
     '<div class="row"><div class="field"><label for="sf_hour">Most new AI facts per hour</label><input type="number" id="sf_hour" min="0" max="1000"></div>' +
     '<div class="field"><label for="sf_day">Most new AI facts per day</label><input type="number" id="sf_day" min="0" max="10000"></div></div>' +
     '<p class="hint">Songs that already have a fact never count. At the limit a new song simply shows no fact until there is room. 0 stops AI writing.</p>' +
+    '<div class="field"><label for="sf_sheet">Facts from a Google Sheet (optional)</label>' +
+    '<input type="text" id="sf_sheet" placeholder="https://docs.google.com/spreadsheets/d/...">' +
+    '<div class="hint" style="margin-top:4px;">Columns: artist, title, fact (header row; the title can be blank for a fact about the artist). Share the sheet as anyone with the link can view, or publish it as CSV. Used before any AI, so these cost nothing. Checked every hour; rows removed from the sheet are removed here. Facts you type here are never overwritten by it. Save keeps the link.</div>' +
+    '<div style="display:flex;gap:8px;align-items:center;margin-top:6px;"><button type="button" class="secondary" id="sf_sync" style="width:auto;margin:0;">Sync now</button><span class="hint" id="sf_syncmsg" style="margin:0;"></span></div></div>' +
     '<div class="row"><div class="field"><label for="sf_artist">Artist</label><input type="text" id="sf_artist"></div>' +
     '<div class="field"><label for="sf_title">Song (optional)</label><input type="text" id="sf_title"></div></div>' +
     '<div class="field"><label for="sf_body">Fact</label><textarea id="sf_body" rows="2" maxlength="400"></textarea></div>' +
@@ -1007,7 +1066,7 @@ async function loadSongFacts() {
       const who = f.title ? f.artist + ' - ' + f.title : f.artist + ' (any song)';
       const marker = f.body ? '' : ' <span class="badge expired">no fact found</span>';
       return '<div class="item" data-id="' + f.id + '"><div class="lead"><div style="flex:1;min-width:0;">' +
-        '<div class="title">' + escapeHtml(who) + ' <span class="badge ' + (f.source === 'manual' ? 'live' : 'draft') + '">' + (f.source === 'manual' ? 'typed' : 'AI') + '</span>' +
+        '<div class="title">' + escapeHtml(who) + ' <span class="badge ' + (f.source === 'manual' ? 'live' : 'draft') + '">' + (f.source === 'manual' ? 'typed' : f.source === 'sheet' ? 'sheet' : 'AI') + '</span>' +
         (f.enabled || !f.body ? '' : ' <span class="badge expired">off</span>') + marker + '</div>' +
         '<div class="meta">' + escapeHtml(f.body) + '</div></div>' +
         '<div class="actions">' +

@@ -22,6 +22,10 @@ export const contentItemsTable = pgTable("content_items", {
   title: text("title").notNull(),
   body: text("body"),
   imageUrl: text("image_url"),
+  // Push behaviour: an optional link, and what a tap does -- "details" opens the full message
+  // in the app, "link" opens linkUrl straight away. Markup in body: [label](https://...).
+  linkUrl: text("link_url"),
+  openMode: text("open_mode").notNull().default("details"),
   relatedArtist: text("related_artist"),
   relatedSong: text("related_song"),
   relatedShow: text("related_show"),

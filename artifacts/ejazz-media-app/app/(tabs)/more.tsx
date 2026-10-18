@@ -20,11 +20,36 @@ export default function MoreScreen() {
   const insets = useSafeAreaInsets();
   const router = useRouter();
   const { links } = useAppConfig();
+  // Each station has its own socials; a station with none set shows nothing here.
+  const stationGroups = ([
+    { title: 'EJAZZ RADIO', links: links.radio },
+    { title: 'EJAZZ XTRA', links: links.xtra },
+  ] as const)
+    .map((group) => ({
+      title: group.title,
+      items: (
+        [
+          ['Instagram', 'instagram', group.links.instagramUrl],
+          ['Facebook', 'facebook', group.links.facebookUrl],
+          ['X', 'twitter', group.links.xUrl],
+          ['TikTok', 'music', group.links.tiktokUrl],
+          ['YouTube', 'youtube', group.links.youtubeUrl],
+          ['WhatsApp', 'message-circle', group.links.whatsappUrl],
+          ['Website', 'globe', group.links.websiteUrl],
+        ] as const
+      )
+        .filter(([, , url]) => Boolean(url))
+        .map(([label, icon, url]) => ({ label, icon, action: url }) as MenuItem),
+    }))
+    .filter((group) => group.items.length > 0);
+  const anyStationLinks = stationGroups.length > 0;
   const items: MenuItem[] = [
     { label: 'Notifications', icon: 'bell', route: '/notifications' },
     { label: 'About EJazz', icon: 'info' },
     { label: 'Contact EJazz', icon: 'mail', action: `mailto:${links.contactEmail || 'hello@ejazzmedia.com'}` },
-    { label: 'Instagram', icon: 'instagram', action: links.instagramUrl || 'https://instagram.com' },
+    ...(links.instagramUrl || !anyStationLinks
+      ? [{ label: 'Instagram', icon: 'instagram', action: links.instagramUrl || 'https://instagram.com' } as MenuItem]
+      : []),
     ...(links.whatsappUrl ? [{ label: 'WhatsApp', icon: 'message-circle', action: links.whatsappUrl } as MenuItem] : []),
     ...(links.websiteUrl ? [{ label: 'Website', icon: 'globe', action: links.websiteUrl } as MenuItem] : []),
     { label: 'Privacy Policy', icon: 'shield', action: links.privacyUrl || undefined },
@@ -75,6 +100,22 @@ export default function MoreScreen() {
             </Pressable>
           ))}
         </View>
+        {stationGroups.map((group) => (
+          <View key={group.title} style={styles.menu}>
+            <Text style={styles.groupTitle}>{group.title}</Text>
+            {group.items.map((item) => (
+              <Pressable
+                key={item.label}
+                onPress={() => item.action && openLink(item.action)}
+                style={({ pressed }) => [styles.menuItem, { opacity: pressed ? 0.65 : 1 }]}
+              >
+                <View style={styles.menuIcon}><Feather name={item.icon} size={18} color={colors.primary} /></View>
+                <Text style={styles.menuLabel}>{item.label}</Text>
+                <Feather name="arrow-up-right" size={16} color={colors.mutedForeground} />
+              </Pressable>
+            ))}
+          </View>
+        ))}
         <View style={styles.version}>
           <Text style={styles.versionText}>EJAZZ MEDIA APP</Text>
           <Text style={styles.versionSubtext}>VERSION {getAppVersion()}</Text>
@@ -103,6 +144,7 @@ const styles = StyleSheet.create({
   hostName: { color: '#F7F9FC', fontSize: 15, fontWeight: '700' },
   hostBio: { color: '#A7B7CC', fontSize: 13, lineHeight: 18 },
   menu: { marginHorizontal: 20, marginTop: 27, borderTopWidth: 1, borderTopColor: '#204570' },
+  groupTitle: { color: '#FF6B6B', fontSize: 10, fontWeight: '700', letterSpacing: 1.5, paddingTop: 16, paddingBottom: 4 },
   menuItem: { minHeight: 62, flexDirection: 'row', alignItems: 'center', borderBottomWidth: 1, borderBottomColor: '#204570', gap: 13 },
   menuIcon: { width: 32, alignItems: 'center' },
   menuLabel: { color: '#F7F9FC', fontSize: 15, fontWeight: '600', flex: 1 },

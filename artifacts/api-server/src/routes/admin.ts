@@ -16,6 +16,7 @@ import { artistKey, titleKey, listFacts } from "../lib/songFacts";
 import { isGroqConfigured } from "../lib/groq";
 import { syncSheet, lastSheetSync, validateSheetUrl } from "../lib/songFactsSheet";
 import { attemptContentPush } from "../lib/contentPush";
+import { cleanHttpUrl } from "../lib/linkText";
 import { normalizeShowInput, describeRepeat, slotsOf, daysOf } from "../lib/showSchedule";
 import { recentAutoFacts, runDaypart } from "../lib/funFacts";
 import { getAppConfig, saveAppConfig } from "../lib/appConfig";
@@ -41,6 +42,34 @@ function withDates(body: unknown): unknown {
     }
   }
   return out;
+}
+
+
+/**
+ * Validates and normalises the link / image / tap-behaviour fields before the schema sees
+ * them: a blank becomes null, anything that is not a plain http(s) link is rejected with a
+ * message the Control Room shows, and openMode can only be "details" or "link".
+ */
+function normalisePushFields(body: unknown): { body: unknown; error?: string } {
+  if (!body || typeof body !== "object" || Array.isArray(body)) return { body };
+  const out: Record<string, unknown> = { ...(body as Record<string, unknown>) };
+  for (const [key, label] of [["linkUrl", "link"], ["imageUrl", "image"]] as const) {
+    if (!(key in out)) continue;
+    const raw = out[key];
+    if (raw === null || (typeof raw === "string" && !raw.trim())) {
+      out[key] = null;
+      continue;
+    }
+    const cleaned = cleanHttpUrl(raw);
+    if (!cleaned) return { body, error: "The " + label + " must be a full web address starting with https:// (or http://)." };
+    if (key === "imageUrl" && !cleaned.startsWith("https://")) return { body, error: "The image link must start with https://." };
+    out[key] = cleaned;
+  }
+  if ("openMode" in out && out.openMode !== "details" && out.openMode !== "link") out.openMode = "details";
+  if (out.openMode === "link" && "linkUrl" in out && !out.linkUrl) {
+    return { body, error: "Choose a link to open, or set the tap to open the full message." };
+  }
+  return { body: out };
 }
 
 router.post("/login", (req, res) => {
@@ -81,7 +110,12 @@ router.get("/content", async (_req, res) => {
 });
 
 router.post("/content", async (req, res) => {
-  const parsed = insertContentItemSchema.safeParse(withDates(req.body));
+  const push = normalisePushFields(req.body);
+  if (push.error) {
+    res.status(400).json({ error: push.error });
+    return;
+  }
+  const parsed = insertContentItemSchema.safeParse(withDates(push.body));
   if (!parsed.success) {
     res.status(400).json({ error: parsed.error.flatten() });
     return;
@@ -100,7 +134,12 @@ router.patch("/content/:id", async (req, res) => {
     res.status(400).json({ error: "invalid id" });
     return;
   }
-  const parsed = updateContentItemSchema.safeParse(withDates(req.body));
+  const push = normalisePushFields(req.body);
+  if (push.error) {
+    res.status(400).json({ error: push.error });
+    return;
+  }
+  const parsed = updateContentItemSchema.safeParse(withDates(push.body));
   if (!parsed.success) {
     res.status(400).json({ error: parsed.error.flatten() });
     return;

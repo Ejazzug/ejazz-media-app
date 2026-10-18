@@ -14,6 +14,16 @@ import { isPulseConfigured } from '@/lib/pulse';
 
 export type StreamConfig = { url: string; backupUrl: string };
 
+export type StationLinks = {
+  instagramUrl: string;
+  facebookUrl: string;
+  xUrl: string;
+  tiktokUrl: string;
+  youtubeUrl: string;
+  whatsappUrl: string;
+  websiteUrl: string;
+};
+
 export type AppConfig = {
   features: {
     news: boolean;
@@ -63,6 +73,8 @@ export type AppConfig = {
     privacyUrl: string;
     termsUrl: string;
     shareText: string;
+    radio: StationLinks;
+    xtra: StationLinks;
   };
   podcasts: PodcastConfig[];
 };
@@ -92,6 +104,8 @@ export const DEFAULT_APP_CONFIG: AppConfig = {
     privacyUrl: '',
     termsUrl: '',
     shareText: '',
+    radio: { instagramUrl: '', facebookUrl: '', xUrl: '', tiktokUrl: '', youtubeUrl: '', whatsappUrl: '', websiteUrl: '' },
+    xtra: { instagramUrl: '', facebookUrl: '', xUrl: '', tiktokUrl: '', youtubeUrl: '', whatsappUrl: '', websiteUrl: '' },
   },
   podcasts: [],
 };

@@ -39,6 +39,17 @@ export type SongFactsConfig = {
   sheetUrl: string;
 };
 
+/** One station's own social / web links. Blank = not shown. */
+export type StationLinks = {
+  instagramUrl: string;
+  facebookUrl: string;
+  xUrl: string;
+  tiktokUrl: string;
+  youtubeUrl: string;
+  whatsappUrl: string;
+  websiteUrl: string;
+};
+
 export type AppConfig = {
   features: {
     news: boolean;
@@ -95,6 +106,9 @@ export type AppConfig = {
     privacyUrl: string;
     termsUrl: string;
     shareText: string;
+    /** Each station's own socials, shown in the More tab under that station's name. */
+    radio: StationLinks;
+    xtra: StationLinks;
   };
   /** Empty list = the app uses its built-in podcast list. */
   podcasts: PodcastEntry[];
@@ -127,6 +141,8 @@ export const DEFAULT_APP_CONFIG: AppConfig = {
     privacyUrl: "",
     termsUrl: "",
     shareText: "",
+    radio: { instagramUrl: "", facebookUrl: "", xUrl: "", tiktokUrl: "", youtubeUrl: "", whatsappUrl: "", websiteUrl: "" },
+    xtra: { instagramUrl: "", facebookUrl: "", xUrl: "", tiktokUrl: "", youtubeUrl: "", whatsappUrl: "", websiteUrl: "" },
   },
   podcasts: [],
   // Off by default, and every daypart off: turning the feature on must be a deliberate act,
@@ -203,6 +219,19 @@ function validateSheetUrlShape(raw: string): boolean {
   } catch {
     return false;
   }
+}
+
+function stationLinks(value: unknown): StationLinks {
+  const v = obj(value);
+  return {
+    instagramUrl: url(v.instagramUrl),
+    facebookUrl: url(v.facebookUrl),
+    xUrl: url(v.xUrl),
+    tiktokUrl: url(v.tiktokUrl),
+    youtubeUrl: url(v.youtubeUrl),
+    whatsappUrl: url(v.whatsappUrl),
+    websiteUrl: url(v.websiteUrl),
+  };
 }
 
 function capNumber(value: unknown, fallback: number, max: number): number {
@@ -360,6 +389,8 @@ export function normalizeAppConfig(input: unknown): AppConfig {
       privacyUrl: url(lk.privacyUrl),
       termsUrl: url(lk.termsUrl),
       shareText: text(lk.shareText, "", 200),
+      radio: stationLinks(lk.radio),
+      xtra: stationLinks(lk.xtra),
     },
     podcasts: podcasts(src.podcasts),
     funFacts: funFacts(src.funFacts),

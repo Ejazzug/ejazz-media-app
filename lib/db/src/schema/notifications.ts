@@ -26,6 +26,9 @@ export const notificationsTable = pgTable("notifications", {
   contentItemId: integer("content_item_id"),
   title: text("title").notNull(),
   body: text("body"),
+  imageUrl: text("image_url"),
+  linkUrl: text("link_url"),
+  openMode: text("open_mode").notNull().default("details"),
   topic: pushTopicEnum("topic").notNull().default("all"),
   sentAt: timestamp("sent_at", { withTimezone: true }).notNull().defaultNow(),
   // Null = never expires. Set to hide the notification from the app after a moment passes.

@@ -2,6 +2,7 @@ import { eq } from "drizzle-orm";
 import { db, contentItemsTable, notificationsTable } from "@workspace/db";
 import type { PushTopic } from "@workspace/db";
 import { sendContentPush, type PushDeliveryResult } from "./pushNotifications";
+import { cleanHttpUrl, firstMarkupUrl } from "./linkText";
 import { logger } from "./logger";
 
 export async function attemptContentPush(item: {
@@ -17,6 +18,9 @@ export async function attemptContentPush(item: {
   // something time-limited stops showing in the app when the thing itself is over.
   // Optional: callers that build a partial item (and every existing caller) still work.
   endAt?: Date | null;
+  imageUrl?: string | null;
+  linkUrl?: string | null;
+  openMode?: string | null;
 }): Promise<PushDeliveryResult | null> {
   if (!item.pushEnabled || item.status !== "live" || item.pushSentAt) return null;
 
@@ -41,6 +45,9 @@ export async function attemptContentPush(item: {
           topic: item.pushTopic,
           sentAt: pushSentAt,
           expiresAt: item.endAt ?? null,
+          imageUrl: cleanHttpUrl(item.imageUrl),
+          linkUrl: cleanHttpUrl(item.linkUrl) ?? firstMarkupUrl(item.body ?? ""),
+          openMode: item.openMode === "link" ? "link" : "details",
         });
       } catch (logError) {
         logger.error(
