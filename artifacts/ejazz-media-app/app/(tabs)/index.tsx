@@ -1,4 +1,5 @@
 import { Feather } from '@expo/vector-icons';
+import { Image } from 'expo-image';
 import { LinearGradient } from 'expo-linear-gradient';
 import { useRouter } from 'expo-router';
 import React from 'react';
@@ -9,12 +10,28 @@ import { usePlayer } from '@/context/PlayerContext';
 import { useColors } from '@/hooks/useColors';
 import { useFeaturedNews, useLatestNews } from '@/lib/news';
 import { usePulseContent } from '@/lib/pulse';
-import { useShows, classifyLineup, formatShowTime, showStationFor } from '@/lib/shows';
+import { useShows, classifyLineup, formatShowTime, showStationFor, type Show } from '@/lib/shows';
 import { FreshEjazzSection } from '@/components/FreshEjazzSection';
 import { ContinueEjazzSection } from '@/components/ContinueEjazzSection';
 import { TheTeaSection } from '@/components/TheTeaSection';
 import { FeaturedCard, PromoBanner, SponsorSlot, UpdateBanner } from '@/components/RemoteControls';
 import { useAppConfig } from '@/lib/appConfig';
+
+function LineupCard({ show, badge, live }: { show: Show; badge: string; live?: boolean }) {
+  return (
+    <View style={[styles.lineupCard, show.imageUrl ? styles.lineupCardRow : null]}>
+      {show.imageUrl ? (
+        <Image source={show.imageUrl} contentFit="cover" style={styles.lineupArtwork} />
+      ) : null}
+      <View style={styles.lineupCopy}>
+        <Text style={live ? styles.lineupBadgeLive : styles.lineupBadge}>{badge}</Text>
+        <Text style={styles.lineupShowName}>{show.name}</Text>
+        {show.hostName ? <Text style={styles.lineupHost}>{show.hostName}</Text> : null}
+        <Text style={styles.lineupTime}>{formatShowTime(show.startMinute, show.endMinute)}</Text>
+      </View>
+    </View>
+  );
+}
 
 export default function HomeScreen() {
   const colors = useColors();
@@ -125,29 +142,10 @@ export default function HomeScreen() {
               <Text style={styles.sectionTitle}>Coming Up</Text>
             </View>
             <View style={styles.lineupList}>
-              {lineup.now ? (
-                <View style={styles.lineupCard}>
-                  <Text style={styles.lineupBadgeLive}>LIVE NOW</Text>
-                  <Text style={styles.lineupShowName}>{lineup.now.name}</Text>
-                  {lineup.now.hostName ? <Text style={styles.lineupHost}>{lineup.now.hostName}</Text> : null}
-                  <Text style={styles.lineupTime}>{formatShowTime(lineup.now.startMinute, lineup.now.endMinute)}</Text>
-                </View>
-              ) : null}
-              {lineup.next ? (
-                <View style={styles.lineupCard}>
-                  <Text style={styles.lineupBadge}>NEXT</Text>
-                  <Text style={styles.lineupShowName}>{lineup.next.name}</Text>
-                  {lineup.next.hostName ? <Text style={styles.lineupHost}>{lineup.next.hostName}</Text> : null}
-                  <Text style={styles.lineupTime}>{formatShowTime(lineup.next.startMinute, lineup.next.endMinute)}</Text>
-                </View>
-              ) : null}
+              {lineup.now ? <LineupCard show={lineup.now} badge="LIVE NOW" live /> : null}
+              {lineup.next ? <LineupCard show={lineup.next} badge="NEXT" /> : null}
               {lineup.later.map((show) => (
-                <View key={show.id} style={styles.lineupCard}>
-                  <Text style={styles.lineupBadge}>LATER</Text>
-                  <Text style={styles.lineupShowName}>{show.name}</Text>
-                  {show.hostName ? <Text style={styles.lineupHost}>{show.hostName}</Text> : null}
-                  <Text style={styles.lineupTime}>{formatShowTime(show.startMinute, show.endMinute)}</Text>
-                </View>
+                <LineupCard key={show.id} show={show} badge="LATER" />
               ))}
             </View>
           </>
@@ -240,6 +238,9 @@ const styles = StyleSheet.create({
   pulseShareBtn: { alignSelf: 'flex-start', marginTop: 4 },
   pulseShareLabel: { color: '#FF6B6B', fontSize: 10, fontWeight: '700', letterSpacing: 1 },
   lineupList: { gap: 12, marginTop: 4 },
+  lineupCardRow: { flexDirection: 'row', alignItems: 'center', gap: 12 },
+  lineupCopy: { flex: 1 },
+  lineupArtwork: { width: 54, height: 54, borderRadius: 8, backgroundColor: '#123363' },
   lineupCard: {
     padding: 16,
     borderRadius: 14,
