@@ -12,36 +12,38 @@ const PAGE = `<!doctype html>
   :root { color-scheme: dark; }
   * { box-sizing: border-box; }
   body {
-    margin: 0; font-family: -apple-system, "Segoe UI", Arial, sans-serif;
-    background: #0d0714; color: #f2eef5; min-height: 100vh;
+    margin: 0; font-family: system-ui, -apple-system, sans-serif;
+    background: #070E28; color: #F2F4FF; min-height: 100vh;
   }
   header {
-    padding: 18px 24px; border-bottom: 1px solid rgba(255,255,255,0.08);
+    padding: 18px 24px; background: #0F2153; border-bottom: 1px solid rgba(242,244,255,0.12);
     display:flex; align-items:center; justify-content:space-between;
   }
   header .brand { font-weight: 800; letter-spacing: 0.5px; }
-  header .brand span { color: #e0304a; }
+  header .brand span { color: #FF0056; }
   button {
-    background: #e0304a; color: #fff; border: none; border-radius: 7px;
+    background: #FF0056; color: #fff; border: none; border-radius: 7px;
     padding: 8px 14px; font-weight: 700; font-size: 13px; cursor: pointer;
   }
-  button.secondary { background: transparent; border: 1px solid rgba(255,255,255,0.25); color: #f2eef5; }
+  button.secondary { background: transparent; border: 1px solid rgba(242,244,255,0.25); color: #F2F4FF; }
+  button:hover:not(:disabled) { background: #BE024A; }
+  button.secondary:hover:not(:disabled) { background: rgba(255,0,86,0.12); }
   button:disabled { opacity: 0.5; cursor: default; }
   #loginView { max-width: 340px; margin: 80px auto; padding: 0 16px; }
   #loginView input {
-    width: 100%; padding: 10px 12px; border-radius: 7px; border: 1px solid rgba(255,255,255,0.2);
-    background: #1a1024; color: #fff; margin: 10px 0; font-size: 14px;
+    width: 100%; padding: 10px 12px; border-radius: 7px; border: 1px solid rgba(242,244,255,0.2);
+    background: #070E28; color: #fff; margin: 10px 0; font-size: 14px;
   }
   main { max-width: 900px; margin: 0 auto; padding: 24px 16px 60px 16px; display: none; }
-  h2 { font-size: 15px; color: #ff5f70; letter-spacing: 0.3px; margin: 28px 0 10px 0; }
+  h2 { font-size: 15px; color: #FF0056; letter-spacing: 0.3px; margin: 28px 0 10px 0; }
   .card {
-    background: #170f21; border: 1px solid rgba(255,255,255,0.08); border-radius: 10px; padding: 16px;
+    background: #16265C; border: 1px solid rgba(242,244,255,0.08); border-radius: 10px; padding: 16px;
   }
   .field { margin-bottom: 12px; }
-  .field label { display:block; font-size: 11.5px; color: #b8aec4; margin-bottom: 4px; font-weight: 700; }
+  .field label { display:block; font-size: 11.5px; color: #8A93C4; margin-bottom: 4px; font-weight: 700; }
   .field input, .field select, .field textarea {
-    width: 100%; padding: 9px 10px; border-radius: 6px; border: 1px solid rgba(255,255,255,0.15);
-    background: #0d0714; color: #fff; font-size: 13.5px; font-family: inherit;
+    width: 100%; padding: 9px 10px; border-radius: 6px; border: 1px solid rgba(242,244,255,0.15);
+    background: #070E28; color: #fff; font-size: 13.5px; font-family: inherit;
   }
   .row { display:flex; gap: 12px; }
   .row > .field { flex: 1; }
@@ -49,42 +51,42 @@ const PAGE = `<!doctype html>
   .checkbox input { width: auto; }
   .items { display:flex; flex-direction:column; gap: 10px; margin-top: 10px; }
   .item {
-    border: 1px solid rgba(255,255,255,0.08); border-radius: 9px; padding: 12px 14px;
+    border: 1px solid rgba(242,244,255,0.08); border-radius: 9px; padding: 12px 14px;
     display:flex; justify-content:space-between; align-items:flex-start; gap: 12px;
   }
-  .item .meta { font-size: 11px; color: #8a8195; margin-top: 3px; }
+  .item .meta { font-size: 11px; color: #8A93C4; margin-top: 3px; }
   .badge { font-size: 10px; font-weight: 800; padding: 2px 8px; border-radius: 5px; text-transform: uppercase; }
-  .badge.live { background: rgba(56,200,120,0.18); color: #48d68a; }
-  .badge.draft { background: rgba(255,255,255,0.1); color: #cfc7d6; }
-  .badge.withdrawn { background: rgba(255,255,255,0.06); color: #7a7285; }
-  .badge.expired { background: rgba(255,255,255,0.06); color: #7a7285; }
+  .badge.live { background: rgba(81,157,197,0.2); color: #519DC5; }
+  .badge.draft { background: rgba(242,244,255,0.1); color: #F2F4FF; }
+  .badge.withdrawn { background: rgba(242,244,255,0.06); color: #8A93C4; }
+  .badge.expired { background: rgba(242,244,255,0.06); color: #8A93C4; }
   .actions { display:flex; gap: 6px; flex-shrink: 0; }
-  .err { color: #ff6b7a; font-size: 12.5px; margin-top: 6px; min-height: 16px; }
-  .empty { color: #8a8195; font-size: 13px; padding: 10px 2px; }
+  .err { color: #FF0056; font-size: 12.5px; margin-top: 6px; min-height: 16px; }
+  .empty { color: #8A93C4; font-size: 13px; padding: 10px 2px; }
   /* Three tabs to a row: the tab strip used to wrap unevenly as tabs were added,
      and a fixed grid keeps it predictable however many there are. */
   nav.tabs { display:grid; grid-template-columns: repeat(3, 1fr); gap: 8px; margin-bottom: 14px; }
-  nav.tabs button { background: transparent; border: 1px solid rgba(255,255,255,0.2); color: #cfc7d6; padding: 9px 10px; }
-  nav.tabs button.active { background: #e0304a; border-color: #e0304a; color: #fff; }
+  nav.tabs button { background: transparent; border: 1px solid rgba(242,244,255,0.2); color: #F2F4FF; padding: 9px 10px; }
+  nav.tabs button.active { background: #FF0056; border-color: #FF0056; color: #fff; }
   @media (max-width: 560px) { nav.tabs { grid-template-columns: repeat(2, 1fr); } }
   .panel { display: none; }
   .panel.active { display: block; }
-  h3 { font-size: 13.5px; margin: 0 0 4px 0; color: #f2eef5; }
-  .hint { font-size: 12px; color: #8a8195; margin: 0 0 12px 0; line-height: 1.45; }
+  h3 { font-size: 13.5px; margin: 0 0 4px 0; color: #F2F4FF; }
+  .hint { font-size: 12px; color: #8A93C4; margin: 0 0 12px 0; line-height: 1.45; }
   .section { margin-bottom: 14px; }
-  .okmsg { color: #a7f3d0; font-size: 12.5px; margin-top: 6px; min-height: 16px; }
+  .okmsg { color: #519DC5; font-size: 12.5px; margin-top: 6px; min-height: 16px; }
 
   /* Collapsible sections. Native <details> on purpose: no listener to register, so a
      section cannot be left stuck shut by a script error elsewhere on the page. */
   details.section > summary {
-    cursor: pointer; font-size: 13.5px; font-weight: 800; color: #f2eef5;
+    cursor: pointer; font-size: 13.5px; font-weight: 800; color: #F2F4FF;
     list-style: none; display:flex; align-items:center; justify-content:space-between; gap: 10px;
   }
   details.section > summary::-webkit-details-marker { display: none; }
-  details.section > summary::after { content: "+"; color: #ff5f70; font-size: 16px; font-weight: 800; }
+  details.section > summary::after { content: "+"; color: #FF0056; font-size: 16px; font-weight: 800; }
   details.section[open] > summary::after { content: "−"; }
-  details.section > summary:hover { color: #ff5f70; }
-  details.section > summary .sumhint { font-weight: 500; font-size: 11.5px; color: #8a8195; flex: 1; }
+  details.section > summary:hover { color: #FF0056; }
+  details.section > summary .sumhint { font-weight: 500; font-size: 11.5px; color: #8A93C4; flex: 1; }
   /* App controls: three sections to a row. An opened section spans the full row so its
      form fields keep a usable width, and the others reflow around it. */
   #controlsForm { display:grid; grid-template-columns: repeat(3, 1fr); gap: 12px; align-items: start; }
@@ -94,31 +96,31 @@ const PAGE = `<!doctype html>
   #controlsForm details.section > summary .sumhint { flex-basis: 100%; order: 3; }
   @media (max-width: 760px) { #controlsForm { grid-template-columns: repeat(2, 1fr); } }
   @media (max-width: 480px) { #controlsForm { grid-template-columns: 1fr; } }
-  .section-body { padding-top: 14px; margin-top: 12px; border-top: 1px solid rgba(255,255,255,0.08); }
+  .section-body { padding-top: 14px; margin-top: 12px; border-top: 1px solid rgba(242,244,255,0.08); }
 
   /* Station sub-tabs inside the programme panel. */
   nav.subtabs { display:flex; gap: 8px; margin-bottom: 12px; }
-  nav.subtabs button { flex: 1; background: transparent; border: 1px solid rgba(255,255,255,0.2); color: #cfc7d6; }
-  nav.subtabs button.active { background: rgba(224,48,74,0.18); border-color: #e0304a; color: #fff; }
+  nav.subtabs button { flex: 1; background: transparent; border: 1px solid rgba(242,244,255,0.2); color: #F2F4FF; }
+  nav.subtabs button.active { background: rgba(255,0,86,0.18); border-color: #FF0056; color: #fff; }
 
   .pickgrid { display:flex; flex-wrap: wrap; gap: 6px; }
   .pickgrid label {
     display:inline-flex; align-items:center; gap: 5px; font-size: 12px; white-space: nowrap;
-    border: 1px solid rgba(255,255,255,0.15); border-radius: 6px; padding: 5px 8px; cursor: pointer;
+    border: 1px solid rgba(242,244,255,0.15); border-radius: 6px; padding: 5px 8px; cursor: pointer;
   }
-  .pickgrid label:has(input:checked) { background: rgba(224,48,74,0.18); border-color: #e0304a; color: #fff; }
+  .pickgrid label:has(input:checked) { background: rgba(255,0,86,0.18); border-color: #FF0056; color: #fff; }
   .pickgrid input { width: auto; margin: 0; }
   .chips { display:flex; flex-wrap: wrap; gap: 6px; }
   .chip {
     display:inline-flex; align-items:center; gap: 6px; font-size: 12px;
-    background: rgba(255,255,255,0.07); border-radius: 6px; padding: 5px 8px;
+    background: rgba(242,244,255,0.07); border-radius: 6px; padding: 5px 8px;
   }
-  .chip button { background: transparent; border: none; color: #ff8b97; padding: 0 2px; font-size: 14px; }
+  .chip button { background: transparent; border: none; color: #FF0056; padding: 0 2px; font-size: 14px; }
   .slotrow { display:flex; align-items:center; gap: 8px; margin-bottom: 8px; }
   .slotrow input { width: auto; }
-  .slotrow .dash { color: #8a8195; font-size: 12px; }
-  .slotrow button { background: transparent; border: 1px solid rgba(255,255,255,0.2); color: #ff8b97; padding: 6px 9px; }
-  .thumb { width: 42px; height: 42px; border-radius: 7px; object-fit: cover; background: rgba(255,255,255,0.06); flex-shrink: 0; }
+  .slotrow .dash { color: #8A93C4; font-size: 12px; }
+  .slotrow button { background: transparent; border: 1px solid rgba(242,244,255,0.2); color: #FF0056; padding: 6px 9px; }
+  .thumb { width: 42px; height: 42px; border-radius: 7px; object-fit: cover; background: rgba(242,244,255,0.06); flex-shrink: 0; }
   .item .lead { display:flex; gap: 10px; align-items: flex-start; }
 </style>
 </head>
@@ -462,7 +464,7 @@ let chartCache = {};
 function pickerFailed(what) {
   const hint = $('pickerHint');
   hint.textContent = 'Could not reach the dashboard (' + what + '). Type the fields in by hand.';
-  hint.style.color = '#fca5a5';
+  hint.style.color = '#FF0056';
 }
 
 async function loadPickers() {
@@ -536,7 +538,7 @@ $('p_song').addEventListener('change', () => {
 
 function showPushDelivery(delivery) {
   if (!delivery) return;
-  $('createErr').style.color = delivery.sent ? '#a7f3d0' : '#fca5a5';
+  $('createErr').style.color = delivery.sent ? '#519DC5' : '#FF0056';
   $('createErr').textContent = delivery.error ||
     ('FCM notification sent to the "' + delivery.topic + '" topic.');
 }
@@ -1257,14 +1259,14 @@ async function loadControls() {
     controlsConfig = await api('/app-config', { method: 'GET' });
     fillControls(controlsConfig);
   } catch (e) {
-    $('controlsMsg').style.color = '#ff6b7a';
+    $('controlsMsg').style.color = '#FF0056';
     $('controlsMsg').textContent = 'Could not load: ' + e.message;
   }
 }
 
 $('saveControlsBtn').addEventListener('click', async () => {
   const msg = $('controlsMsg');
-  msg.style.color = '#a7f3d0';
+  msg.style.color = '#519DC5';
   msg.textContent = 'Saving…';
   try {
     const next = JSON.parse(JSON.stringify(controlsConfig || {}));
@@ -1286,7 +1288,7 @@ $('saveControlsBtn').addEventListener('click', async () => {
     fillControls(controlsConfig);
     msg.textContent = 'Saved. Phones pick this up the next time the app opens. Anything left blank or invalid (for example a link that is not https) was reset to the default.';
   } catch (e) {
-    msg.style.color = '#ff6b7a';
+    msg.style.color = '#FF0056';
     msg.textContent = 'Could not save: ' + e.message;
   }
 });
