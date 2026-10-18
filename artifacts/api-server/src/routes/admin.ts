@@ -6,13 +6,12 @@ import {
   insertContentItemSchema,
   updateContentItemSchema,
   showsTable,
-  insertShowSchema,
-  updateShowSchema,
   hostsTable,
   insertHostSchema,
   updateHostSchema,
 } from "@workspace/db";
 import { attemptContentPush } from "../lib/contentPush";
+import { normalizeShowInput, describeRepeat, slotsOf, daysOf } from "../lib/showSchedule";
 import { recentAutoFacts, runDaypart } from "../lib/funFacts";
 import { getAppConfig, saveAppConfig } from "../lib/appConfig";
 import { signSession, requireAdmin, ADMIN_COOKIE } from "../middlewares/adminAuth";
@@ -126,35 +125,58 @@ router.patch("/content/:id", async (req, res) => {
   res.json({ ...savedItem, pushDelivery });
 });
 
+/**
+ * The stored programme ENTRIES (not the flattened per-day rows GET /api/shows returns),
+ * so the Control Room can edit a show as the one thing the operator created. Each entry
+ * carries a plain-English summary of its repeat pattern, built from the same rules the
+ * public expansion uses, so the list and the app can never disagree about what repeats.
+ */
 router.get("/shows", async (_req, res) => {
-  const items = await db.select().from(showsTable).orderBy(showsTable.dayOfWeek, showsTable.startMinute);
-  res.json(items);
+  const items = await db
+    .select()
+    .from(showsTable)
+    .orderBy(showsTable.station, showsTable.dayOfWeek, showsTable.startMinute);
+  res.json(
+    items.map((show) => ({
+      ...show,
+      slots: slotsOf(show),
+      daysOfWeek: daysOf(show),
+      repeatMode: show.repeatMode || "weekly",
+      repeatSummary: describeRepeat(show),
+    })),
+  );
 });
 
 router.post("/shows", async (req, res) => {
-  const parsed = insertShowSchema.safeParse(req.body);
-  if (!parsed.success) {
-    res.status(400).json({ error: parsed.error.flatten() });
+  const normalized = normalizeShowInput(req.body);
+  if (!normalized.ok) {
+    res.status(400).json({ error: normalized.error });
     return;
   }
-  const [item] = await db.insert(showsTable).values(parsed.data).returning();
+  const [item] = await db.insert(showsTable).values(normalized.value).returning();
   res.status(201).json(item);
 });
 
+/**
+ * Edit one entry. This REPLACES the editable fields rather than merging a few of them:
+ * a schedule is one coherent choice (a repeat type and the lists that belong to it), and
+ * a partial update could leave an entry in "dates mode with no dates", which would
+ * silently never air again.
+ */
 router.patch("/shows/:id", async (req, res) => {
   const id = Number(req.params.id);
   if (!Number.isInteger(id)) {
     res.status(400).json({ error: "invalid id" });
     return;
   }
-  const parsed = updateShowSchema.safeParse(req.body);
-  if (!parsed.success) {
-    res.status(400).json({ error: parsed.error.flatten() });
+  const normalized = normalizeShowInput(req.body);
+  if (!normalized.ok) {
+    res.status(400).json({ error: normalized.error });
     return;
   }
   const [item] = await db
     .update(showsTable)
-    .set({ ...parsed.data, updatedAt: new Date() })
+    .set({ ...normalized.value, updatedAt: new Date() })
     .where(eq(showsTable.id, id))
     .returning();
   if (!item) {

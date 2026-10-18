@@ -61,15 +61,56 @@ const PAGE = `<!doctype html>
   .actions { display:flex; gap: 6px; flex-shrink: 0; }
   .err { color: #ff6b7a; font-size: 12.5px; margin-top: 6px; min-height: 16px; }
   .empty { color: #8a8195; font-size: 13px; padding: 10px 2px; }
-  nav.tabs { display:flex; gap: 8px; margin-bottom: 4px; flex-wrap: wrap; }
-  nav.tabs button { background: transparent; border: 1px solid rgba(255,255,255,0.2); color: #cfc7d6; }
+  /* Three tabs to a row: the tab strip used to wrap unevenly as tabs were added,
+     and a fixed grid keeps it predictable however many there are. */
+  nav.tabs { display:grid; grid-template-columns: repeat(3, 1fr); gap: 8px; margin-bottom: 14px; }
+  nav.tabs button { background: transparent; border: 1px solid rgba(255,255,255,0.2); color: #cfc7d6; padding: 9px 10px; }
   nav.tabs button.active { background: #e0304a; border-color: #e0304a; color: #fff; }
+  @media (max-width: 560px) { nav.tabs { grid-template-columns: repeat(2, 1fr); } }
   .panel { display: none; }
   .panel.active { display: block; }
   h3 { font-size: 13.5px; margin: 0 0 4px 0; color: #f2eef5; }
   .hint { font-size: 12px; color: #8a8195; margin: 0 0 12px 0; line-height: 1.45; }
   .section { margin-bottom: 14px; }
   .okmsg { color: #a7f3d0; font-size: 12.5px; margin-top: 6px; min-height: 16px; }
+
+  /* Collapsible sections. Native <details> on purpose: no listener to register, so a
+     section cannot be left stuck shut by a script error elsewhere on the page. */
+  details.section > summary {
+    cursor: pointer; font-size: 13.5px; font-weight: 800; color: #f2eef5;
+    list-style: none; display:flex; align-items:center; justify-content:space-between; gap: 10px;
+  }
+  details.section > summary::-webkit-details-marker { display: none; }
+  details.section > summary::after { content: "+"; color: #ff5f70; font-size: 16px; font-weight: 800; }
+  details.section[open] > summary::after { content: "−"; }
+  details.section > summary:hover { color: #ff5f70; }
+  details.section > summary .sumhint { font-weight: 500; font-size: 11.5px; color: #8a8195; flex: 1; }
+  .section-body { padding-top: 14px; margin-top: 12px; border-top: 1px solid rgba(255,255,255,0.08); }
+
+  /* Station sub-tabs inside the programme panel. */
+  nav.subtabs { display:flex; gap: 8px; margin-bottom: 12px; }
+  nav.subtabs button { flex: 1; background: transparent; border: 1px solid rgba(255,255,255,0.2); color: #cfc7d6; }
+  nav.subtabs button.active { background: rgba(224,48,74,0.18); border-color: #e0304a; color: #fff; }
+
+  .pickgrid { display:flex; flex-wrap: wrap; gap: 6px; }
+  .pickgrid label {
+    display:inline-flex; align-items:center; gap: 5px; font-size: 12px; white-space: nowrap;
+    border: 1px solid rgba(255,255,255,0.15); border-radius: 6px; padding: 5px 8px; cursor: pointer;
+  }
+  .pickgrid label:has(input:checked) { background: rgba(224,48,74,0.18); border-color: #e0304a; color: #fff; }
+  .pickgrid input { width: auto; margin: 0; }
+  .chips { display:flex; flex-wrap: wrap; gap: 6px; }
+  .chip {
+    display:inline-flex; align-items:center; gap: 6px; font-size: 12px;
+    background: rgba(255,255,255,0.07); border-radius: 6px; padding: 5px 8px;
+  }
+  .chip button { background: transparent; border: none; color: #ff8b97; padding: 0 2px; font-size: 14px; }
+  .slotrow { display:flex; align-items:center; gap: 8px; margin-bottom: 8px; }
+  .slotrow input { width: auto; }
+  .slotrow .dash { color: #8a8195; font-size: 12px; }
+  .slotrow button { background: transparent; border: 1px solid rgba(255,255,255,0.2); color: #ff8b97; padding: 6px 9px; }
+  .thumb { width: 42px; height: 42px; border-radius: 7px; object-fit: cover; background: rgba(255,255,255,0.06); flex-shrink: 0; }
+  .item .lead { display:flex; gap: 10px; align-items: flex-start; }
 </style>
 </head>
 <body>
@@ -190,6 +231,10 @@ const PAGE = `<!doctype html>
   <section id="panel-controls" class="panel">
     <h2>App controls</h2>
     <p class="hint">Changes reach phones the next time the app opens (or returns to the foreground). Controls need the app version built with remote controls; older installs ignore them.</p>
+    <p class="hint" style="margin-bottom:10px;">
+      Every section below is collapsed — open the one you need.
+      <a href="#" id="expandAll">open all</a> · <a href="#" id="collapseAll">close all</a>
+    </p>
     <div id="controlsForm"></div>
     <div style="margin-top:14px;">
       <button id="saveControlsBtn">Save app controls</button>
@@ -198,32 +243,92 @@ const PAGE = `<!doctype html>
   </section>
 
   <section id="panel-schedule" class="panel">
-    <h2>Programme schedule</h2>
-    <p class="hint">Drives "Live now / Next / Later" on the app Home. Times are East Africa Time. Add one row per show per day.</p>
-    <div class="card">
-      <div class="row">
-        <div class="field"><label>Show name</label><input type="text" id="s_name"></div>
-        <div class="field"><label>Host</label><input type="text" id="s_host"></div>
-      </div>
-      <div class="row">
-        <div class="field"><label>Station</label>
-          <select id="s_station"><option value="radio">EJazz Radio</option><option value="xtra">EJazz Xtra</option></select>
+    <h2>Programme line-up</h2>
+    <p class="hint">Drives "Live now / Next / Later" on the app Home. Times are East Africa Time.
+      Each station has its own line-up — pick the station first, and everything below belongs to it.</p>
+
+    <nav class="subtabs" id="stationTabs">
+      <button class="stationBtn active" data-station="radio">EJazz Radio</button>
+      <button class="stationBtn" data-station="xtra">EJazz Xtra</button>
+    </nav>
+
+    <details class="card section" id="showFormBox">
+      <summary><span id="showFormTitle">Add a show</span><span class="sumhint" id="showFormHint"></span></summary>
+      <div class="section-body">
+        <div class="row">
+          <div class="field"><label for="s_name">Show name</label><input type="text" id="s_name"></div>
+          <div class="field"><label for="s_host">Host</label><input type="text" id="s_host"></div>
         </div>
-        <div class="field"><label>Day</label>
-          <select id="s_day">
-            <option value="1">Monday</option><option value="2">Tuesday</option><option value="3">Wednesday</option>
-            <option value="4">Thursday</option><option value="5">Friday</option><option value="6">Saturday</option><option value="0">Sunday</option>
-          </select>
+        <div class="row">
+          <div class="field"><label for="s_station">Station</label>
+            <select id="s_station"><option value="radio">EJazz Radio</option><option value="xtra">EJazz Xtra</option></select>
+          </div>
+          <div class="field"><label for="s_repeat">When it airs</label>
+            <select id="s_repeat">
+              <option value="weekly">Days of the week</option>
+              <option value="monthly">Dates of the month</option>
+              <option value="dates">Specific dates</option>
+            </select>
+          </div>
         </div>
+
+        <div class="field" id="weeklyBox">
+          <label>Which days</label>
+          <div class="pickgrid" id="dayBoxes"></div>
+          <p class="hint" style="margin:6px 0 0;">
+            Quick pick:
+            <a href="#" class="dayPick" data-pick="all">every day</a> ·
+            <a href="#" class="dayPick" data-pick="weekdays">Mon–Fri</a> ·
+            <a href="#" class="dayPick" data-pick="weekend">weekend</a> ·
+            <a href="#" class="dayPick" data-pick="none">clear</a>
+          </p>
+        </div>
+
+        <div class="field" id="monthlyBox" style="display:none;">
+          <label>Which dates of the month</label>
+          <div class="pickgrid" id="domBoxes"></div>
+          <p class="hint" style="margin:6px 0 0;">A month without that date (the 31st, say) simply skips it.</p>
+        </div>
+
+        <div class="field" id="datesBox" style="display:none;">
+          <label for="s_datePick">Exact dates</label>
+          <div class="row">
+            <div class="field"><input type="date" id="s_datePick"></div>
+            <div class="field"><button type="button" class="secondary" id="addDateBtn">Add this date</button></div>
+          </div>
+          <div class="chips" id="dateList"></div>
+          <p class="hint" style="margin:6px 0 0;">For one-offs and specials. A date in the past is kept but never airs again.</p>
+        </div>
+
+        <div class="field">
+          <label>Times in the day</label>
+          <div id="slotList"></div>
+          <button type="button" class="secondary" id="addSlotBtn">Add another time</button>
+          <p class="hint" style="margin:6px 0 0;">
+            Several times in the same day are fine — a show at 09:00 and again at 18:00 is two times, not two shows.
+            They must not overlap each other.
+          </p>
+        </div>
+
+        <div class="field">
+          <label for="s_image">Artwork link (optional)</label>
+          <input type="text" id="s_image" placeholder="https://...">
+          <p class="hint" style="margin:6px 0 0;">An https link to a square image. Left empty, the app shows the station logo.</p>
+        </div>
+        <div class="field" id="imagePreviewBox" style="display:none;">
+          <img id="imagePreview" class="thumb" style="width:84px;height:84px;" alt="">
+        </div>
+
+        <div class="field"><label for="s_desc">Description (optional)</label><input type="text" id="s_desc"></div>
+
+        <div style="display:flex; gap:8px; align-items:center;">
+          <button id="saveShowBtn">Add show</button>
+          <button type="button" class="secondary" id="cancelEditBtn" style="display:none;">Cancel edit</button>
+        </div>
+        <div class="err" id="showErr"></div>
       </div>
-      <div class="row">
-        <div class="field"><label>Starts</label><input type="time" id="s_start"></div>
-        <div class="field"><label>Ends</label><input type="time" id="s_end"></div>
-      </div>
-      <div class="field"><label>Description (optional)</label><input type="text" id="s_desc"></div>
-      <button id="addShowBtn">Add show</button>
-      <div class="err" id="showErr"></div>
-    </div>
+    </details>
+
     <div class="items" id="showsList"><div class="empty">Loading…</div></div>
   </section>
 
@@ -713,11 +818,21 @@ function renderControls() {
       const type = f[1] === 'datetime' ? 'datetime-local' : 'text';
       return '<div class="field"><label for="' + id + '">' + escapeHtml(f[2]) + '</label><input type="' + type + '" id="' + id + '"></div>';
     }).join('');
-    return '<div class="card section"><h3>' + escapeHtml(sec.title) + '</h3><p class="hint">' + escapeHtml(sec.hint) + '</p>' + fields + '</div>';
+    return sectionHtml(sec.title, sec.hint, fields);
   }).join('') +
-    '<div class="card section"><h3>Podcasts</h3><p class="hint">One show per line: Name | feed link. Leave empty to keep the podcasts built into the app. Up to 12.</p>' +
-    '<div class="field"><textarea id="cfg_podcasts" rows="4" placeholder="The Xtreme BPM | https://anchor.fm/s/281a6d78/podcast/rss"></textarea></div></div>' +
+    sectionHtml('Podcasts',
+      'One show per line: Name | feed link. Leave empty to keep the podcasts built into the app. Up to 12.',
+      '<div class="field"><textarea id="cfg_podcasts" rows="4" placeholder="The Xtreme BPM | https://anchor.fm/s/281a6d78/podcast/rss"></textarea></div>') +
     funFactsSectionHtml();
+}
+
+// One collapsed section. <details> rather than a click handler on a heading: the App
+// controls tab is a long page of eleven sections, and a native element cannot be left
+// stuck shut by a script error somewhere else on the page.
+function sectionHtml(title, hint, body) {
+  return '<details class="card section"><summary>' + escapeHtml(title) +
+    '<span class="sumhint">' + escapeHtml(hint) + '</span></summary>' +
+    '<div class="section-body">' + body + '</div></details>';
 }
 
 function funFactsSectionHtml() {
@@ -725,8 +840,9 @@ function funFactsSectionHtml() {
   const dayBoxes = days.map((d, i) =>
     '<label style="margin-right:12px;white-space:nowrap;"><input type="checkbox" class="ffDay" value="' + i + '"> ' + d + '</label>'
   ).join('');
-  return '<div class="card section"><h3>Automatic fun facts</h3>' +
-    '<p class="hint">Writes a fact with AI and pushes it, at the dayparts you tick. The time of day and the weekday are given to the AI as context, so a drive-time fact reads differently from a morning one. ' +
+  return sectionHtml('Automatic fun facts',
+    'Writes a fact with AI and pushes it, at the dayparts you tick.',
+    '<p class="hint">The time of day and the weekday are given to the AI as context, so a drive-time fact reads differently from a morning one. ' +
     'A fact is only ever created together with its push — if the push fails the fact is withdrawn, never left sitting silently.</p>' +
     '<div class="checkbox" style="margin-bottom:10px;"><input type="checkbox" id="cfg_ff_enabled"><label for="cfg_ff_enabled" style="margin:0;">Automatic fun facts ON</label></div>' +
     '<div class="field"><label>Days</label><div id="ffDays" style="padding:4px 0;">' + dayBoxes + '</div>' +
@@ -737,8 +853,7 @@ function funFactsSectionHtml() {
     '<div class="field"><label>Dayparts</label><div id="ffDayparts"></div>' +
     '<p class="hint" style="margin-top:4px;">Each ticked daypart fires once on a chosen day, within 10 minutes of its time. A slot missed while the server was down is skipped, not posted late.</p></div>' +
     '<div class="err" id="ffWarn" style="display:none;"></div>' +
-    '<div id="ffLog" class="items" style="margin-top:12px;"><div class="empty">Loading the log…</div></div>' +
-    '</div>';
+    '<div id="ffLog" class="items" style="margin-top:12px;"><div class="empty">Loading the log…</div></div>');
 }
 
 function fillControls(cfg) {
@@ -835,6 +950,12 @@ async function loadFunFactLog() {
   }
 }
 
+function setAllSections(open) {
+  document.querySelectorAll('#controlsForm details.section').forEach((d) => { d.open = open; });
+}
+$('expandAll').addEventListener('click', (e) => { e.preventDefault(); setAllSections(true); });
+$('collapseAll').addEventListener('click', (e) => { e.preventDefault(); setAllSections(false); });
+
 async function loadControls() {
   $('controlsMsg').textContent = '';
   try {
@@ -874,8 +995,14 @@ $('saveControlsBtn').addEventListener('click', async () => {
   }
 });
 
-// ---------- programme schedule ----------
+// ---------- programme line-up ----------
+// One entry per show-on-a-station, with a repeat pattern and one or more times in the
+// day. The server flattens that into per-day rows for the app (lib/showSchedule.ts), so
+// this page never has to think about the shape the app reads.
 const DAY_NAMES = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'];
+const DAY_SHORT = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
+const STATION_NAMES = { radio: 'EJazz Radio', xtra: 'EJazz Xtra' };
+
 function minuteToTime(m) { return pad2(Math.floor(m / 60) % 24) + ':' + pad2(m % 60); }
 function timeToMinute(t) {
   const parts = String(t || '').split(':');
@@ -884,51 +1011,309 @@ function timeToMinute(t) {
   return Number.isFinite(h) && Number.isFinite(m) ? h * 60 + m : null;
 }
 
+let scheduleStation = 'radio';   // which station's line-up is on screen
+let showEntries = [];            // what the server last told us
+let editingShowId = null;        // null = the form is adding, not editing
+let formDates = [];              // staged "specific dates", newest edit wins
+let formSlots = [{ start: '', end: '' }];
+
+// ---- the day / date-of-month pickers, built once ----
+function buildPickers() {
+  $('dayBoxes').innerHTML = DAY_NAMES.map((name, i) =>
+    '<label><input type="checkbox" class="dayBox" value="' + i + '">' + DAY_SHORT[i] + '</label>'
+  ).join('');
+  let dom = '';
+  for (let d = 1; d <= 31; d += 1) {
+    dom += '<label><input type="checkbox" class="domBox" value="' + d + '">' + d + '</label>';
+  }
+  $('domBoxes').innerHTML = dom;
+}
+
+function checkedValues(selector) {
+  return Array.from(document.querySelectorAll(selector))
+    .filter((b) => b.checked)
+    .map((b) => Number(b.value));
+}
+
+function setChecked(selector, values) {
+  document.querySelectorAll(selector).forEach((b) => {
+    b.checked = values.indexOf(Number(b.value)) !== -1;
+  });
+}
+
+document.querySelectorAll('.dayPick').forEach((link) => {
+  link.addEventListener('click', (e) => {
+    e.preventDefault();
+    const pick = link.getAttribute('data-pick');
+    const map = { all: [0, 1, 2, 3, 4, 5, 6], weekdays: [1, 2, 3, 4, 5], weekend: [0, 6], none: [] };
+    setChecked('.dayBox', map[pick] || []);
+  });
+});
+
+// ---- repeat type ----
+function repeatModeChanged() {
+  const mode = $('s_repeat').value;
+  $('weeklyBox').style.display = mode === 'weekly' ? 'block' : 'none';
+  $('monthlyBox').style.display = mode === 'monthly' ? 'block' : 'none';
+  $('datesBox').style.display = mode === 'dates' ? 'block' : 'none';
+}
+$('s_repeat').addEventListener('change', repeatModeChanged);
+
+// ---- specific dates ----
+function renderDates() {
+  const host = $('dateList');
+  if (!formDates.length) {
+    host.innerHTML = '<span class="meta">No dates yet.</span>';
+    return;
+  }
+  host.innerHTML = formDates.map((d, i) =>
+    '<span class="chip">' + escapeHtml(d) +
+    '<button type="button" class="dropDate" data-i="' + i + '" title="Remove">&times;</button></span>'
+  ).join('');
+  document.querySelectorAll('.dropDate').forEach((b) => b.addEventListener('click', () => {
+    formDates.splice(Number(b.getAttribute('data-i')), 1);
+    renderDates();
+  }));
+}
+
+$('addDateBtn').addEventListener('click', () => {
+  const value = $('s_datePick').value;
+  if (!value) return;
+  if (formDates.indexOf(value) === -1) formDates.push(value);
+  formDates.sort();
+  $('s_datePick').value = '';
+  renderDates();
+});
+
+// ---- times in the day ----
+// Read the inputs back before every re-render, so a half-typed time is not lost when a
+// row is added or removed.
+function harvestSlots() {
+  const rows = document.querySelectorAll('.slotrow');
+  if (!rows.length) return;
+  formSlots = Array.from(rows).map((row) => ({
+    start: row.querySelector('.slotStart').value,
+    end: row.querySelector('.slotEnd').value,
+  }));
+}
+
+function renderSlots() {
+  $('slotList').innerHTML = formSlots.map((slot, i) =>
+    '<div class="slotrow">' +
+    '<input type="time" class="slotStart" value="' + escapeHtml(slot.start) + '">' +
+    '<span class="dash">to</span>' +
+    '<input type="time" class="slotEnd" value="' + escapeHtml(slot.end) + '">' +
+    (formSlots.length > 1 ? '<button type="button" class="dropSlot" data-i="' + i + '">Remove</button>' : '') +
+    '</div>'
+  ).join('');
+  document.querySelectorAll('.dropSlot').forEach((b) => b.addEventListener('click', () => {
+    harvestSlots();
+    formSlots.splice(Number(b.getAttribute('data-i')), 1);
+    if (!formSlots.length) formSlots = [{ start: '', end: '' }];
+    renderSlots();
+  }));
+}
+
+$('addSlotBtn').addEventListener('click', () => {
+  harvestSlots();
+  formSlots.push({ start: '', end: '' });
+  renderSlots();
+});
+
+// ---- artwork preview ----
+function refreshImagePreview() {
+  const value = $('s_image').value.trim();
+  const ok = value.indexOf('https://') === 0;
+  $('imagePreviewBox').style.display = ok ? 'block' : 'none';
+  if (ok) $('imagePreview').src = value;
+}
+$('s_image').addEventListener('change', refreshImagePreview);
+$('s_image').addEventListener('blur', refreshImagePreview);
+
+// ---- station sub-tabs ----
+document.querySelectorAll('.stationBtn').forEach((btn) => {
+  btn.addEventListener('click', () => {
+    document.querySelectorAll('.stationBtn').forEach((b) => b.classList.remove('active'));
+    btn.classList.add('active');
+    scheduleStation = btn.getAttribute('data-station');
+    // A new show typed here belongs to the station being looked at, unless an edit is
+    // already in progress -- that entry keeps its own station.
+    if (editingShowId === null) $('s_station').value = scheduleStation;
+    renderShows();
+  });
+});
+
+// ---- the form ----
+function resetShowForm() {
+  editingShowId = null;
+  formDates = [];
+  formSlots = [{ start: '', end: '' }];
+  $('s_name').value = '';
+  $('s_host').value = '';
+  $('s_desc').value = '';
+  $('s_image').value = '';
+  $('s_station').value = scheduleStation;
+  $('s_repeat').value = 'weekly';
+  setChecked('.dayBox', []);
+  setChecked('.domBox', []);
+  $('showErr').textContent = '';
+  $('showFormTitle').textContent = 'Add a show';
+  $('showFormHint').textContent = '';
+  $('saveShowBtn').textContent = 'Add show';
+  $('cancelEditBtn').style.display = 'none';
+  repeatModeChanged();
+  renderDates();
+  renderSlots();
+  refreshImagePreview();
+}
+
+function editShow(id) {
+  const entry = showEntries.filter((s) => s.id === id)[0];
+  if (!entry) return;
+  editingShowId = id;
+  $('s_name').value = entry.name || '';
+  $('s_host').value = entry.hostName || '';
+  $('s_desc').value = entry.description || '';
+  $('s_image').value = entry.imageUrl || '';
+  $('s_station').value = entry.station;
+  $('s_repeat').value = entry.repeatMode || 'weekly';
+  setChecked('.dayBox', entry.daysOfWeek || []);
+  setChecked('.domBox', entry.datesOfMonth || []);
+  formDates = (entry.dates || []).slice();
+  formSlots = (entry.slots || []).map((s) => ({
+    start: minuteToTime(s.startMinute),
+    end: minuteToTime(s.endMinute),
+  }));
+  if (!formSlots.length) formSlots = [{ start: '', end: '' }];
+  $('showErr').textContent = '';
+  $('showFormTitle').textContent = 'Editing ' + entry.name;
+  $('showFormHint').textContent = STATION_NAMES[entry.station] || '';
+  $('saveShowBtn').textContent = 'Save changes';
+  $('cancelEditBtn').style.display = 'inline-block';
+  repeatModeChanged();
+  renderDates();
+  renderSlots();
+  refreshImagePreview();
+  $('showFormBox').open = true;
+  $('showFormBox').scrollIntoView({ block: 'nearest' });
+}
+
+$('cancelEditBtn').addEventListener('click', () => resetShowForm());
+
+function collectShowPayload() {
+  harvestSlots();
+  const mode = $('s_repeat').value;
+  const slots = [];
+  for (let i = 0; i < formSlots.length; i += 1) {
+    const start = timeToMinute(formSlots[i].start);
+    const end = timeToMinute(formSlots[i].end);
+    if (start === null || end === null) return { error: 'Every time needs both a start and an end.' };
+    if (end <= start) return { error: 'A time must end after it starts (row ' + (i + 1) + ').' };
+    slots.push({ startMinute: start, endMinute: end });
+  }
+  const payload = {
+    name: $('s_name').value.trim(),
+    hostName: $('s_host').value.trim(),
+    station: $('s_station').value,
+    repeatMode: mode,
+    slots: slots,
+    daysOfWeek: mode === 'weekly' ? checkedValues('.dayBox') : [],
+    datesOfMonth: mode === 'monthly' ? checkedValues('.domBox') : [],
+    dates: mode === 'dates' ? formDates.slice() : [],
+    description: $('s_desc').value.trim(),
+    imageUrl: $('s_image').value.trim(),
+  };
+  if (!payload.name) return { error: 'The show needs a name.' };
+  if (mode === 'weekly' && !payload.daysOfWeek.length) return { error: 'Pick at least one day of the week.' };
+  if (mode === 'monthly' && !payload.datesOfMonth.length) return { error: 'Pick at least one date of the month.' };
+  if (mode === 'dates' && !payload.dates.length) return { error: 'Add at least one date.' };
+  return { payload: payload };
+}
+
+$('saveShowBtn').addEventListener('click', async () => {
+  $('showErr').textContent = '';
+  const collected = collectShowPayload();
+  if (collected.error) { $('showErr').textContent = collected.error; return; }
+  const editing = editingShowId;
+  try {
+    if (editing === null) {
+      await api('/shows', { method: 'POST', body: JSON.stringify(collected.payload) });
+    } else {
+      await api('/shows/' + editing, { method: 'PATCH', body: JSON.stringify(collected.payload) });
+    }
+    // Show the station that was just saved to, so the entry is visible straight away
+    // even when it was moved to the other station.
+    scheduleStation = collected.payload.station;
+    document.querySelectorAll('.stationBtn').forEach((b) => {
+      b.classList.toggle('active', b.getAttribute('data-station') === scheduleStation);
+    });
+    resetShowForm();
+    $('showFormBox').open = false;
+    await loadShows();
+  } catch (e) {
+    $('showErr').textContent = (editing === null ? 'Could not add: ' : 'Could not save: ') + e.message;
+  }
+});
+
+// ---- the list ----
+function slotSummary(entry) {
+  return (entry.slots || []).map((s) => minuteToTime(s.startMinute) + '-' + minuteToTime(s.endMinute)).join(', ');
+}
+
+function renderShows() {
+  const list = $('showsList');
+  const mine = showEntries.filter((s) => s.station === scheduleStation);
+  if (!mine.length) {
+    list.innerHTML = '<div class="empty">Nothing on ' + escapeHtml(STATION_NAMES[scheduleStation]) +
+      ' yet — add the first show above.</div>';
+    return;
+  }
+  list.innerHTML = mine.map((s) => {
+    const meta = [s.repeatSummary, slotSummary(s), s.hostName].filter(Boolean).join(' · ');
+    const art = s.imageUrl
+      ? '<img class="thumb" src="' + escapeHtml(s.imageUrl) + '" alt="">'
+      : '';
+    return '<div class="item"><div class="lead">' + art +
+      '<div><div><strong>' + escapeHtml(s.name) + '</strong></div>' +
+      '<div class="meta">' + escapeHtml(meta) + '</div>' +
+      (s.description ? '<div class="meta">' + escapeHtml(s.description) + '</div>' : '') +
+      '</div></div>' +
+      '<div class="actions">' +
+      '<button class="secondary editShow" data-id="' + s.id + '">Edit</button>' +
+      '<button class="secondary delShow" data-id="' + s.id + '">Remove</button>' +
+      '</div></div>';
+  }).join('');
+  document.querySelectorAll('.editShow').forEach((btn) => {
+    btn.addEventListener('click', () => editShow(Number(btn.getAttribute('data-id'))));
+  });
+  document.querySelectorAll('.delShow').forEach((btn) => {
+    btn.addEventListener('click', async () => {
+      const id = Number(btn.getAttribute('data-id'));
+      const entry = showEntries.filter((s) => s.id === id)[0];
+      if (!confirm('Remove ' + (entry ? entry.name : 'this show') + ' from the line-up?')) return;
+      try {
+        await api('/shows/' + id, { method: 'DELETE' });
+        if (editingShowId === id) resetShowForm();
+        await loadShows();
+      } catch (e) {
+        $('showErr').textContent = 'Could not remove: ' + e.message;
+      }
+    });
+  });
+}
+
 async function loadShows() {
   const list = $('showsList');
   try {
-    const shows = await api('/shows', { method: 'GET' });
-    if (!shows.length) { list.innerHTML = '<div class="empty">No shows yet - add the first one above.</div>'; return; }
-    list.innerHTML = shows.map((s) => {
-      const meta = DAY_NAMES[s.dayOfWeek] + ' ' + minuteToTime(s.startMinute) + '-' + minuteToTime(s.endMinute) + ' · ' + (s.station === 'xtra' ? 'EJazz Xtra' : 'EJazz Radio') + (s.hostName ? ' · ' + s.hostName : '');
-      return '<div class="item"><div><strong>' + escapeHtml(s.name) + '</strong><div class="meta">' + escapeHtml(meta) + '</div></div>' +
-        '<div class="actions"><button class="secondary delShow" data-id="' + s.id + '">Remove</button></div></div>';
-    }).join('');
-    document.querySelectorAll('.delShow').forEach((btn) => {
-      btn.addEventListener('click', async () => {
-        if (!confirm('Remove this show from the schedule?')) return;
-        await api('/shows/' + btn.getAttribute('data-id'), { method: 'DELETE' });
-        loadShows();
-      });
-    });
+    showEntries = await api('/shows', { method: 'GET' });
+    renderShows();
   } catch (e) {
-    list.innerHTML = '<div class="empty">Could not load shows: ' + escapeHtml(e.message) + '</div>';
+    list.innerHTML = '<div class="empty">Could not load the line-up: ' + escapeHtml(e.message) + '</div>';
   }
 }
 
-$('addShowBtn').addEventListener('click', async () => {
-  $('showErr').textContent = '';
-  const startMinute = timeToMinute($('s_start').value);
-  const endMinute = timeToMinute($('s_end').value);
-  if (!$('s_name').value.trim()) { $('showErr').textContent = 'Show name is required.'; return; }
-  if (startMinute === null || endMinute === null) { $('showErr').textContent = 'Set start and end times.'; return; }
-  if (endMinute <= startMinute) { $('showErr').textContent = 'End time must be after the start time.'; return; }
-  try {
-    await api('/shows', { method: 'POST', body: JSON.stringify({
-      name: $('s_name').value.trim(),
-      hostName: $('s_host').value.trim() || null,
-      station: $('s_station').value,
-      dayOfWeek: Number($('s_day').value),
-      startMinute: startMinute,
-      endMinute: endMinute,
-      description: $('s_desc').value.trim() || null,
-    }) });
-    $('s_name').value = ''; $('s_host').value = ''; $('s_desc').value = '';
-    loadShows();
-  } catch (e) {
-    $('showErr').textContent = 'Could not add: ' + e.message;
-  }
-});
+buildPickers();
+resetShowForm();
 
 checkSession();
 </script>
