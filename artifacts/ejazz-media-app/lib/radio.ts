@@ -1,8 +1,17 @@
 import { useMutation, useQuery } from '@tanstack/react-query';
 
 const RADIO_RPC_URL = 'https://eu1.reliastream.com:2199/external/rpc.php';
-const EXTRA_API_URL = 'https://c32.radioboss.fm/w';
-const EXTRA_STATION_ID = '320';
+/**
+ * EJazz Xtra moved from RadioBoss to AzuraCast. One public, unauthenticated endpoint
+ * (/api/nowplaying/2) now carries what used to take three RadioBoss calls -- current
+ * track, next track, and the play history -- plus listener counts and whether a live
+ * streamer is on air. EJazz Radio is unaffected and still uses the RPC above.
+ */
+const EXTRA_API_URL = 'https://stream.ejazzug.com';
+const EXTRA_STATION_ID = '2';
+/** The station's own listen URLs, for reference and for any player that wants them. */
+export const EXTRA_STREAM_URL = 'https://stream.ejazzug.com/listen/ejazzxtra/radio.mp3';
+export const EXTRA_HLS_URL = 'https://stream.ejazzug.com/hls/ejazzxtra/live.m3u8';
 const RADIO_USERNAME = 'ejazzug';
 const REQUEST_TIMEOUT_MS = 10_000;
 let radioHistoryBackfill: RadioTrack[] = [];
@@ -39,11 +48,23 @@ export type SongRequestResult = {
 export type ExtraNowPlaying = {
   currentTrack: RadioTrack | null;
   nextTrack: RadioTrack | null;
+  /** Play history, newest first, jingles filtered out. One payload, no second call. */
+  history: RadioTrack[];
+  /** Seconds into the current track, and its length, as the station reports them. */
+  elapsed: number;
+  duration: number;
+  listeners: number;
+  isLive: boolean;
+  streamerName: string;
+  isOnline: boolean;
 };
 
 export type ExtraSearchTrack = {
+  /** AzuraCast's request_id -- what POST /request/<id> takes, not the media id. */
   id: string;
   title: string;
+  artist: string;
+  imageUrl: string;
 };
 
 export type ExtraSearchResult = {
@@ -153,119 +174,178 @@ async function fetchRecentTracks() {
   return currentTrack ? [currentTrack, ...radioHistoryBackfill] : radioHistoryBackfill;
 }
 
-function extraArtworkUrl(kind: 'current' | 'next', timestamp: unknown) {
-  const path = kind === 'current' ? 'artwork' : 'artwork_next';
-  const cacheKey = typeof timestamp === 'string' || typeof timestamp === 'number'
-    ? `?${encodeURIComponent(String(timestamp))}`
-    : '';
-  return `${EXTRA_API_URL}/${path}/${EXTRA_STATION_ID}.jpg${cacheKey}`;
-}
+// ---------------------------------------------------------------------------
+// EJazz Xtra (AzuraCast)
+//
+// Its own request helper rather than requestJson() above: that one is shaped around
+// reliastream's RpcEnvelope and carries EJazz Radio's error wording, and AzuraCast
+// returns plain objects and arrays. Keeping them separate means nothing here can change
+// how the Radio path behaves.
+// ---------------------------------------------------------------------------
 
-function normalizeExtraTrack(
-  artistValue: unknown,
-  titleValue: unknown,
-  imageUrl: string,
-): RadioTrack | null {
-  const artist = typeof artistValue === 'string' ? smartTitleCase(artistValue) : '';
-  const title = typeof titleValue === 'string' ? smartTitleCase(titleValue) : '';
-  if (!artist && !title) return null;
-  return { artist, title: title || artist, album: '', imageUrl, time: '' };
-}
-
-async function fetchExtraNowPlaying(): Promise<ExtraNowPlaying> {
-  const payload = await requestJson(
-    `${EXTRA_API_URL}/nowplayinginfo?u=${EXTRA_STATION_ID}`,
-  );
-  if (!payload || typeof payload !== 'object') {
-    throw new Error('Unexpected EJazz Xtra metadata response');
+async function extraRequest(url: string, init?: RequestInit): Promise<{ status: number; body: unknown }> {
+  const controller = new AbortController();
+  const timeout = setTimeout(() => controller.abort(), REQUEST_TIMEOUT_MS);
+  try {
+    const response = await fetch(url, {
+      ...init,
+      headers: { Accept: 'application/json', ...(init?.headers ?? {}) },
+      signal: controller.signal,
+    });
+    // The body is read whatever the status: AzuraCast puts the reason a request was
+    // refused in `message`, and a bare "HTTP 500" would throw that away.
+    const body: unknown = await response.json().catch(() => null);
+    return { status: response.status, body };
+  } catch (error) {
+    if (error instanceof Error && error.name === 'AbortError') {
+      throw new Error('EJazz Xtra timed out');
+    }
+    throw new Error('EJazz Xtra is temporarily unavailable');
+  } finally {
+    clearTimeout(timeout);
   }
+}
 
-  const data = payload as Record<string, unknown>;
+async function extraGet(url: string): Promise<unknown> {
+  const { status, body } = await extraRequest(url);
+  if (status < 200 || status >= 300) throw new Error(`EJazz Xtra returned HTTP ${status}`);
+  return body;
+}
+
+/**
+ * Split "Artist - Title" when AzuraCast gives us no artist of its own.
+ *
+ * Many files on the station are tagged with the whole string in the title and an empty
+ * artist ("Blaqbonez- Like Ice Spice (Official Music Video)"). Splitting here, in the one
+ * place every screen reads from, is what keeps an empty artist line or a stray leading
+ * dash off the UI. Only a dash with a space on at least one side counts, so a hyphenated
+ * word ("Hip-Hop", "Afro-Fusion") is never cut in half.
+ */
+function splitCombinedTitle(text: string): { artist: string; title: string } {
+  const match = text.match(/^(.*?\S)\s*[-–—]\s+(\S.*)$|^(.*?\S)\s+[-–—]\s*(\S.*)$/);
+  if (!match) return { artist: '', title: text };
+  const artist = (match[1] ?? match[3] ?? '').trim();
+  const title = (match[2] ?? match[4] ?? '').trim();
+  return artist && title ? { artist, title } : { artist: '', title: text };
+}
+
+/**
+ * Strip control characters out of an ID3 tag before it is displayed. Real tags on the
+ * station carry them (one artist reads "Shakira\u0007Burna Boy"), and they render as a
+ * missing glyph or nothing at all, silently gluing two names together. The proper fix is
+ * retagging the file; this just stops it looking broken in the app.
+ */
+function cleanTagText(value: unknown): string {
+  if (typeof value !== 'string') return '';
+  return value.replace(/[\u0000-\u001f\u007f]+/g, ' ').replace(/\s+/g, ' ').trim();
+}
+
+/** One AzuraCast `song` object (now playing, playing next, or a history row). */
+function normalizeExtraSong(value: unknown, playedAt?: unknown): RadioTrack | null {
+  if (!value || typeof value !== 'object') return null;
+  const song = value as Record<string, unknown>;
+  const rawArtist = cleanTagText(song.artist);
+  const rawTitle = cleanTagText(song.title);
+  const rawText = cleanTagText(song.text);
+
+  // An untagged file leaves artist empty and everything in the title (or only in `text`).
+  const source = rawTitle || rawText;
+  const parts = rawArtist ? { artist: rawArtist, title: source } : splitCombinedTitle(source);
+  const artist = smartTitleCase(parts.artist);
+  const title = smartTitleCase(parts.title);
+  if (!artist && !title) return null;
+
   return {
-    currentTrack: normalizeExtraTrack(
-      data.currenttrack_artist,
-      data.currenttrack_title,
-      extraArtworkUrl('current', data.artwork_ts),
-    ),
-    nextTrack: normalizeExtraTrack(
-      data.nexttrack_artist,
-      data.nexttrack_title,
-      extraArtworkUrl('next', data.artwork_next_ts),
-    ),
+    artist,
+    title: title || artist,
+    album: cleanTagText(song.album),
+    imageUrl: typeof song.art === 'string' ? song.art.trim() : '',
+    time: typeof playedAt === 'number' && playedAt > 0
+      ? new Date(playedAt * 1000).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
+      : '',
   };
 }
 
-async function fetchExtraRecentTracks(): Promise<RadioTrack[]> {
-  const payload = await requestJson(
-    `${EXTRA_API_URL}/recenttrackslist?u=${EXTRA_STATION_ID}`,
-  );
-  if (!Array.isArray(payload)) throw new Error('Unexpected EJazz Xtra history response');
+function numberOr(value: unknown, fallback: number): number {
+  return typeof value === 'number' && Number.isFinite(value) ? value : fallback;
+}
 
-  return payload
-    .slice(1)
-    .map((value): RadioTrack | null => {
-      if (!value || typeof value !== 'object') return null;
-      const item = value as Record<string, unknown>;
-      const artist = typeof item.trackartist === 'string' ? smartTitleCase(item.trackartist) : '';
-      const title = typeof item.tracktitle === 'string' ? smartTitleCase(item.tracktitle) : '';
-      if (!artist && !title) return null;
-      const artworkId = typeof item.artworkid === 'string' || typeof item.artworkid === 'number'
-        ? String(item.artworkid)
-        : '';
-      return {
-        artist,
-        title: title || artist,
-        album: '',
-        imageUrl: artworkId
-          ? `${EXTRA_API_URL}/artwork_recent_${encodeURIComponent(artworkId)}/${EXTRA_STATION_ID}.jpg`
-          : '',
-        time: typeof item.started === 'string' ? item.started : '',
-      };
+async function fetchExtraNowPlaying(): Promise<ExtraNowPlaying> {
+  const payload = await extraGet(`${EXTRA_API_URL}/api/nowplaying/${EXTRA_STATION_ID}`);
+  if (!payload || typeof payload !== 'object' || Array.isArray(payload)) {
+    throw new Error('Unexpected EJazz Xtra metadata response');
+  }
+  const data = payload as Record<string, unknown>;
+  const nowPlaying = (data.now_playing ?? {}) as Record<string, unknown>;
+  const playingNext = (data.playing_next ?? {}) as Record<string, unknown>;
+  const listeners = (data.listeners ?? {}) as Record<string, unknown>;
+  const live = (data.live ?? {}) as Record<string, unknown>;
+
+  const history = (Array.isArray(data.song_history) ? data.song_history : [])
+    .map((row) => {
+      if (!row || typeof row !== 'object') return null;
+      const item = row as Record<string, unknown>;
+      return normalizeExtraSong(item.song, item.played_at);
     })
-    .filter((track): track is RadioTrack => track !== null && !isStationJingle(track))
-    .slice(0, 6);
+    .filter((track): track is RadioTrack => track !== null && !isStationJingle(track));
+
+  return {
+    currentTrack: normalizeExtraSong(nowPlaying.song),
+    nextTrack: normalizeExtraSong(playingNext.song),
+    history,
+    elapsed: numberOr(nowPlaying.elapsed, 0),
+    duration: numberOr(nowPlaying.duration, 0),
+    listeners: numberOr(listeners.total, 0),
+    isLive: live.is_live === true,
+    streamerName: typeof live.streamer_name === 'string' ? live.streamer_name : '',
+    isOnline: data.is_online !== false,
+  };
 }
 
 async function searchExtraSongs(query: string): Promise<ExtraSearchResult> {
-  const payload = await requestJson(
-    `${EXTRA_API_URL}/songrequestsearch?u=${EXTRA_STATION_ID}&q=${encodeURIComponent(query)}`,
-  );
-  if (!payload || typeof payload !== 'object') {
-    throw new Error('Unexpected EJazz Xtra search response');
-  }
-  const data = payload as Record<string, unknown>;
-  const message = [data.message, data.errdetail]
-    .find((value): value is string => typeof value === 'string' && value.trim().length > 0)
-    ?.trim() ?? '';
-  if (data.error === true) return { tracks: [], message: message || 'No matching tracks found.' };
-  if (!Array.isArray(data.tracks)) throw new Error('Unexpected EJazz Xtra search response');
+  const url = `${EXTRA_API_URL}/api/station/${EXTRA_STATION_ID}/requests`
+    + `?searchPhrase=${encodeURIComponent(query)}&rowCount=25&current=1`;
+  const payload = await extraGet(url);
+  // A searched call answers with a paginated object; the unfiltered one answers with a
+  // bare array of every requestable track. Accept both so a future caller cannot break.
+  const rows = Array.isArray(payload)
+    ? payload
+    : payload && typeof payload === 'object' && Array.isArray((payload as Record<string, unknown>).rows)
+      ? ((payload as Record<string, unknown>).rows as unknown[])
+      : null;
+  if (!rows) throw new Error('Unexpected EJazz Xtra search response');
 
-  const tracks = data.tracks
+  const tracks = rows
     .map((value): ExtraSearchTrack | null => {
       if (!value || typeof value !== 'object') return null;
       const item = value as Record<string, unknown>;
-      const id = typeof item.id === 'string' || typeof item.id === 'number' ? String(item.id) : '';
-      const title = typeof item.title === 'string' ? smartTitleCase(item.title) : '';
-      return id && title ? { id, title } : null;
+      const id = typeof item.request_id === 'string' || typeof item.request_id === 'number'
+        ? String(item.request_id)
+        : '';
+      const track = normalizeExtraSong(item.song);
+      if (!id || !track) return null;
+      return { id, title: track.title, artist: track.artist, imageUrl: track.imageUrl };
     })
     .filter((track): track is ExtraSearchTrack => track !== null);
   return { tracks, message: tracks.length ? '' : 'No matching tracks found.' };
 }
 
-async function requestExtraSong(trackId: string): Promise<SongRequestResult> {
-  const payload = await requestJson(
-    `${EXTRA_API_URL}/songrequestmake?u=${EXTRA_STATION_ID}&id=${encodeURIComponent(trackId)}`,
+async function requestExtraSong(requestId: string): Promise<SongRequestResult> {
+  const { status, body } = await extraRequest(
+    `${EXTRA_API_URL}/api/station/${EXTRA_STATION_ID}/request/${encodeURIComponent(requestId)}`,
+    { method: 'POST' },
   );
-  if (!payload || typeof payload !== 'object') {
-    throw new Error('Unexpected EJazz Xtra request response');
-  }
-  const data = payload as Record<string, unknown>;
-  const serverMessage = [data.message, data.errdetail]
+  const data = body && typeof body === 'object' ? (body as Record<string, unknown>) : {};
+  const serverMessage = [data.message, data.formatted_message]
     .find((value): value is string => typeof value === 'string' && value.trim().length > 0)
     ?.trim();
+  // AzuraCast refuses a request for real reasons -- the song was played too recently, the
+  // request window is closed, requests are off -- and says which in `message`. Surface it
+  // rather than a generic failure, which would read as an app bug to the listener.
+  const ok = status >= 200 && status < 300 && data.success !== false;
   return {
-    success: data.error === false,
-    message: serverMessage ?? (data.error === false
+    success: ok,
+    message: serverMessage ?? (ok
       ? 'Your request was sent to EJazz Xtra.'
       : 'This track could not be requested right now.'),
   };
@@ -308,25 +388,18 @@ export function useRecentTracks(enabled: boolean, isAppActive: boolean = true) {
   });
 }
 
+/**
+ * The only EJazz Xtra metadata call. It carries the current track, the next one and the
+ * play history together, so the separate history poll this file used to run is gone --
+ * which also means the three can never disagree with each other.
+ */
 export function useExtraNowPlaying(enabled: boolean, isAppActive: boolean = true) {
   return useQuery({
     queryKey: ['radio', 'extra', 'now-playing'],
     queryFn: fetchExtraNowPlaying,
     enabled,
-    staleTime: 4_000,
-    refetchInterval: enabled ? (isAppActive ? 5_000 : 30_000) : false,
-    refetchIntervalInBackground: true,
-    retry: 1,
-  });
-}
-
-export function useExtraRecentTracks(enabled: boolean, isAppActive: boolean = true) {
-  return useQuery({
-    queryKey: ['radio', 'extra', 'recent-tracks'],
-    queryFn: fetchExtraRecentTracks,
-    enabled,
-    staleTime: 8_000,
-    refetchInterval: enabled ? (isAppActive ? 10_000 : 60_000) : false,
+    staleTime: 10_000,
+    refetchInterval: enabled ? (isAppActive ? 15_000 : 30_000) : false,
     refetchIntervalInBackground: true,
     retry: 1,
   });

@@ -21,9 +21,20 @@ export type Show = {
   startMinute: number;
   endMinute: number;
   description: string | null;
+  /** Programme artwork, if the station set one. Absent on older API builds. */
+  imageUrl?: string | null;
   createdAt: string;
   updatedAt: string;
 };
+
+/**
+ * The player calls EJazz Xtra 'extra'; the schedule (and the API) call it 'xtra'. One
+ * place to translate, so a line-up is never filtered against a station id that can
+ * never match -- which would silently show an empty "Coming Up".
+ */
+export function showStationFor(stationId: 'radio' | 'extra'): ShowStation {
+  return stationId === 'extra' ? 'xtra' : 'radio';
+}
 
 function isShow(value: unknown): value is Show {
   if (!value || typeof value !== 'object') return false;
@@ -89,11 +100,21 @@ function minutesNowLocal(now: Date) {
   return { day: now.getDay(), minute: now.getHours() * 60 + now.getMinutes() };
 }
 
-/** Splits shows into now-playing / up-next / later-today, using device local time. */
-export function classifyLineup(shows: Show[], now: Date = new Date()): ProgrammeLineup {
+/**
+ * Splits shows into now-playing / up-next / later-today, using device local time.
+ *
+ * `station` keeps each station's line-up separate: the two run different programmes, so
+ * showing both mixed together put the wrong show on screen whenever they overlapped.
+ * Omitting it keeps the old behaviour of listing every station.
+ */
+export function classifyLineup(
+  shows: Show[],
+  now: Date = new Date(),
+  station?: ShowStation,
+): ProgrammeLineup {
   const { day, minute } = minutesNowLocal(now);
   const today = shows
-    .filter((show) => show.dayOfWeek === day)
+    .filter((show) => show.dayOfWeek === day && (!station || show.station === station))
     .sort((a, b) => a.startMinute - b.startMinute);
 
   const current = today.find((show) => show.startMinute <= minute && minute < show.endMinute) ?? null;

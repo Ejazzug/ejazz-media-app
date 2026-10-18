@@ -20,7 +20,6 @@ import { PodcastEpisode, PodcastShow } from '@/lib/podcasts';
 import {
   RadioTrack,
   useExtraNowPlaying,
-  useExtraRecentTracks,
   useRecentTracks,
 } from '@/lib/radio';
 
@@ -49,6 +48,18 @@ export type PodcastPlaybackItem = {
   artworkUrl: string;
 };
 
+/**
+ * EJazz Xtra's live stream. The station moved to AzuraCast (HTTPS, no cleartext exception
+ * needed), so this is a stable public address and is baked in as the fallback rather than
+ * left empty: an unset or empty EXPO_PUBLIC_EJAZZ_EXTRA_STREAM_URL used to mean a station
+ * with no stream at all, which the player can only report as an error.
+ *
+ * Precedence, lowest to highest: this constant -> EXPO_PUBLIC_EJAZZ_EXTRA_STREAM_URL baked
+ * in at build time -> the Control Room's streams.xtra.url (applied in useMemo below), which
+ * is the only one that reaches phones already installed.
+ */
+const EXTRA_STREAM_FALLBACK_URL = 'https://stream.ejazzug.com/listen/ejazzxtra/radio.mp3';
+
 const BASE_STATIONS: Station[] = [
   {
     id: 'radio',
@@ -68,7 +79,8 @@ const BASE_STATIONS: Station[] = [
     shortName: 'EJazz Xtra',
     description: 'African Pop',
     genre: 'AFRICAN POP',
-    streamUrl: process.env.EXPO_PUBLIC_EJAZZ_EXTRA_STREAM_URL ?? '',
+    // `||`, not `??`: EXPO_PUBLIC_* inlining can leave an empty string, which `??` keeps.
+    streamUrl: process.env.EXPO_PUBLIC_EJAZZ_EXTRA_STREAM_URL || EXTRA_STREAM_FALLBACK_URL,
     backupUrl: '',
     artwork: require('@/assets/images/editorial-african-pop.jpg'),
     logo: require('@/assets/images/ejazz-xtra-logo.png'),
@@ -206,25 +218,21 @@ export function PlayerProvider({ children }: PropsWithChildren) {
     (viewingStationId === 'extra' && isAppActive) || selectedStationId === 'extra',
     isAppActive,
   );
-  const extraRecentTracks = useExtraRecentTracks(
-    (viewingStationId === 'extra' && isAppActive) || selectedStationId === 'extra',
-    isAppActive,
-  );
   const currentTrack = selectedStationId === 'radio'
     ? recentTracks.data?.[0] ?? null
     : extraNowPlaying.data?.currentTrack ?? null;
   const previousTracks = selectedStationId === 'radio'
     ? recentTracks.data?.slice(1, 5) ?? []
-    : extraRecentTracks.data ?? [];
+    : extraNowPlaying.data?.history.slice(0, 6) ?? [];
   const nextTrack = selectedStationId === 'extra'
     ? extraNowPlaying.data?.nextTrack ?? null
     : null;
   const metadataLoading = selectedStationId === 'radio'
     ? recentTracks.isLoading
-    : extraNowPlaying.isLoading || extraRecentTracks.isLoading;
+    : extraNowPlaying.isLoading;
   const metadataError = selectedStationId === 'radio'
     ? recentTracks.isError
-    : extraNowPlaying.isError && extraRecentTracks.isError;
+    : extraNowPlaying.isError;
   const viewingStation = useMemo(
     () => stations.find((station) => station.id === viewingStationId) ?? stations[0],
     [viewingStationId, stations],
@@ -234,18 +242,18 @@ export function PlayerProvider({ children }: PropsWithChildren) {
     : extraNowPlaying.data?.currentTrack ?? null;
   const viewingPreviousTracks = viewingStationId === 'radio'
     ? recentTracks.data?.slice(1, 5) ?? []
-    : extraRecentTracks.data ?? [];
+    : extraNowPlaying.data?.history.slice(0, 6) ?? [];
   const viewingNextTrack = viewingStationId === 'extra'
     ? extraNowPlaying.data?.nextTrack ?? null
     : null;
   const viewingMetadataLoading = viewingStationId === 'radio'
     ? recentTracks.isLoading
-    : extraNowPlaying.isLoading || extraRecentTracks.isLoading;
+    : extraNowPlaying.isLoading;
   const viewingMetadataError = viewingStationId === 'radio'
     ? recentTracks.isError
-    : extraNowPlaying.isError && extraRecentTracks.isError;
+    : extraNowPlaying.isError;
   const viewingTrackTitle = viewingCurrentTrack?.title ?? 'Live from EJazz';
-  const viewingTrackArtist = viewingCurrentTrack?.artist ?? viewingStation.description;
+  const viewingTrackArtist = viewingCurrentTrack?.artist || viewingStation.description;
 
   const playbackError = playbackKind === 'podcast' && !!status.error;
 
@@ -255,8 +263,7 @@ export function PlayerProvider({ children }: PropsWithChildren) {
       return;
     }
     void extraNowPlaying.refetch();
-    void extraRecentTracks.refetch();
-  }, [extraNowPlaying, extraRecentTracks, recentTracks, selectedStationId]);
+  }, [extraNowPlaying, recentTracks, selectedStationId]);
 
   useEffect(() => {
     setAudioModeAsync({
@@ -281,14 +288,12 @@ export function PlayerProvider({ children }: PropsWithChildren) {
         }
         if (selectedStationId === 'extra' || viewingStationId === 'extra') {
           void extraNowPlaying.refetch();
-          void extraRecentTracks.refetch();
         }
       }
     });
     return () => subscription.remove();
   }, [
     extraNowPlaying.refetch,
-    extraRecentTracks.refetch,
     recentTracks.refetch,
     selectedStationId,
     viewingStationId,
@@ -594,8 +599,10 @@ export function PlayerProvider({ children }: PropsWithChildren) {
       streamError,
       streamErrorMessage,
       playbackError,
-      trackTitle: currentTrack?.title ?? 'Live from EJazz',
-      trackArtist: currentTrack?.artist ?? activeStation.description,
+      trackTitle: currentTrack?.title || 'Live from EJazz',
+      // `||`, not `??`: an AzuraCast file with no artist tag gives an empty string, and
+      // `??` would keep it and render a blank line where the artist belongs.
+      trackArtist: currentTrack?.artist || activeStation.description,
       currentTrack,
       previousTracks,
       nextTrack,

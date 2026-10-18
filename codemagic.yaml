@@ -13,6 +13,11 @@ workflows:
         # Pulse feature -- isPulseConfigured() returns false and no request is ever made --
         # which is why Home showed no Pulse cards and the Control Room reached nobody.
         EXPO_PUBLIC_PULSE_API_URL: "https://control.ejazzug.com"
+        # EJazz Xtra moved from RadioBoss to AzuraCast. Set here, in version control, rather
+        # than only in the ejazz_eas variable group, which is not visible from the server and
+        # still carries the old c32.radioboss.fm:8320 address. Delete it from that group too:
+        # if the group wins the merge, a build would silently bake the dead stream back in.
+        EXPO_PUBLIC_EJAZZ_EXTRA_STREAM_URL: "https://stream.ejazzug.com/listen/ejazzxtra/radio.mp3"
     cache:
       cache_paths:
         - ~/.pnpm-store
@@ -59,9 +64,10 @@ workflows:
       groups:
         - ejazz_eas
       vars:
-        # Same as the release workflow -- a preview build that cannot reach Pulse would not
-        # be testing the same app. See the note there.
+        # Same as the release workflow -- a preview build that cannot reach Pulse, or that
+        # plays the old stream, would not be testing the same app. See the notes there.
         EXPO_PUBLIC_PULSE_API_URL: "https://control.ejazzug.com"
+        EXPO_PUBLIC_EJAZZ_EXTRA_STREAM_URL: "https://stream.ejazzug.com/listen/ejazzxtra/radio.mp3"
     cache:
       cache_paths:
         - ~/.pnpm-store

@@ -9,7 +9,7 @@ import { usePlayer } from '@/context/PlayerContext';
 import { useColors } from '@/hooks/useColors';
 import { useFeaturedNews, useLatestNews } from '@/lib/news';
 import { usePulseContent } from '@/lib/pulse';
-import { useShows, classifyLineup, formatShowTime } from '@/lib/shows';
+import { useShows, classifyLineup, formatShowTime, showStationFor } from '@/lib/shows';
 import { FreshEjazzSection } from '@/components/FreshEjazzSection';
 import { ContinueEjazzSection } from '@/components/ContinueEjazzSection';
 import { TheTeaSection } from '@/components/TheTeaSection';
@@ -31,7 +31,7 @@ export default function HomeScreen() {
   const pulseContent = usePulseContent();
   const pulseItems = (pulseContent.data ?? []).filter((item) => item.type !== 'poll');
   const showsQuery = useShows();
-  const lineup = classifyLineup(showsQuery.data ?? []);
+  const lineup = classifyLineup(showsQuery.data ?? [], new Date(), showStationFor(activeStation.id));
   const handleSharePulse = (item: { title: string; body: string | null }) => {
     const suffix = links.shareText || 'via EJazz Media';
     Share.share({ message: item.body ? `${item.title}\n\n${item.body}\n\n${suffix}` : `${item.title}\n\n${suffix}` }).catch(() => {});

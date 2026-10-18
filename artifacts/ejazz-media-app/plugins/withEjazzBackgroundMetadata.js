@@ -59,7 +59,7 @@ function patchAudioControlsService(source) {
     val url = when (station) {
       "ejazz radio" ->
         "https://eu1.reliastream.com:2199/external/rpc.php?m=recenttracks.get&username=ejazzug&charset=UTF-8&limit=10"
-      "ejazz xtra" -> "https://c32.radioboss.fm/w/nowplayinginfo?u=320"
+      "ejazz xtra" -> "https://stream.ejazzug.com/api/nowplaying/2"
       else -> return null
     }
     val connection = (URL(url).openConnection() as HttpURLConnection).apply {
@@ -84,11 +84,33 @@ function patchAudioControlsService(source) {
           artworkUrl = URL(it)
         }
       } else {
-        title = root.optString("currenttrack_title").trim()
-        artist = root.optString("currenttrack_artist").trim()
-        val artworkTimestamp = root.optString("artwork_ts").trim()
-        if (artworkTimestamp.isNotEmpty()) {
-          artworkUrl = URL("https://c32.radioboss.fm/w/artwork/320.jpg?$artworkTimestamp")
+        // AzuraCast: one payload, and song.art is already an absolute URL -- nothing to
+        // build from a station id and a cache-busting timestamp any more.
+        val song = root.optJSONObject("now_playing")?.optJSONObject("song") ?: return null
+        var songTitle = song.optString("title").trim()
+        var songArtist = song.optString("artist").trim()
+        if (songArtist.isEmpty()) {
+          // Untagged files carry "Artist - Title" (or "Artist- Title") in the title
+          // alone. Same idea as splitCombinedTitle() in lib/radio.ts, kept deliberately
+          // simple here: this Kotlin only compiles on Codemagic.
+          val combined = songTitle.ifEmpty { song.optString("text").trim() }
+          var cut = combined.indexOf(" - ")
+          var skip = 3
+          if (cut <= 0) {
+            cut = combined.indexOf("- ")
+            skip = 2
+          }
+          if (cut > 0) {
+            songArtist = combined.substring(0, cut).trim()
+            songTitle = combined.substring(cut + skip).trim()
+          } else {
+            songTitle = combined
+          }
+        }
+        title = songTitle
+        artist = songArtist
+        song.optString("art").trim().takeIf { it.startsWith("https://") }?.let {
+          artworkUrl = URL(it)
         }
       }
       if (title.isEmpty() && artist.isEmpty()) return null

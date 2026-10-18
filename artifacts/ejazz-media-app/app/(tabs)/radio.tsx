@@ -266,7 +266,11 @@ export default function RadioScreen() {
                 )}
                 <View style={styles.historyCopy}>
                   <Text numberOfLines={1} style={styles.historyTitle}>{track.title}</Text>
-                  <Text numberOfLines={1} style={styles.historyArtist}>{track.artist}</Text>
+                  {/* Guarded: an AzuraCast file with no artist tag would otherwise
+                      render an empty line under the title. */}
+                  {!!track.artist && (
+                    <Text numberOfLines={1} style={styles.historyArtist}>{track.artist}</Text>
+                  )}
                 </View>
               </View>
             ))}
