@@ -3,7 +3,7 @@ import { Image } from 'expo-image';
 import { LinearGradient } from 'expo-linear-gradient';
 import { useLocalSearchParams } from 'expo-router';
 import React from 'react';
-import { ActivityIndicator, Pressable, ScrollView, StyleSheet, Text, TextInput, View } from 'react-native';
+import { ActivityIndicator, Modal, Pressable, ScrollView, StyleSheet, Text, TextInput, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { MINI_PLAYER_CLEARANCE, PlayButton, PlayingEqualizer } from '@/components/MediaComponents';
 import { KeyboardAwareScrollViewCompat } from '@/components/KeyboardAwareScrollViewCompat';
@@ -36,46 +36,80 @@ function formatChartDay(date: string): string {
 }
 
 /**
- * One chart on a station's screen. A saved countdown shows today's chart, and, only if the
- * Control Room has allowed past days, a row of date chips to look back at an earlier day.
- * The chips are the server's `pastDates`, so this never offers a day that cannot be shown.
+ * One chart on a station's screen -- ONE day of it, never several side by side. A saved countdown
+ * shows today's, and, only if the Control Room has allowed past days, a calendar icon beside the
+ * title opens the list of days to look back at. The list is the server's own `pastDates`, so it
+ * never offers a day that cannot be shown; a free calendar would, because the history only has a
+ * row for a day the chart actually changed.
  */
 function ChartSection({ chart, station }: { chart: StationChart; station: 'radio' | 'xtra' }) {
   const [picked, setPicked] = React.useState<string | null>(null);
+  const [choosing, setChoosing] = React.useState(false);
   const past = usePastChart(station, chart.countdownId, picked);
   const dates = chart.kind === 'countdown' ? (chart.pastDates ?? []) : [];
   const viewingPast = picked !== null && dates.includes(picked);
   const entries = viewingPast ? (past.data ?? []) : chart.entries;
   const shown = chart.kind === 'countdown' ? entries : entries.slice(0, 10);
 
+  const choose = (date: string | null) => {
+    setPicked(date);
+    setChoosing(false);
+  };
+
   return (
     <View style={styles.chartSection}>
       <Text style={styles.sectionEyebrow}>{viewingPast && picked ? `CHART · ${formatChartDay(picked).toUpperCase()}` : 'CHART'}</Text>
-      <Text style={styles.chartTitle}>{chart.title}</Text>
+      <View style={styles.chartTitleRow}>
+        <Text style={styles.chartTitle}>{chart.title}</Text>
+        {dates.length > 0 ? (
+          <Pressable
+            onPress={() => setChoosing(true)}
+            hitSlop={10}
+            accessibilityRole="button"
+            accessibilityLabel="Choose a day"
+            style={styles.chartDayButton}
+          >
+            <Feather name="calendar" size={16} color="#A7B7CC" />
+          </Pressable>
+        ) : null}
+      </View>
+      {viewingPast ? (
+        <Pressable onPress={() => choose(null)} accessibilityRole="button" style={styles.chartBack}>
+          <Text style={styles.chartBackText}>Back to today</Text>
+        </Pressable>
+      ) : null}
       {dates.length > 0 ? (
-        <ScrollView
-          horizontal
-          showsHorizontalScrollIndicator={false}
-          style={styles.chartChipsScroll}
-          contentContainerStyle={styles.chartChips}
-        >
-          {[null, ...dates].map((date) => {
-            const active = (date ?? null) === (viewingPast ? picked : null);
-            return (
-              <Pressable
-                key={date ?? 'today'}
-                onPress={() => setPicked(date)}
-                accessibilityRole="button"
-                accessibilityState={{ selected: active }}
-                style={[styles.chartChip, active ? styles.chartChipActive : null]}
-              >
-                <Text style={[styles.chartChipText, active ? styles.chartChipTextActive : null]}>
-                  {date ? formatChartDay(date) : 'Today'}
-                </Text>
+        <Modal visible={choosing} transparent animationType="fade" onRequestClose={() => setChoosing(false)}>
+          {/* The backdrop is the way out as well as the Close row, so a tap anywhere sensible
+              dismisses it -- Android's own back gesture is handled by onRequestClose. */}
+          <Pressable style={styles.chartSheetBackdrop} onPress={() => setChoosing(false)}>
+            <Pressable style={styles.chartSheet} onPress={() => {}}>
+              <Text style={styles.chartSheetTitle}>Choose a day</Text>
+              <ScrollView style={styles.chartSheetScroll}>
+                {[null, ...dates].map((date) => {
+                  const active = (date ?? null) === (viewingPast ? picked : null);
+                  return (
+                    <Pressable
+                      key={date ?? 'today'}
+                      onPress={() => choose(date)}
+                      accessibilityRole="button"
+                      accessibilityState={{ selected: active }}
+                      style={[styles.chartSheetRow, active ? styles.chartSheetRowActive : null]}
+                    >
+                      <Text style={[styles.chartSheetRowText, active ? styles.chartSheetRowTextActive : null]}>
+                        {date ? formatChartDay(date) : 'Today'}
+                      </Text>
+                      {active ? <Feather name="check" size={16} color="#0B1730" /> : null}
+                    </Pressable>
+                  );
+                })}
+              </ScrollView>
+              <Pressable onPress={() => setChoosing(false)} accessibilityRole="button" style={styles.chartSheetClose}>
+                <Text style={styles.chartSheetCloseText}>Close</Text>
               </Pressable>
-            );
-          })}
-        </ScrollView>
+            </Pressable>
+          </Pressable>
+        </Modal>
       ) : null}
       {viewingPast && past.isLoading ? <ActivityIndicator style={styles.chartStatus} /> : null}
       {viewingPast && past.isError ? <Text style={styles.chartStatusText}>That day's chart isn't available.</Text> : null}
@@ -684,12 +718,20 @@ const styles = StyleSheet.create({
   chartTitle: { color: '#F7F9FC', fontSize: 18, fontWeight: '700', letterSpacing: -0.4, marginBottom: 8 },
   chartRow: { flexDirection: 'row', alignItems: 'center', minHeight: 48, borderBottomWidth: 1, borderBottomColor: '#17365E', paddingVertical: 6 },
   chartPos: { color: '#FF6B6B', fontSize: 16, fontWeight: '700', width: 30 },
-  chartChipsScroll: { marginHorizontal: -20, marginBottom: 10 },
-  chartChips: { paddingHorizontal: 20, gap: 8 },
-  chartChip: { paddingHorizontal: 12, paddingVertical: 7, borderRadius: 999, borderWidth: 1, borderColor: '#204570' },
-  chartChipActive: { backgroundColor: '#FF6B6B', borderColor: '#FF6B6B' },
-  chartChipText: { color: '#A7B7CC', fontSize: 12, fontWeight: '700' },
-  chartChipTextActive: { color: '#0B1730' },
+  chartTitleRow: { flexDirection: 'row', alignItems: 'center', gap: 10, marginBottom: 8 },
+  chartDayButton: { padding: 6, borderRadius: 8, borderWidth: 1, borderColor: '#204570' },
+  chartBack: { paddingBottom: 10 },
+  chartBackText: { color: '#FF6B6B', fontSize: 12, fontWeight: '700' },
+  chartSheetBackdrop: { flex: 1, backgroundColor: 'rgba(5,12,26,0.72)', justifyContent: 'flex-end' },
+  chartSheet: { backgroundColor: '#0E1E3A', borderTopLeftRadius: 18, borderTopRightRadius: 18, paddingTop: 18, paddingHorizontal: 20, paddingBottom: 28 },
+  chartSheetTitle: { color: '#F7F9FC', fontSize: 16, fontWeight: '700', marginBottom: 12 },
+  chartSheetScroll: { maxHeight: 320 },
+  chartSheetRow: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', paddingVertical: 12, paddingHorizontal: 14, borderRadius: 10, marginBottom: 6, borderWidth: 1, borderColor: '#204570' },
+  chartSheetRowActive: { backgroundColor: '#FF6B6B', borderColor: '#FF6B6B' },
+  chartSheetRowText: { color: '#F7F9FC', fontSize: 14, fontWeight: '600' },
+  chartSheetRowTextActive: { color: '#0B1730' },
+  chartSheetClose: { paddingVertical: 12, alignItems: 'center' },
+  chartSheetCloseText: { color: '#A7B7CC', fontSize: 13, fontWeight: '700' },
   chartStatus: { marginVertical: 14 },
   chartStatusText: { color: '#A7B7CC', fontSize: 13, paddingVertical: 12 },
   scheduleSection: { marginHorizontal: 20, marginTop: 22 },
