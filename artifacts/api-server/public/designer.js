@@ -24,6 +24,21 @@
   var MAX_HISTORY = 60;
   var PREVIEW_DEBOUNCE = 700;
 
+  // The shapes the designer offers, in the order an operator reaches for them: a square post, a
+  // 9:16 story, a 4:5 feed portrait, a 16:9 wide. They are labelled by RATIO because that is how
+  // a shareable gets asked for ("a 9:16 for the story"), not by pixel count.
+  //
+  // A template still declares the shapes it was drawn for in `sizes`, and the renderer refuses
+  // any other -- so this list is the choice offered, never a claim about what a given template
+  // allows. Picking a shape that is not declared retargets the design (see the dsSizeSel
+  // handler); it does not quietly add a second canvas the boxes would also have to fit.
+  var SHAPES = [
+    { size: '1080x1080', name: 'square' },
+    { size: '1080x1920', name: 'story' },
+    { size: '1080x1350', name: 'portrait' },
+    { size: '1920x1080', name: 'wide' }
+  ];
+
   var state = {
     tpl: null,            // the template being edited
     selected: null,       // placeholder id
@@ -92,6 +107,29 @@
     return sizes[0];
   }
 
+  /** 1080, 1920 -> '9:16'. Reduced by the greatest common divisor, so a size nobody listed reads
+   *  the same way as one of the SHAPES. */
+  function ratioOf(w, h) {
+    var a = w, b = h, t;
+    while (b) { t = a % b; a = b; b = t; }
+    a = a || 1;
+    return (w / a) + ':' + (h / a);
+  }
+
+  /** How a size reads in the Size list: '9:16 story \u00b7 1080\u00d71920'. */
+  function shapeLabel(size) {
+    var p = sizeParts(size);
+    var name = '';
+    for (var i = 0; i < SHAPES.length; i++) if (SHAPES[i].size === size) name = ' ' + SHAPES[i].name;
+    return ratioOf(p.w, p.h) + name + ' \u00b7 ' + p.w + '\u00d7' + p.h;
+  }
+
+  function sizeOption(size) {
+    var o = el('option', null, shapeLabel(size));
+    o.value = size;
+    return o;
+  }
+
   function findPh(id) {
     var list = (state.tpl && state.tpl.placeholders) || [];
     for (var i = 0; i < list.length; i++) if (String(list[i].id) === String(id)) return list[i];
@@ -131,7 +169,10 @@
     var wrap = $('dsCanvasWrap');
     var size = sizeParts(currentSize());
     var available = wrap ? Math.max(240, wrap.clientWidth - 2) : 520;
-    return Math.min(1, available / size.w);
+    // Height counts as much as width now that a 9:16 story is one of the shapes: scaled to the
+    // width alone, a 1080x1920 canvas stands about three screens tall and boxes get dragged blind.
+    var tall = Math.max(320, Math.round((window.innerHeight || 900) * 0.72));
+    return Math.min(1, available / size.w, tall / size.h);
   }
 
   function renderCanvas() {
@@ -743,13 +784,19 @@
     if ($('dsBgColor')) $('dsBgColor').value = (state.tpl.background || {}).color || '';
     var sizeSel = $('dsSizeSel');
     if (sizeSel) {
-      var sizes = state.tpl.sizes || ['1080x1080'];
+      var declared = state.tpl.sizes || ['1080x1080'];
       clear(sizeSel);
-      sizes.forEach(function (s) {
-        var o = el('option', null, s);
-        o.value = s;
-        sizeSel.appendChild(o);
+      // Two groups, so the list says what this design IS as well as what it could be redrawn at.
+      var mine = el('optgroup');
+      mine.label = 'This design';
+      declared.forEach(function (s) { mine.appendChild(sizeOption(s)); });
+      sizeSel.appendChild(mine);
+      var rest = el('optgroup');
+      rest.label = 'Redesign at';
+      SHAPES.forEach(function (sh) {
+        if (declared.indexOf(sh.size) === -1) rest.appendChild(sizeOption(sh.size));
       });
+      if (rest.firstChild) sizeSel.appendChild(rest);
       sizeSel.value = currentSize();
     }
     renderCanvas();
@@ -767,6 +814,10 @@
     if (state.booted) return;
     state.booted = true;
     state.tpl = blankTemplate();
+    // Paint the blank design straight away. loadTemplates() only opens one if the box has any
+    // saved, so without this the first operator to open the tab on a fresh box gets an empty
+    // pane -- no canvas and no Size list -- until they save something.
+    renderAll();
 
     on('dsAddBtn', 'click', addPlaceholder);
     on('dsDeleteBtn', 'click', deleteSelected);
@@ -787,7 +838,23 @@
     });
     on('dsTemplateSel', 'change', function (ev) { openTemplate(ev.target.value); });
     on('dsSizeSel', 'change', function (ev) {
-      state.size = ev.target.value;
+      var size = ev.target.value;
+      var declared = (state.tpl && state.tpl.sizes) || [];
+      if (declared.indexOf(size) === -1) {
+        // A shape this design was not drawn for: RETARGET it rather than add it. Geometry is
+        // absolute pixels and a template has to fit inside every size it declares, so declaring
+        // both 1:1 and 9:16 would pin every box inside the square -- almost never what "give me
+        // the 9:16" means. Nothing is saved until Save template, and Undo puts the old shape back.
+        pushHistory();
+        state.tpl.sizes = [size];
+        state.size = size;
+        renderAll();
+        renderPreview();
+        say('Now designing at ' + shapeLabel(size) + '. Boxes keep their pixel positions, so check '
+            + 'nothing hangs off the canvas: saving refuses a box that falls outside it.');
+        return;
+      }
+      state.size = size;
       renderAll();
       renderPreview();
     });
