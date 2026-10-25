@@ -336,6 +336,37 @@
     ['dsPhFont', 'font'], ['dsPhSize', 'size'], ['dsPhColor', 'color'],
     ['dsPhAlign', 'align'], ['dsPhBg', 'background']
   ];
+  // The plate's padding and corner radius are fixed by the TEMPLATE -- the renderer's
+  // PLATE_TEMPLATE_ONLY, and the preset routes refuse them too. Once a plate is actually being
+  // drawn these two are shown but locked, so what the operator sees is what the template says
+  // and nobody can nudge a live design's layout through the style panel. The plate COLOUR stays
+  // editable, because tint is exactly what a preset and an operator are allowed to change.
+  var INSPECTOR_PLATE = [['dsPhPlatePad', 'plate_padding'], ['dsPhRadius', 'radius']];
+  var PLATE_TYPES = ['image', 'logo'];
+
+  function isColour(v) { return /^#?([0-9a-fA-F]{3}|[0-9a-fA-F]{6}|[0-9a-fA-F]{8})$/.test(String(v || '').trim()); }
+
+  /** True when this placeholder is actually having a plate drawn behind it. */
+  function plateShown(ph) {
+    return !!ph && PLATE_TYPES.indexOf(ph.type) !== -1 && isColour((ph.style || {}).background);
+  }
+
+  /** Lock or unlock the plate geometry inputs to match. */
+  function updatePlateLock(ph) {
+    var shown = plateShown(ph);
+    INSPECTOR_PLATE.forEach(function (pair) {
+      var node = $(pair[0]);
+      if (node) node.disabled = shown;
+    });
+    var colour = $('dsPhBg');
+    if (colour) colour.disabled = false;
+    var note = $('dsPlateNote');
+    if (note) {
+      note.textContent = shown
+        ? 'A plate is being drawn here. Its padding and radius come from the template and are locked; only the colour can change.'
+        : '';
+    }
+  }
 
   function fillInspector() {
     var ph = state.selected ? findPh(state.selected) : null;
@@ -347,10 +378,11 @@
       if (node) node.value = ph[pair[1]] === undefined || ph[pair[1]] === null ? '' : String(ph[pair[1]]);
     });
     var style = ph.style || {};
-    INSPECTOR_STYLE.forEach(function (pair) {
+    INSPECTOR_STYLE.concat(INSPECTOR_PLATE).forEach(function (pair) {
       var node = $(pair[0]);
       if (node) node.value = style[pair[1]] === undefined || style[pair[1]] === null ? '' : String(style[pair[1]]);
     });
+    updatePlateLock(ph);
   }
 
   function readInspector() {
@@ -376,6 +408,19 @@
       var raw = node.value.trim();
       if (!raw) return;
       style[pair[1]] = pair[1] === 'size' ? parseInt(raw, 10) : raw;
+    });
+    // A locked input is not a cleared one: keep what the template already said, so switching a
+    // plate on cannot quietly drop the padding and radius it was designed with.
+    var existing = ph.style || {};
+    INSPECTOR_PLATE.forEach(function (pair) {
+      var node = $(pair[0]);
+      if (!node) return;
+      if (node.disabled) {
+        if (existing[pair[1]] !== undefined && existing[pair[1]] !== null) style[pair[1]] = existing[pair[1]];
+        return;
+      }
+      var raw = node.value.trim();
+      if (raw) style[pair[1]] = parseInt(raw, 10);
     });
     if (Object.keys(style).length) ph.style = style; else delete ph.style;
     state.selected = String(newId);
@@ -778,7 +823,7 @@
     });
     on('dsBgColor', 'change', function () { pushHistory(); readTemplateFields(); renderAll(); schedulePreview(); });
 
-    INSPECTOR.concat(INSPECTOR_STYLE).forEach(function (pair) {
+    INSPECTOR.concat(INSPECTOR_STYLE).concat(INSPECTOR_PLATE).forEach(function (pair) {
       on(pair[0], 'change', readInspector);
     });
 

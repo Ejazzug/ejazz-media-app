@@ -193,6 +193,35 @@ router.delete("/brand/:id", requireAdmin, async (req, res) => {
 });
 
 // --------------------------------------------------------------------- presets
+
+/**
+ * Plate geometry belongs to the template, never to a preset -- the renderer's
+ * PLATE_TEMPLATE_ONLY. A preset may recolour a logo's plate (style.background) and may not
+ * change its padding or corner radius, because that is layout and a preset must not own
+ * layout. The renderer already drops these keys when it merges, so this is the second lock:
+ * it stops a preset that would silently do nothing from being SAVED, and names the field, so
+ * the operator finds out at the moment they try rather than wondering why nothing moved.
+ */
+const PLATE_TEMPLATE_ONLY = ["plate_padding", "radius"];
+
+function plateViolation(settings: unknown): string | null {
+  const s = (settings || {}) as Json;
+  const styles: Array<[string, unknown]> = [["style", s.style]];
+  const per = s.placeholders;
+  if (per && typeof per === "object" && !Array.isArray(per)) {
+    for (const [id, value] of Object.entries(per as Json)) {
+      if (value && typeof value === "object") styles.push(["placeholders." + id + ".style", (value as Json).style]);
+    }
+  }
+  for (const [where, style] of styles) {
+    if (!style || typeof style !== "object" || Array.isArray(style)) continue;
+    for (const key of Object.keys(style as Json)) {
+      if (PLATE_TEMPLATE_ONLY.includes(key)) return where + "." + key;
+    }
+  }
+  return null;
+}
+
 router.get("/presets", requireAdmin, async (_req, res) => {
   res.json(await db.select().from(presetsTable).orderBy(presetsTable.name));
 });
@@ -202,6 +231,14 @@ router.post("/presets", requireAdmin, async (req, res) => {
   const name = String(b.name || "").trim();
   if (!name) { res.status(400).json({ error: "A preset needs a name." }); return; }
   const settings = (b.settings && typeof b.settings === "object" ? b.settings : {}) as Json;
+  const offending = plateViolation(settings);
+  if (offending) {
+    res.status(400).json({
+      error: "A preset cannot set " + offending + ": the plate's padding and corner radius belong to the template. Only its colour (style.background) can come from a preset.",
+      field: offending,
+    });
+    return;
+  }
   try {
     const [row] = await db.insert(presetsTable)
       .values({ name, kind: String(b.kind || "design"), settings }).returning();
@@ -217,7 +254,17 @@ router.put("/presets/:id", requireAdmin, async (req, res) => {
   const patch: Json = { updatedAt: new Date() };
   if (typeof b.name === "string" && b.name.trim()) patch.name = b.name.trim();
   if (typeof b.kind === "string" && b.kind.trim()) patch.kind = b.kind.trim();
-  if (b.settings && typeof b.settings === "object") patch.settings = b.settings;
+  if (b.settings && typeof b.settings === "object") {
+    const bad = plateViolation(b.settings);
+    if (bad) {
+      res.status(400).json({
+        error: "A preset cannot set " + bad + ": the plate's padding and corner radius belong to the template. Only its colour (style.background) can come from a preset.",
+        field: bad,
+      });
+      return;
+    }
+    patch.settings = b.settings;
+  }
   const [row] = await db.update(presetsTable).set(patch)
     .where(eq(presetsTable.id, String(req.params.id))).returning();
   if (!row) { res.status(404).json({ error: "No such preset." }); return; }

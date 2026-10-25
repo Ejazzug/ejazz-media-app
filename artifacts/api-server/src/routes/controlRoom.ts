@@ -541,6 +541,11 @@ const PAGE = `<!doctype html>
             </div>
           </div>
           <div class="field"><label>Background (cta pill, or a plate behind a logo)</label><input type="text" id="dsPhBg" placeholder="#FF0056"></div>
+          <div class="row">
+            <div class="field"><label>Plate padding</label><input type="number" id="dsPhPlatePad"></div>
+            <div class="field"><label>Plate radius</label><input type="number" id="dsPhRadius"></div>
+          </div>
+          <p class="meta" id="dsPlateNote" style="margin:0;"></p>
         </div>
 
         <details class="card section" style="margin-top:12px;" open>
