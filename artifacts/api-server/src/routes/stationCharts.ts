@@ -20,6 +20,11 @@ function stationOf(value: unknown): "radio" | "xtra" | null {
  * Two kinds of item, same shape so older apps keep working: saved COUNTDOWNS (today's chart
  * from the newest snapshot, id "cd:<countdown id>", plus the past dates the operator has
  * allowed) and CHARTS generated on the dashboard's Charts page.
+ *
+ * A countdown also carries its shareable `card` (picture + caption) when it has one -- stored by
+ * the same sync that stores the chart, so this route never calls the dashboard. It is only sent
+ * for TODAY's chart: the card is a picture of the chart as it stands, and offering it beside an
+ * earlier day would be sharing one day's list with another day's picture.
  */
 router.get("/", async (req, res) => {
   const station = stationOf(req.query.station);
@@ -46,6 +51,7 @@ router.get("/", async (req, res) => {
         date: today,
         entries: expandEntries(snap.entries as CompactEntries),
         pastDates: pastDates(cfg, today, first),
+        card: c.cardUrl ? { url: c.cardUrl, caption: c.cardCaption ?? "" } : null,
       });
     }
 

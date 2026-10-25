@@ -629,10 +629,13 @@ router.put("/countdown-charts/:id", async (req, res) => {
     res.status(404).json({ error: "That countdown no longer exists on the dashboard." });
     return;
   }
+  // The card goes in with the assignment, not at the next sync: otherwise a countdown ticked
+  // onto a station shows its chart at once and its card up to 15 minutes later.
+  const card = { cardUrl: c.card?.url ?? null, cardCaption: c.card?.caption ?? null, cardUpdatedAt: new Date() };
   await db
     .insert(countdownChartStationsTable)
-    .values({ countdownId, name: c.name, stations })
-    .onConflictDoUpdate({ target: countdownChartStationsTable.countdownId, set: { name: c.name, stations } });
+    .values({ countdownId, name: c.name, stations, ...card })
+    .onConflictDoUpdate({ target: countdownChartStationsTable.countdownId, set: { name: c.name, stations, ...card } });
   // Save today's chart now so the app has something to show straight away.
   const snapshot = await snapshotCountdown(c, todayInEat().date);
   res.json({ id: countdownId, stations, snapshot });

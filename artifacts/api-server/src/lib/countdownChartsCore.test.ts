@@ -10,7 +10,8 @@
  */
 import {
   addDays, compactEntries, expandEntries, sameEntries, normalizeChartsConfig, earliestAllowed,
-  pastDates, isViewable, resolveSnapshot, rowsToPrune, isDateString, type ChartsConfig,
+  pastDates,
+  readCard, isViewable, resolveSnapshot, rowsToPrune, isDateString, type ChartsConfig,
 } from "./countdownChartsCore";
 
 let pass = 0, fail = 0;
@@ -98,6 +99,24 @@ check("single older row is kept as carry-over", rowsToPrune(rows, "2026-10-12").
 // After pruning, a date at the cutoff still resolves.
 const kept = rows.filter((r) => !pr.includes(r));
 check("cutoff date still resolves after prune", resolveSnapshot(kept, "2026-10-16")?.v === "b");
+
+// ---- the shareable card, as handed over by the dashboard ----
+// It becomes an <img> source on a phone and on a website, so the shape is what is trusted, never
+// the sender: anything that is not a plain https URL is no card at all.
+check("a card is read from the dashboard's shape",
+  JSON.stringify(readCard({ public_url: "https://control.ejazzug.com/static/x.png?v=1", caption: "hi" })) ===
+  JSON.stringify({ url: "https://control.ejazzug.com/static/x.png?v=1", caption: "hi" }));
+check("no caption is still a card", readCard({ public_url: "https://a/b.png" })?.caption === "");
+check("the url is trimmed", readCard({ public_url: "  https://a/b.png  " })?.url === "https://a/b.png");
+check("null, undefined and junk are no card",
+  readCard(null) === null && readCard(undefined) === null && readCard("https://a/b.png") === null);
+check("a relative url is refused", readCard({ public_url: "/static/x.png" }) === null);
+check("plain http is refused", readCard({ public_url: "http://a/b.png" }) === null);
+check("a javascript: url is refused", readCard({ public_url: "javascript:alert(1)" }) === null);
+check("a data: url is refused", readCard({ public_url: "data:image/png;base64,AAA" }) === null);
+check("a url with whitespace in it is refused", readCard({ public_url: "https://a/ b.png" }) === null);
+check("a non-string caption becomes empty",
+  readCard({ public_url: "https://a/b.png", caption: 42 })?.caption === "");
 
 console.log(`${pass} passed, ${fail} failed`);
 if (fail) process.exit(1);

@@ -11,6 +11,19 @@ export const countdownChartStationsTable = pgTable("countdown_chart_stations", {
   name: text("name").notNull(),
   stations: jsonb("stations").$type<("radio" | "xtra")[]>().notNull().default([]),
   assignedAt: timestamp("assigned_at", { withTimezone: true }).notNull().defaultNow(),
+  /**
+   * The countdown's shareable card: the picture the dashboard draws of this chart, and the
+   * caption written to go with it (dashboard: lib/countdown_cards.py).
+   *
+   * Kept here, next to the assignment, for the same reason the snapshots are kept at all -- the
+   * app must not depend on the dashboard being up. The sync that reads the chart stores these in
+   * the same pass; null means that countdown has no card (no design chosen, or switched off), and
+   * the app simply shows no share button. The URL is absolute and already carries the image's
+   * own version, so a redrawn card is never served from a stale cache.
+   */
+  cardUrl: text("card_url"),
+  cardCaption: text("card_caption"),
+  cardUpdatedAt: timestamp("card_updated_at", { withTimezone: true }),
 });
 
 /**

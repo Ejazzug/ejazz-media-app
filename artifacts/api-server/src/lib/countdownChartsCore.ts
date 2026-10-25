@@ -124,3 +124,29 @@ export function rowsToPrune<T extends { day: string }>(rows: T[], cutoff: string
   const older = rows.filter((r) => r.day < cutoff).sort((a, b) => (a.day < b.day ? 1 : -1));
   return older.slice(1);
 }
+
+/**
+ * The shareable card the dashboard draws for a countdown: the picture of this chart and the
+ * caption written to go with it. Null when that countdown has no card -- no design chosen on the
+ * dashboard's Card Designs tab, or switched off on its Sharing tab.
+ */
+export type CountdownCard = {
+  /** Absolute, and already carrying the image's own version, so it is safe to cache by URL. */
+  url: string;
+  caption: string;
+};
+
+/**
+ * The dashboard's `card` object, trusted only as far as its shape.
+ *
+ * An https URL and nothing else: this becomes an <img> source in the app and on a website, and
+ * "the dashboard said so" is not a reason to hand a phone a javascript: or data: URL. A card with
+ * no caption is still a card -- the picture is the point and the words are optional.
+ */
+export function readCard(raw: unknown): CountdownCard | null {
+  if (!raw || typeof raw !== "object") return null;
+  const c = raw as { public_url?: unknown; caption?: unknown };
+  const url = typeof c.public_url === "string" ? c.public_url.trim() : "";
+  if (!/^https:\/\/[^\s]+$/i.test(url)) return null;
+  return { url, caption: typeof c.caption === "string" ? c.caption : "" };
+}

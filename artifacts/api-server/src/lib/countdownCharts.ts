@@ -3,8 +3,8 @@ import { db, countdownChartStationsTable, countdownChartSnapshotsTable } from "@
 import { getAppConfig } from "./appConfig";
 import { todayInEat } from "./showSchedule";
 import {
-  addDays, compactEntries, rowsToPrune, sameEntries,
-  type ChartEntry, type CompactEntries,
+  addDays, compactEntries, readCard, rowsToPrune, sameEntries,
+  type ChartEntry, type CompactEntries, type CountdownCard,
 } from "./countdownChartsCore";
 import { logger } from "./logger";
 
@@ -26,6 +26,7 @@ export type DashboardCountdown = {
   entries: ChartEntry[];
   /** True while daily_countdown.py is rebuilding it: the playlist is half-filled, so do not snapshot. */
   building: boolean;
+  card: CountdownCard | null;
   error?: string;
 };
 
@@ -42,6 +43,7 @@ export async function fetchDashboardCountdowns(): Promise<DashboardCountdown[]> 
     name: String(c.name),
     entries: Array.isArray(c.entries) ? c.entries : [],
     building: Boolean(c.building),
+    card: readCard(c.card),
     ...(c.error ? { error: String(c.error) } : {}),
   }));
 }
@@ -139,6 +141,15 @@ export async function syncCountdownCharts(): Promise<{ checked: number; saved: n
       if (!c) continue; // removed on the dashboard: keep what we have, change nothing
       if (c.name !== a.name) {
         await db.update(countdownChartStationsTable).set({ name: c.name }).where(eq(countdownChartStationsTable.countdownId, a.countdownId));
+      }
+      // The card is stored in the same pass that reads the chart -- no second request, no second
+      // timer -- and only when it actually changed, so an unchanged card keeps its own timestamp.
+      const card = c.card;
+      if ((card?.url ?? null) !== a.cardUrl || (card?.caption ?? null) !== a.cardCaption) {
+        await db
+          .update(countdownChartStationsTable)
+          .set({ cardUrl: card?.url ?? null, cardCaption: card?.caption ?? null, cardUpdatedAt: new Date() })
+          .where(eq(countdownChartStationsTable.countdownId, a.countdownId));
       }
       if ((await snapshotCountdown(c, today)) === "saved") saved += 1;
     }

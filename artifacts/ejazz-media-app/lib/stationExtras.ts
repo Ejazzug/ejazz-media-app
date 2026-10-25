@@ -43,6 +43,13 @@ export function useSongFact(artist: string | undefined, title: string | undefine
 
 export type StationChartEntry = { position: number; title: string; artist: string };
 
+/**
+ * A countdown's shareable card: the picture the dashboard draws of this chart, and the caption
+ * written to go with it. Only sent for TODAY's chart, and only when the countdown has been given
+ * a design -- so `card` being absent is the normal case, not an error.
+ */
+export type StationChartCard = { url: string; caption: string };
+
 export type StationChart = {
   id: string;
   title: string;
@@ -53,6 +60,7 @@ export type StationChart = {
   countdownId?: string;
   /** Earlier days the operator allows, newest first (YYYY-MM-DD). Empty/absent = today only. */
   pastDates?: string[];
+  card?: StationChartCard | null;
 };
 
 /** A countdown's chart on an earlier day. Only requested when a date chip is tapped. */

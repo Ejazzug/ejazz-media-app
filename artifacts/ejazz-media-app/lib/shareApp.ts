@@ -39,5 +39,15 @@ export function useShareApp() {
     shareApp: () => open(withAppLink(links.shareAppText || DEFAULT_APP_SHARE_TEXT, update.storeUrl)),
     /** Any other message (a station, a fun fact) with the app link added underneath. */
     shareWithLink: (text: string) => open(withAppLink(text, update.storeUrl)),
+    /**
+     * A chart card: the caption written for it in the dashboard, then the picture's own link.
+     *
+     * The link rather than the file: this app bundles no sharing module that can hand over an
+     * image, and the card is a public https PNG, so a link is what every chat app can open (most
+     * show it as a picture). Adding a native image-share would mean a new dependency and a new
+     * build for something the link already does.
+     */
+    shareCard: (caption: string, imageUrl: string) =>
+      open(withAppLink([caption.trim(), imageUrl.trim()].filter(Boolean).join('\n\n'), update.storeUrl)),
   };
 }

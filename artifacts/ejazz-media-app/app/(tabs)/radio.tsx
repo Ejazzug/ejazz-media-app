@@ -3,7 +3,7 @@ import { Image } from 'expo-image';
 import { LinearGradient } from 'expo-linear-gradient';
 import { useLocalSearchParams } from 'expo-router';
 import React from 'react';
-import { ActivityIndicator, Modal, Pressable, ScrollView, StyleSheet, Text, TextInput, View } from 'react-native';
+import { ActivityIndicator, Linking, Modal, Pressable, ScrollView, StyleSheet, Text, TextInput, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { MINI_PLAYER_CLEARANCE, PlayButton, PlayingEqualizer } from '@/components/MediaComponents';
 import { KeyboardAwareScrollViewCompat } from '@/components/KeyboardAwareScrollViewCompat';
@@ -46,6 +46,7 @@ function ChartSection({ chart, station }: { chart: StationChart; station: 'radio
   const [picked, setPicked] = React.useState<string | null>(null);
   const [choosing, setChoosing] = React.useState(false);
   const past = usePastChart(station, chart.countdownId, picked);
+  const share = useShareApp();
   const dates = chart.kind === 'countdown' ? (chart.pastDates ?? []) : [];
   const viewingPast = picked !== null && dates.includes(picked);
   const entries = viewingPast ? (past.data ?? []) : chart.entries;
@@ -77,6 +78,33 @@ function ChartSection({ chart, station }: { chart: StationChart; station: 'radio
         <Pressable onPress={() => choose(null)} accessibilityRole="button" style={styles.chartBack}>
           <Text style={styles.chartBackText}>Back to today</Text>
         </Pressable>
+      ) : null}
+      {/* The card: the picture the dashboard draws of this very chart, with its own caption. Only
+          for today -- the picture IS the chart as it stands, so offering it beside an earlier day
+          would be sharing one day's list with another day's picture. */}
+      {!viewingPast && chart.card ? (
+        <View style={styles.chartCardRow}>
+          <Pressable
+            onPress={() => Linking.openURL(chart.card!.url).catch(() => {})}
+            accessibilityRole="button"
+            accessibilityLabel={`Open the ${chart.title} card`}
+          >
+            <Image source={{ uri: chart.card.url }} style={styles.chartCardImage} contentFit="cover" transition={200} />
+          </Pressable>
+          <View style={styles.chartCardCopy}>
+            <Text style={styles.chartCardHint}>Today's chart as a picture, ready to post.</Text>
+            {share.enabled ? (
+              <Pressable
+                onPress={() => share.shareCard(chart.card?.caption ?? chart.title, chart.card?.url ?? '')}
+                accessibilityRole="button"
+                style={styles.chartCardShare}
+              >
+                <Feather name="share-2" size={14} color="#0B1730" />
+                <Text style={styles.chartCardShareText}>Share this chart</Text>
+              </Pressable>
+            ) : null}
+          </View>
+        </View>
       ) : null}
       {dates.length > 0 ? (
         <Modal visible={choosing} transparent animationType="fade" onRequestClose={() => setChoosing(false)}>
@@ -721,6 +749,15 @@ const styles = StyleSheet.create({
   chartTitleRow: { flexDirection: 'row', alignItems: 'center', gap: 10, marginBottom: 8 },
   chartDayButton: { padding: 6, borderRadius: 8, borderWidth: 1, borderColor: '#204570' },
   chartBack: { paddingBottom: 10 },
+  chartCardRow: { flexDirection: 'row', gap: 12, alignItems: 'center', paddingBottom: 14 },
+  // 9:16, the shape the dashboard's default design draws, kept small so the chart itself stays
+  // the subject of the section. contentFit cover means a square or wide card still fills it.
+  chartCardImage: { width: 72, height: 128, borderRadius: 8, backgroundColor: '#0E1E3A' },
+  chartCardCopy: { flex: 1, gap: 8 },
+  chartCardHint: { color: '#A7B7CC', fontSize: 12, lineHeight: 17 },
+  chartCardShare: { flexDirection: 'row', alignItems: 'center', gap: 6, alignSelf: 'flex-start',
+                    backgroundColor: '#FF6B6B', paddingVertical: 7, paddingHorizontal: 12, borderRadius: 999 },
+  chartCardShareText: { color: '#0B1730', fontSize: 12, fontWeight: '700' },
   chartBackText: { color: '#FF6B6B', fontSize: 12, fontWeight: '700' },
   chartSheetBackdrop: { flex: 1, backgroundColor: 'rgba(5,12,26,0.72)', justifyContent: 'flex-end' },
   chartSheet: { backgroundColor: '#0E1E3A', borderTopLeftRadius: 18, borderTopRightRadius: 18, paddingTop: 18, paddingHorizontal: 20, paddingBottom: 28 },
