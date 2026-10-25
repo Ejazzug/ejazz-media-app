@@ -24,19 +24,18 @@
   var MAX_HISTORY = 60;
   var PREVIEW_DEBOUNCE = 700;
 
-  // The shapes the designer offers, in the order an operator reaches for them: a square post, a
-  // 9:16 story, a 4:5 feed portrait, a 16:9 wide. They are labelled by RATIO because that is how
-  // a shareable gets asked for ("a 9:16 for the story"), not by pixel count.
+  // The three ratios a design can be shared at: 9:16 story, 4:5 feed portrait, 1:1 square. They
+  // are named by RATIO because that is how a shareable gets asked for ("a 9:16 for the story"),
+  // and all three are 1080 wide so one layout can serve them.
   //
-  // A template still declares the shapes it was drawn for in `sizes`, and the renderer refuses
-  // any other -- so this list is the choice offered, never a claim about what a given template
-  // allows. Picking a shape that is not declared retargets the design (see the dsSizeSel
-  // handler); it does not quietly add a second canvas the boxes would also have to fit.
+  // A design OFFERS whichever of these it is ticked for; that list is the template's `sizes`,
+  // the renderer refuses anything outside it, and whoever shares picks from it
+  // (GET /api/designer/render/<id>?size=...). The Size select below is only which of the offered
+  // ratios you are laying out on right now.
   var SHAPES = [
-    { size: '1080x1080', name: 'square' },
     { size: '1080x1920', name: 'story' },
     { size: '1080x1350', name: 'portrait' },
-    { size: '1920x1080', name: 'wide' }
+    { size: '1080x1080', name: 'square' }
   ];
 
   var state = {
@@ -50,6 +49,7 @@
     templates: [],
     previewTimer: null,
     previewUrl: null,
+    ratioRow: null,       // the "Shares as" tick-boxes, built once beside the Size select
     booted: false
   };
 
@@ -90,7 +90,10 @@
     return {
       id: 'untitled',
       name: 'Untitled design',
-      sizes: ['1080x1080'],
+      // A new design is shareable at all three from the start, so whoever shares it has the
+      // choice without anyone going back to the editor. That pins the layout to what the three
+      // have in common (the 1080x1080 square); untick a ratio to use the rest of the canvas.
+      sizes: SHAPES.map(function (sh) { return sh.size; }),
       background: { color: '#070E28' },
       placeholders: []
     };
@@ -128,6 +131,31 @@
     var o = el('option', null, shapeLabel(size));
     o.value = size;
     return o;
+  }
+
+  /** The sizes this design offers, in SHAPES order, with anything non-standard it already
+   *  declares kept on the end rather than silently dropped. */
+  function offered() {
+    var have = (state.tpl && state.tpl.sizes) || [];
+    var out = [];
+    SHAPES.forEach(function (sh) { if (have.indexOf(sh.size) !== -1) out.push(sh.size); });
+    have.forEach(function (sz) { if (out.indexOf(sz) === -1) out.push(sz); });
+    return out.length ? out : ['1080x1080'];
+  }
+
+  /** The box every offered ratio has in common -- the narrowest width by the shortest height.
+   *  Drawn on the canvas as a guide, because a layout has to fit inside EVERY ratio it offers
+   *  (absolute pixels; the renderer's own rule) and that is otherwise invisible while you work. */
+  function commonArea() {
+    var list = offered();
+    if (list.length < 2) return null;
+    var w = 0, h = 0;
+    list.forEach(function (sz, i) {
+      var p = sizeParts(sz);
+      w = i === 0 ? p.w : Math.min(w, p.w);
+      h = i === 0 ? p.h : Math.min(h, p.h);
+    });
+    return { w: w, h: h };
   }
 
   function findPh(id) {
@@ -191,6 +219,22 @@
     guideH.id = 'dsGuideH';
     canvas.appendChild(guideV);
     canvas.appendChild(guideH);
+
+    // The area every offered ratio shares, drawn before the boxes so it sits underneath them.
+    var common = commonArea();
+    if (common) {
+      var guide = el('div');
+      guide.style.position = 'absolute';
+      guide.style.left = '0px';
+      guide.style.top = '0px';
+      guide.style.width = Math.round(common.w * scale) + 'px';
+      guide.style.height = Math.round(common.h * scale) + 'px';
+      guide.style.border = '1px dashed #519DC5';
+      guide.style.pointerEvents = 'none';
+      guide.setAttribute('data-role', 'common-area');
+      guide.title = 'Inside here the design fits every ratio it is shared at';
+      canvas.appendChild(guide);
+    }
 
     var list = (state.tpl.placeholders || []).slice().sort(function (a, b) {
       return (a.z || 0) - (b.z || 0);
@@ -784,25 +828,100 @@
     if ($('dsBgColor')) $('dsBgColor').value = (state.tpl.background || {}).color || '';
     var sizeSel = $('dsSizeSel');
     if (sizeSel) {
-      var declared = state.tpl.sizes || ['1080x1080'];
       clear(sizeSel);
-      // Two groups, so the list says what this design IS as well as what it could be redrawn at.
-      var mine = el('optgroup');
-      mine.label = 'This design';
-      declared.forEach(function (s) { mine.appendChild(sizeOption(s)); });
-      sizeSel.appendChild(mine);
-      var rest = el('optgroup');
-      rest.label = 'Redesign at';
-      SHAPES.forEach(function (sh) {
-        if (declared.indexOf(sh.size) === -1) rest.appendChild(sizeOption(sh.size));
-      });
-      if (rest.firstChild) sizeSel.appendChild(rest);
+      // Only the ratios this design offers: the Size box is "which one am I laying out on",
+      // not "what could this become". What it offers is the tick-boxes beside it.
+      offered().forEach(function (sz) { sizeSel.appendChild(sizeOption(sz)); });
       sizeSel.value = currentSize();
     }
+    renderRatioChoice();
     renderCanvas();
     renderLayers();
     fillInspector();
     refreshUndoButtons();
+  }
+
+  /** The "Shares as" tick-boxes: which ratios this design offers.
+   *
+   * Built here rather than in controlRoom.ts because that page is one template literal behind a
+   * build and a service restart, while this file is a static script -- the operator gets the
+   * control on a reload. The row is created once and lives beside the Size select.
+   */
+  function ratioChoiceRow() {
+    if (state.ratioRow) return state.ratioRow;
+    var sizeSel = $('dsSizeSel');
+    var field = sizeSel && sizeSel.parentNode;
+    var bar = field && field.parentNode;
+    if (!bar) return null;
+    var row = el('div', 'field');
+    row.style.minWidth = '260px';
+    var label = el('label', null, 'Shares as');
+    row.appendChild(label);
+    var boxes = el('div');
+    boxes.style.display = 'flex';
+    boxes.style.flexWrap = 'wrap';
+    boxes.style.gap = '10px';
+    row.appendChild(boxes);
+    var hint = el('div', 'hint', 'Tick every ratio this design should be shareable at. One layout '
+      + 'serves them all, so a box has to fit inside the smallest -- the dashed guide on the '
+      + 'canvas. The first ticked is what a share gets when it does not ask for a ratio.');
+    hint.style.margin = '4px 0 0';
+    row.appendChild(hint);
+    if (bar.insertBefore) bar.insertBefore(row, field.nextSibling || null);
+    else bar.appendChild(row);
+    state.ratioRow = { row: row, boxes: boxes, inputs: {} };
+    return state.ratioRow;
+  }
+
+  function renderRatioChoice() {
+    var ui = ratioChoiceRow();
+    if (!ui || !state.tpl) return;
+    var have = offered();
+    var all = SHAPES.map(function (sh) { return sh.size; });
+    // A size this design already declares that is not one of the three stays listed, so it can be
+    // seen and unticked rather than quietly carried forever.
+    have.forEach(function (sz) { if (all.indexOf(sz) === -1) all.push(sz); });
+    clear(ui.boxes);
+    ui.inputs = {};
+    all.forEach(function (sz) {
+      var wrap = el('label', 'checkbox');
+      var box = el('input');
+      box.type = 'checkbox';
+      box.checked = have.indexOf(sz) !== -1;
+      box.value = sz;
+      box.setAttribute('data-ratio', sz);
+      box.addEventListener('change', function () { toggleRatio(sz, box.checked); });
+      wrap.appendChild(box);
+      wrap.appendChild(el('span', null, shapeLabel(sz)));
+      ui.boxes.appendChild(wrap);
+      ui.inputs[sz] = box;
+    });
+  }
+
+  function toggleRatio(size, wanted) {
+    if (!state.tpl) return;
+    var have = offered();
+    var next = wanted ? have.concat([size]) : have.filter(function (s) { return s !== size; });
+    if (!next.length) {
+      // Python refuses an empty `sizes`, and a design that is shareable at nothing is not a
+      // design. Put the tick back and say why rather than letting the save fail later.
+      renderRatioChoice();
+      say('A design has to be shareable at at least one ratio. Tick another before removing this '
+          + 'one.', true);
+      return;
+    }
+    pushHistory();
+    // offered() re-reads the list in SHAPES order, so the default a share gets (the first one
+    // declared) never depends on the order the boxes happened to be ticked in.
+    state.tpl.sizes = next;
+    state.tpl.sizes = offered();
+    if (state.tpl.sizes.indexOf(state.size) === -1) state.size = state.tpl.sizes[0];
+    renderAll();
+    renderPreview();
+    say(wanted ? 'Now shared at ' + shapeLabel(size) + ' as well. A box has to fit inside every '
+                 + 'ratio offered: the dashed guide is what they have in common, and saving names '
+                 + 'any box that falls outside one.'
+               : 'No longer shared at ' + shapeLabel(size) + '.');
   }
 
   function on(id, event, fn) {
@@ -837,24 +956,10 @@
       ev.target.value = '';
     });
     on('dsTemplateSel', 'change', function (ev) { openTemplate(ev.target.value); });
+    // Which offered ratio you are laying out on. It changes the view, never what the design
+    // offers -- that is the Shares as tick-boxes.
     on('dsSizeSel', 'change', function (ev) {
-      var size = ev.target.value;
-      var declared = (state.tpl && state.tpl.sizes) || [];
-      if (declared.indexOf(size) === -1) {
-        // A shape this design was not drawn for: RETARGET it rather than add it. Geometry is
-        // absolute pixels and a template has to fit inside every size it declares, so declaring
-        // both 1:1 and 9:16 would pin every box inside the square -- almost never what "give me
-        // the 9:16" means. Nothing is saved until Save template, and Undo puts the old shape back.
-        pushHistory();
-        state.tpl.sizes = [size];
-        state.size = size;
-        renderAll();
-        renderPreview();
-        say('Now designing at ' + shapeLabel(size) + '. Boxes keep their pixel positions, so check '
-            + 'nothing hangs off the canvas: saving refuses a box that falls outside it.');
-        return;
-      }
-      state.size = size;
+      state.size = ev.target.value;
       renderAll();
       renderPreview();
     });

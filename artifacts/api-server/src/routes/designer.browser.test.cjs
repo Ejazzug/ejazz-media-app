@@ -60,9 +60,22 @@ function makeDom(ids) {
       get firstChild() { return this.children[0] || null; },
       appendChild(c) {
         this.children.push(c);
+        c.parentNode = this;
         if (this.tagName === 'SELECT' && (c.tagName === 'OPTION' || c.tagName === 'OPTGROUP')) this.options.push(c);
         return c;
       },
+      insertBefore(c, ref) {
+        const i = ref ? this.children.indexOf(ref) : -1;
+        if (i < 0) this.children.push(c); else this.children.splice(i, 0, c);
+        c.parentNode = this;
+        return c;
+      },
+      get nextSibling() {
+        const p = this.parentNode;
+        if (!p) return null;
+        return p.children[p.children.indexOf(this) + 1] || null;
+      },
+      parentNode: null,
       removeChild(c) { const i = this.children.indexOf(c); if (i >= 0) this.children.splice(i, 1); },
       addEventListener(ev, fn) { (this.listeners[ev] = this.listeners[ev] || []).push(fn); },
       removeEventListener() {},
@@ -84,6 +97,14 @@ function makeDom(ids) {
   ids.forEach((id) => { byId[id] = node(id.slice(0, 2) === 'ds' ? 'div' : 'div'); });
   for (const id of ['dsSizeSel', 'dsTemplateSel', 'dsPresetSel', 'dsAddType', 'dsPhType', 'dsPhFit', 'dsPhAlign']) {
     if (byId[id]) byId[id].tagName = 'SELECT';
+  }
+  // The Size select sits in a .field inside a .dsBar in the real page; the ratio row is inserted
+  // beside it, so the stand-in needs those two wrappers.
+  if (byId.dsSizeSel) {
+    const bar = node('div');
+    const field = node('div');
+    bar.appendChild(field);
+    field.appendChild(byId.dsSizeSel);
   }
   const tabBtn = node('button');
   tabBtn.attrs['data-panel'] = 'panel-designer';
@@ -146,77 +167,147 @@ function load(ids, opts) {
 }
 
 // ------------------------------------------------------------------------------------ the tests
+
+// The ratio tick-boxes are built by designer.js next to the Size select, so they are found by
+// walking the DOM rather than by id.
+function ratioBoxes(byId) {
+  const out = {};
+  const bar = byId.dsSizeSel.parentNode.parentNode;
+  (function walk(n) {
+    (n.children || []).forEach((c) => {
+      if (c.tagName === 'INPUT' && c.getAttribute('data-ratio')) out[c.getAttribute('data-ratio')] = c;
+      walk(c);
+    });
+  })(bar);
+  return out;
+}
+
+function tick(box, on) {
+  box.checked = on;
+  box.fire('change');
+}
+
+function commonGuide(byId) {
+  return (byId.dsCanvas.children || []).find((c) => c.getAttribute('data-role') === 'common-area') || null;
+}
+
+function sent(run) {
+  return run.renders[run.renders.length - 1];
+}
+
 (async function main() {
   const ids = servedIds();
   ok('the served page has the Size select', ids.has('dsSizeSel'));
 
-  // ---- the shapes on offer ----
+  // ---- the three ratios, offered from the start ----
   const a = load(ids);
   await settle();
-  const sel = a.byId.dsSizeSel;
-  const rows = optionRows(sel);
-  eq('a blank design is square, and the other shapes are offered',
-     rows,
-     [['This design', '1:1 square · 1080×1080', '1080x1080'],
-      ['Redesign at', '9:16 story · 1080×1920', '1080x1920'],
-      ['Redesign at', '4:5 portrait · 1080×1350', '1080x1350'],
-      ['Redesign at', '16:9 wide · 1920×1080', '1920x1080']]);
-  ok('every label leads with its ratio', rows.every((r) => /^\d+:\d+ /.test(r[1])));
-  eq('the selected size is the one being designed', sel.value, '1080x1080');
+  eq('a new design is shareable at all three ratios, 9:16 first',
+     optionRows(a.byId.dsSizeSel),
+     [['', '9:16 story \u00b7 1080\u00d71920', '1080x1920'],
+      ['', '4:5 portrait \u00b7 1080\u00d71350', '1080x1350'],
+      ['', '1:1 square \u00b7 1080\u00d71080', '1080x1080']]);
+  eq('and nothing else is on offer', Object.keys(ratioBoxes(a.byId)),
+     ['1080x1920', '1080x1350', '1080x1080']);
+  ok('every one of them is ticked',
+     Object.keys(ratioBoxes(a.byId)).every((k) => ratioBoxes(a.byId)[k].checked));
+  ok('16:9 is gone', optionRows(a.byId.dsSizeSel).every((r) => r[2] !== '1920x1080'));
+  eq('the editing size is the first offered', a.byId.dsSizeSel.value, '1080x1920');
 
-  // ---- picking a shape the design was not drawn for retargets it ----
+  // ---- the guide shows what the offered ratios have in common ----
+  const guide = commonGuide(a.byId);
+  ok('the canvas marks the area common to all three', !!guide);
+  const canvasW = parseInt(a.byId.dsCanvas.style.width, 10);
+  ok('and it is the square they share (' + (guide && guide.style.height) + ')',
+     guide && parseInt(guide.style.width, 10) === canvasW
+       && Math.abs(parseInt(guide.style.height, 10) - canvasW) <= 1);
+
+  // ---- the operator chooses which ratios a design is shared at ----
   const b = load(ids);
   await settle();
   b.renders.length = 0;
-  b.byId.dsSizeSel.value = '1080x1920';
-  b.byId.dsSizeSel.fire('change');
+  tick(ratioBoxes(b.byId)['1080x1350'], false);
   await settle();
-  const sent = b.renders[b.renders.length - 1];
-  eq('the preview is asked for at the new size', sent && sent.size, '1080x1920');
-  eq('the design now declares that one shape only', sent && sent.template.sizes, ['1080x1920']);
-  ok('it says what happened', /9:16 story/.test(b.byId.dsMsg.textContent));
-  const canvas = b.byId.dsCanvas;
-  const w = parseInt(canvas.style.width, 10), h = parseInt(canvas.style.height, 10);
-  ok('the canvas is 9:16 (' + w + 'x' + h + ')', Math.abs(h / w - 1920 / 1080) < 0.02);
-  ok('a 9:16 canvas still fits the viewport (' + h + 'px of 900)', h <= 900 * 0.72 + 1);
-  eq('the list now reads 9:16 as this design',
-     optionRows(b.byId.dsSizeSel).filter((r) => r[0] === 'This design'),
-     [['This design', '9:16 story · 1080×1920', '1080x1920']]);
+  eq('unticking a ratio stops it being offered', sent(b).template.sizes, ['1080x1920', '1080x1080']);
+  tick(ratioBoxes(b.byId)['1080x1080'], false);
+  await settle();
+  eq('and unticking another leaves just the one', sent(b).template.sizes, ['1080x1920']);
+  ok('with one ratio there is nothing to mark in common', !commonGuide(b.byId));
+  eq('the Size list follows what is offered', optionRows(b.byId.dsSizeSel).map((r) => r[2]), ['1080x1920']);
 
-  // ---- undo puts the old shape back, since retargeting is a change like any other ----
-  // (Asserted on the editor, not the preview: undo() re-paints but leaves the preview until the
-  // next change or Refresh, which is how it behaved before this.)
+  // ---- the last ratio cannot be removed ----
+  const before = JSON.stringify(sent(b).template.sizes);
+  b.renders.length = 0;
+  tick(ratioBoxes(b.byId)['1080x1920'], false);
+  await settle();
+  ok('the last ratio is refused, with a reason', /at least one ratio/.test(b.byId.dsErr.textContent));
+  ok('the tick goes back', ratioBoxes(b.byId)['1080x1920'].checked);
+  ok('nothing was re-rendered for a refusal', b.renders.length === 0);
+  eq('and the design still offers what it did', before, JSON.stringify(['1080x1920']));
+
+  // ---- ticking one back adds it in SHAPES order, not click order ----
+  b.renders.length = 0;
+  tick(ratioBoxes(b.byId)['1080x1080'], true);
+  await settle();
+  tick(ratioBoxes(b.byId)['1080x1350'], true);
+  await settle();
+  eq('the offered list stays in ratio order, so the share default is stable',
+     sent(b).template.sizes, ['1080x1920', '1080x1350', '1080x1080']);
+
+  // ---- undo treats a ratio change like any other change ----
   b.byId.dsUndoBtn.fire('click');
   await settle();
-  eq('undo returns the design to 1:1',
-     optionRows(b.byId.dsSizeSel).filter((r) => r[0] === 'This design').map((r) => r[2]),
-     ['1080x1080']);
-  ok('and the canvas is square again',
-     parseInt(b.byId.dsCanvas.style.width, 10) === parseInt(b.byId.dsCanvas.style.height, 10));
+  eq('undo puts the previous set back',
+     optionRows(b.byId.dsSizeSel).map((r) => r[2]), ['1080x1920', '1080x1080']);
 
-  // ---- a size the design already declares is only a view switch ----
-  const multi = [{
-    id: 'both', name: 'Both shapes', body: {
-      id: 'both', name: 'Both shapes', sizes: ['1080x1080', '1080x1920'],
+  // ---- the Size select only changes the view ----
+  const c = load(ids);
+  await settle();
+  c.renders.length = 0;
+  c.byId.dsSizeSel.value = '1080x1080';
+  c.byId.dsSizeSel.fire('change');
+  await settle();
+  eq('it renders at the ratio you are laying out on', sent(c).size, '1080x1080');
+  eq('and leaves what the design offers alone',
+     sent(c).template.sizes, ['1080x1920', '1080x1350', '1080x1080']);
+  ok('the canvas is square while editing 1:1',
+     parseInt(c.byId.dsCanvas.style.width, 10) === parseInt(c.byId.dsCanvas.style.height, 10));
+
+  // ---- a 9:16 canvas still has to fit on screen ----
+  const d = load(ids);
+  await settle();
+  tick(ratioBoxes(d.byId)['1080x1350'], false);
+  await settle();
+  tick(ratioBoxes(d.byId)['1080x1080'], false);
+  await settle();
+  const h = parseInt(d.byId.dsCanvas.style.height, 10);
+  const w = parseInt(d.byId.dsCanvas.style.width, 10);
+  ok('a 9:16 canvas is 9:16 (' + w + 'x' + h + ')', Math.abs(h / w - 1920 / 1080) < 0.02);
+  ok('and fits the viewport (' + h + 'px of 900)', h <= 900 * 0.72 + 1);
+
+  // ---- a size a saved design declares that is not one of the three is kept, and can be dropped
+  const legacy = [{
+    id: 'old-wide', name: 'Old wide', body: {
+      id: 'old-wide', name: 'Old wide', sizes: ['1920x1080', '1080x1080'],
       background: { color: '#070E28' }, placeholders: [],
     },
   }];
-  const c = load(ids, { templates: multi });
+  const e = load(ids, { templates: legacy });
   await settle();
-  c.byId.dsTemplateSel.value = 'both';
-  c.byId.dsTemplateSel.fire('change');
+  e.byId.dsTemplateSel.value = 'old-wide';
+  e.byId.dsTemplateSel.fire('change');
   await settle();
-  eq('both declared shapes are listed as this design',
-     optionRows(c.byId.dsSizeSel).filter((r) => r[0] === 'This design').map((r) => r[2]),
-     ['1080x1080', '1080x1920']);
-  c.renders.length = 0;
-  c.byId.dsSizeSel.value = '1080x1920';
-  c.byId.dsSizeSel.fire('change');
+  eq('a non-standard size it already declares is still offered and listed last',
+     optionRows(e.byId.dsSizeSel).map((r) => r[2]), ['1080x1080', '1920x1080']);
+  ok('it reads as its own ratio',
+     optionRows(e.byId.dsSizeSel).some((r) => r[1] === '16:9 \u00b7 1920\u00d71080'));
+  e.renders.length = 0;
+  tick(ratioBoxes(e.byId)['1920x1080'], false);
   await settle();
-  const view = c.renders[c.renders.length - 1];
-  eq('switching to a declared shape renders at it', view && view.size, '1080x1920');
-  eq('and leaves the allow-list alone', view && view.template.sizes, ['1080x1080', '1080x1920']);
-  ok('nothing was saved by any of this', c.saved.length === 0 && a.saved.length === 0 && b.saved.length === 0);
+  eq('and it can be dropped', sent(e).template.sizes, ['1080x1080']);
+
+  ok('nothing was saved by any of this',
+     [a, b, c, d, e].every((run) => run.saved.length === 0));
 
   console.log(failures ? '\n' + failures + ' FAILED' : '\nall passed');
   process.exit(failures ? 1 : 0);
