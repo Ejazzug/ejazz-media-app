@@ -9,6 +9,7 @@ import notificationsRouter from "./notifications";
 import factsRouter from "./facts";
 import stationChartsRouter from "./stationCharts";
 import songRequestsRouter from "./songRequests";
+import designerRouter from "./designer";
 
 const router: IRouter = Router();
 
@@ -30,5 +31,8 @@ router.use("/station-charts", stationChartsRouter);
 // Room). Read by the website embed and the app; needs its own ejazz-proxy line, like the
 // routes above, or it falls through to the Flask dashboard.
 router.use("/song-requests", songRequestsRouter);
+// The in-house designer: brand store, presets, templates and a render proxied to the Flask
+// dashboard's Pillow renderer. Needs its own ejazz-proxy line or it falls through to Flask.
+router.use("/designer", designerRouter);
 
 export default router;

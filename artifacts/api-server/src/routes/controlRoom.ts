@@ -130,6 +130,42 @@ const PAGE = `<!doctype html>
   .srnow.open { color: #519DC5; }
   .thumb { width: 42px; height: 42px; border-radius: 7px; object-fit: cover; background: rgba(242,244,255,0.06); flex-shrink: 0; }
   .item .lead { display:flex; gap: 10px; align-items: flex-start; }
+
+  /* ---- Designer tab. The canvas here shows WHERE things sit, never how they look:
+     the preview pane beside it is a real render by the Python renderer of record. ---- */
+  .dsBar { display:flex; flex-wrap:wrap; gap: 8px; align-items:flex-end; }
+  .dsBar .field { margin-bottom: 0; min-width: 120px; }
+  .dsWork { display:flex; gap: 14px; align-items:flex-start; margin-top: 12px; flex-wrap: wrap; }
+  .dsCol { flex: 1 1 320px; min-width: 280px; }
+  #dsCanvasWrap { background: rgba(0,0,0,0.25); border-radius: 10px; padding: 10px; overflow:auto; }
+  #dsCanvas { position: relative; margin: 0 auto; border-radius: 6px; overflow: hidden;
+              box-shadow: 0 0 0 1px rgba(242,244,255,0.18); touch-action: none; }
+  .dsBox { position:absolute; border: 1px dashed rgba(242,244,255,0.55); cursor: move;
+           background: rgba(81,157,197,0.10); }
+  .dsBox.selected { border: 1px solid #FF0056; background: rgba(255,0,86,0.14); }
+  .dsBoxLabel { position:absolute; top: 2px; left: 4px; font-size: 10px; font-weight: 700;
+                color: #F2F4FF; text-shadow: 0 1px 2px rgba(0,0,0,0.8); pointer-events:none; }
+  .dsHandle { position:absolute; right: -5px; bottom: -5px; width: 12px; height: 12px;
+              border-radius: 3px; background: #FF0056; cursor: nwse-resize; }
+  .dsGuide { position:absolute; display:none; background: #519DC5; pointer-events:none; }
+  .dsGuideV { top:0; bottom:0; width: 1px; }
+  .dsGuideH { left:0; right:0; height: 1px; }
+  .dsLayer { display:flex; justify-content:space-between; gap: 8px; padding: 7px 9px; cursor:pointer;
+             border: 1px solid rgba(242,244,255,0.08); border-radius: 7px; margin-bottom: 6px; }
+  .dsLayer.selected { border-color: #FF0056; background: rgba(255,0,86,0.10); }
+  .dsLayerName { font-size: 12.5px; font-weight: 700; }
+  .dsLayerMeta { font-size: 11px; color: #8A93C4; }
+  .dsAsset { border: 1px solid rgba(242,244,255,0.14); border-radius: 7px; padding: 7px 9px;
+             margin-bottom: 6px; cursor: grab; }
+  .dsAsset.missing { border-color: #FF0056; opacity: 0.75; }
+  .dsAssetName { display:block; font-size: 12.5px; font-weight: 700; }
+  .dsAssetMeta { display:block; font-size: 10.5px; color: #8A93C4; }
+  .dsSwatch { width: 30px; height: 30px; border-radius: 6px; border: 1px solid rgba(242,244,255,0.25);
+              padding: 0; margin: 0 6px 6px 0; }
+  .dsFont { display:block; width: 100%; text-align:left; background: transparent; color: #F2F4FF;
+            border: 1px solid rgba(242,244,255,0.14); margin-bottom: 6px; font-weight: 600; }
+  #dsPreview { width: 100%; border-radius: 8px; display:block; background: rgba(0,0,0,0.3); }
+  #dsPreviewMeta { font-size: 11px; color: #8A93C4; margin-top: 6px; min-height: 14px; }
 </style>
 </head>
 <body>
@@ -156,6 +192,7 @@ const PAGE = `<!doctype html>
     <button class="tabBtn" data-panel="panel-controls">App controls</button>
     <button class="tabBtn" data-panel="panel-schedule">Programme schedule</button>
     <button class="tabBtn" data-panel="panel-notifications">Notifications</button>
+    <button class="tabBtn" data-panel="panel-designer">Designer</button>
   </nav>
 
   <section id="panel-content" class="panel active">
@@ -398,6 +435,135 @@ const PAGE = `<!doctype html>
       <div class="err" id="notifErr"></div>
     </div>
     <div class="items" id="notifList"><div class="empty">Loading…</div></div>
+  </section>
+
+  <section id="panel-designer" class="panel">
+    <h2>Designer</h2>
+    <div class="card">
+      <p class="meta" style="margin:0 0 10px;">
+        Lay out a shareable here; the preview on the right is a real render by the station
+        renderer, so what you see is the file. The boxes only say where things sit.
+      </p>
+      <div class="dsBar">
+        <div class="field"><label>Template</label><select id="dsTemplateSel"></select></div>
+        <div class="field"><label>Size</label><select id="dsSizeSel"></select></div>
+        <div class="field"><label>Id</label><input type="text" id="dsTplId"></div>
+        <div class="field"><label>Name</label><input type="text" id="dsTplName"></div>
+        <div class="field"><label>Background</label><input type="text" id="dsBgColor" placeholder="#070E28"></div>
+      </div>
+      <div class="dsBar" style="margin-top:10px;">
+        <div class="field"><label>Add placeholder</label>
+          <select id="dsAddType">
+            <option value="text">text</option>
+            <option value="image">image</option>
+            <option value="logo">logo</option>
+            <option value="cta">cta</option>
+            <option value="data">data</option>
+          </select>
+        </div>
+        <button id="dsAddBtn">Add</button>
+        <button class="secondary" id="dsDeleteBtn">Delete</button>
+        <button class="secondary" id="dsZUpBtn">Bring forward</button>
+        <button class="secondary" id="dsZDownBtn">Send back</button>
+        <button class="secondary" id="dsUndoBtn">Undo</button>
+        <button class="secondary" id="dsRedoBtn">Redo</button>
+      </div>
+      <div class="dsBar" style="margin-top:10px;">
+        <button id="dsSaveBtn">Save template</button>
+        <button class="secondary" id="dsDupBtn">Duplicate</button>
+        <button class="secondary" id="dsExportBtn">Export JSON</button>
+        <button class="secondary" id="dsImportBtn">Import JSON</button>
+        <input type="file" id="dsImportFile" accept="application/json,.json" style="display:none;">
+      </div>
+      <div class="dsBar" style="margin-top:10px;">
+        <div class="field"><label>Save as preset (name required)</label><input type="text" id="dsPresetName" placeholder="Launch night"></div>
+        <button class="secondary" id="dsSavePresetBtn">Save as preset</button>
+        <div class="field"><label>Apply preset</label><select id="dsPresetSel"></select></div>
+        <button class="secondary" id="dsApplyPresetBtn">Apply preset</button>
+      </div>
+      <div class="err" id="dsErr"></div>
+      <div class="meta" id="dsMsg"></div>
+    </div>
+
+    <div class="dsWork">
+      <div class="dsCol">
+        <div id="dsCanvasWrap"><div id="dsCanvas"></div></div>
+        <details class="card section" style="margin-top:12px;">
+          <summary>Layers</summary>
+          <div id="dsLayers"></div>
+        </details>
+      </div>
+
+      <div class="dsCol">
+        <div class="card" id="dsInspector" style="display:none;">
+          <div class="row">
+            <div class="field"><label>Id</label><input type="text" id="dsPhId"></div>
+            <div class="field"><label>Type</label>
+              <select id="dsPhType">
+                <option value="text">text</option>
+                <option value="image">image</option>
+                <option value="logo">logo</option>
+                <option value="cta">cta</option>
+                <option value="data">data</option>
+              </select>
+            </div>
+          </div>
+          <div class="row">
+            <div class="field"><label>X</label><input type="number" id="dsPhX"></div>
+            <div class="field"><label>Y</label><input type="number" id="dsPhY"></div>
+          </div>
+          <div class="row">
+            <div class="field"><label>Width</label><input type="number" id="dsPhW"></div>
+            <div class="field"><label>Height</label><input type="number" id="dsPhH"></div>
+          </div>
+          <div class="row">
+            <div class="field"><label>Fit</label>
+              <select id="dsPhFit">
+                <option value="cover">cover</option>
+                <option value="contain">contain</option>
+              </select>
+            </div>
+            <div class="field"><label>Z</label><input type="number" id="dsPhZ"></div>
+          </div>
+          <div class="field"><label>Default</label><input type="text" id="dsPhDefault"></div>
+          <div class="row">
+            <div class="field"><label>Font</label><input type="text" id="dsPhFont" placeholder="Liberation Sans Bold"></div>
+            <div class="field"><label>Size</label><input type="number" id="dsPhSize"></div>
+          </div>
+          <div class="row">
+            <div class="field"><label>Colour</label><input type="text" id="dsPhColor" placeholder="#F2F4FF"></div>
+            <div class="field"><label>Align</label>
+              <select id="dsPhAlign">
+                <option value="left">left</option>
+                <option value="center">center</option>
+                <option value="right">right</option>
+              </select>
+            </div>
+          </div>
+          <div class="field"><label>Background (cta pill, or a plate behind a logo)</label><input type="text" id="dsPhBg" placeholder="#FF0056"></div>
+        </div>
+
+        <details class="card section" style="margin-top:12px;" open>
+          <summary>Brand</summary>
+          <p class="meta" style="margin:8px 0 6px;">Drag a logo onto a logo or image box. A colour goes to the
+            selected placeholder, or to the background when nothing is selected.</p>
+          <div id="dsBrandLogos"></div>
+          <div id="dsBrandColours" style="margin:8px 0;"></div>
+          <div id="dsBrandFonts"></div>
+        </details>
+      </div>
+
+      <div class="dsCol">
+        <div class="card">
+          <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:8px;">
+            <strong style="font-size:13px;">Preview</strong>
+            <button class="secondary" id="dsRefreshPreview">Refresh</button>
+          </div>
+          <img id="dsPreview" alt="Server render of this template">
+          <div id="dsPreviewMeta"></div>
+        </div>
+      </div>
+    </div>
   </section>
 </main>
 
@@ -2103,6 +2269,7 @@ resetShowForm();
 
 checkSession();
 </script>
+<script src="/control-room/designer.js" defer></script>
 </body>
 </html>`;
 

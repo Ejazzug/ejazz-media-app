@@ -54,3 +54,7 @@ artifacts/ejazz-media-app/.firebase/
 # Local build caches
 .buildtmp/
 .gradle-home/
+
+# Designer render cache (2026-10-25): JPEGs keyed by a hash of template + preset + data.
+# Pure cache -- deleting it costs one re-render.
+artifacts/api-server/cache/

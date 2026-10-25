@@ -7,3 +7,4 @@ export * from "./notifications";
 export * from "./songFacts";
 export * from "./chartAssignments";
 export * from "./countdownCharts";
+export * from "./designer";
