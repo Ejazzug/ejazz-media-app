@@ -545,7 +545,6 @@ const PAGE = `<!doctype html>
             <div class="field"><label>Plate padding</label><input type="number" id="dsPhPlatePad"></div>
             <div class="field"><label>Plate radius</label><input type="number" id="dsPhRadius"></div>
           </div>
-          <p class="meta" id="dsPlateNote" style="margin:0;"></p>
         </div>
 
         <details class="card section" style="margin-top:12px;" open>
