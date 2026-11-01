@@ -1,8 +1,10 @@
 import { Router, type IRouter } from "express";
 import type { Request, Response, NextFunction } from "express";
-import { sql } from "drizzle-orm";
-import { db } from "@workspace/db";
+import { and, desc, eq, sql } from "drizzle-orm";
+import { db, contentItemsTable } from "@workspace/db";
 import { getAppConfig } from "../lib/appConfig";
+import { parseApprovalDecision } from "../lib/approvals";
+import { cardTemplate, cardRatioFromUrl } from "../lib/cardTemplates";
 
 const router: IRouter = Router();
 
@@ -23,8 +25,16 @@ const router: IRouter = Router();
  * The value of either header is never trusted, and neither is remote_addr on
  * its own -- the proxy is on loopback too.
  *
- * Nothing here writes, and nothing here returns anything an operator could not
- * already see in the Control Room.
+ * ONE thing here writes, and only one: the approval decision on a card. It is
+ * here rather than under /api/admin/ because the dashboard is the approval
+ * centre -- lib/content_os.py holds the per-kind policy and lib/roles.py's
+ * require() decides who may approve -- and Flask has no way to mint the admin
+ * session cookie /api/admin/ wants. The approval columns are deliberately
+ * omitted from the content CRUD schema, so this is the ONLY door they move
+ * through, and a card cannot approve itself with a PATCH.
+ *
+ * Nothing else here writes, and nothing here returns anything an operator could
+ * not already see in the Control Room.
  */
 function requireLocal(req: Request, res: Response, next: NextFunction) {
   if (req.headers["x-forwarded-for"] || req.headers["x-real-ip"]) {
@@ -142,6 +152,113 @@ router.get("/metrics", async (_req, res) => {
     });
   } catch (error) {
     res.status(500).json({ error: error instanceof Error ? error.message : "metrics failed" });
+  }
+});
+
+/* ------------------------------------------------------------------ App Cards
+ *
+ * What the dashboard's /approvals needs: the cards, and a door for the decision.
+ * The queue is cards only -- every other kind the dashboard approves lives in its
+ * own JSON stores on that side, and the ones that live here (facts, polls,
+ * announcements) are managed in the Control Room, which has no gate.
+ */
+
+/** A card as the dashboard shows it. The picture is the signed path the app uses, so the
+ *  approvals page and the phone are looking at the same render and not two guesses. */
+function forDashboard(row: typeof contentItemsTable.$inferSelect) {
+  const template = cardTemplate(row.templateId);
+  return {
+    id: row.id,
+    title: row.title,
+    body: row.body,
+    image_url: row.imageUrl,
+    template_id: row.templateId,
+    template_name: template?.name ?? null,
+    // A row whose template has left the catalogue is reported, never hidden: its picture
+    // still renders, and an operator deciding on it should know it cannot be re-made.
+    template_known: Boolean(template),
+    fields: row.templateFields ?? {},
+    ratio: cardRatioFromUrl(row.imageUrl),
+    placement: row.placement,
+    status: row.status,
+    approval_state: row.approvalState,
+    approval_note: row.approvalNote,
+    approval_by: row.approvalBy,
+    approval_at: row.approvalAt,
+    push_enabled: row.pushEnabled,
+    push_topic: row.pushTopic,
+    push_sent_at: row.pushSentAt,
+    schedule_at: row.scheduleAt,
+    start_at: row.startAt,
+    end_at: row.endAt,
+    created_by: row.createdBy,
+    created_at: row.createdAt,
+  };
+}
+
+/**
+ * GET /api/internal/cards[?state=pending]
+ *
+ * Newest first. `counts` is over ALL cards whatever the filter asks for, so a page showing
+ * only what is waiting can still say how much else there is without a second call.
+ */
+router.get("/cards", async (req, res) => {
+  try {
+    const state = typeof req.query.state === "string" ? req.query.state.trim() : "";
+    const where = state
+      ? and(eq(contentItemsTable.type, "card"), eq(contentItemsTable.approvalState, state))
+      : eq(contentItemsTable.type, "card");
+    const rows = await db.select().from(contentItemsTable)
+      .where(where).orderBy(desc(contentItemsTable.createdAt));
+
+    const [counts] = await db.execute<{
+      total: number; pending: number; approved: number; rejected: number; live: number;
+    }>(sql`
+      select
+        count(*)::int as total,
+        count(*) filter (where approval_state = 'pending')::int as pending,
+        count(*) filter (where approval_state = 'approved')::int as approved,
+        count(*) filter (where approval_state = 'rejected')::int as rejected,
+        count(*) filter (where status = 'live')::int as live
+      from content_items where type = 'card'
+    `).then((r) => r.rows);
+
+    res.json({
+      state: state || null,
+      counts: counts ?? { total: 0, pending: 0, approved: 0, rejected: 0, live: 0 },
+      items: rows.map(forDashboard),
+    });
+  } catch (error) {
+    res.status(500).json({ error: error instanceof Error ? error.message : "cards failed" });
+  }
+});
+
+/**
+ * POST /api/internal/cards/:id/approval -- {state, by, note?}
+ *
+ * Records the decision and nothing else. It does NOT publish an approved card and does not
+ * withdraw a rejected one: publishing is the schedule's job, and a rejection already keeps a
+ * card off every phone because GET /api/content/active requires approval_state = 'approved'.
+ * Keeping the two apart is what lets a card be approved today and scheduled for Friday.
+ */
+router.post("/cards/:id/approval", async (req, res) => {
+  const id = Number(req.params.id);
+  if (!Number.isInteger(id)) { res.status(400).json({ error: "invalid id" }); return; }
+  const { decision, error } = parseApprovalDecision(req.body);
+  if (!decision) { res.status(400).json({ error }); return; }
+  try {
+    const [row] = await db.select().from(contentItemsTable).where(eq(contentItemsTable.id, id));
+    if (!row || row.type !== "card") { res.status(404).json({ error: "No such card." }); return; }
+    const [item] = await db.update(contentItemsTable).set({
+      approvalState: decision.state,
+      approvalNote: decision.note,
+      approvalBy: decision.by,
+      approvalAt: new Date(),
+      updatedAt: new Date(),
+    }).where(eq(contentItemsTable.id, id)).returning();
+    res.json({ ok: true, was: row.approvalState, card: forDashboard(item) });
+  } catch (err) {
+    res.status(500).json({ error: err instanceof Error ? err.message : "the decision was not saved" });
   }
 });
 
