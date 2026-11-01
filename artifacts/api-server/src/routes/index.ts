@@ -10,6 +10,7 @@ import factsRouter from "./facts";
 import stationChartsRouter from "./stationCharts";
 import songRequestsRouter from "./songRequests";
 import designerRouter from "./designer";
+import internalRouter from "./internal";
 
 const router: IRouter = Router();
 
@@ -34,5 +35,10 @@ router.use("/song-requests", songRequestsRouter);
 // The in-house designer: brand store, presets, templates and a render proxied to the Flask
 // dashboard's Pillow renderer. Needs its own ejazz-proxy line or it falls through to Flask.
 router.use("/designer", designerRouter);
+// Loopback-only metrics for the Flask dashboard's command centre. /api/internal/
+// is deliberately NOT forwarded by ejazz-proxy, so this is unreachable from the
+// tunnel; the route guards on the absence of X-Forwarded-For as well. Adding a
+// proxy line for it would be the mistake -- see routes/internal.ts.
+router.use("/internal", internalRouter);
 
 export default router;
