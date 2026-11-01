@@ -45,12 +45,20 @@ function formatChartDay(date: string): string {
 function ChartSection({ chart, station }: { chart: StationChart; station: 'radio' | 'xtra' }) {
   const [picked, setPicked] = React.useState<string | null>(null);
   const [choosing, setChoosing] = React.useState(false);
+  const [cardWidth, setCardWidth] = React.useState(0);
   const past = usePastChart(station, chart.countdownId, picked);
   const share = useShareApp();
   const dates = chart.kind === 'countdown' ? (chart.pastDates ?? []) : [];
   const viewingPast = picked !== null && dates.includes(picked);
   const entries = viewingPast ? (past.data ?? []) : chart.entries;
   const shown = chart.kind === 'countdown' ? entries : entries.slice(0, 10);
+  // An earlier day's caption, written the way the dashboard writes the picture's: title and date,
+  // then the rows. There is no image link to put under it, so the share is the words alone.
+  const pastCaption = [
+    `${chart.title}${picked ? ` — ${formatChartDay(picked)}` : ''}`,
+    '',
+    ...shown.map((e) => `${e.position}. ${e.title}${e.artist ? ` — ${e.artist}` : ''}`),
+  ].join('\n');
 
   const choose = (date: string | null) => {
     setPicked(date);
@@ -79,11 +87,12 @@ function ChartSection({ chart, station }: { chart: StationChart; station: 'radio
           <Text style={styles.chartBackText}>Back to today</Text>
         </Pressable>
       ) : null}
-      {/* The card: the picture the dashboard draws of this very chart, with its own caption. Only
-          for today -- the picture IS the chart as it stands, so offering it beside an earlier day
-          would be sharing one day's list with another day's picture. */}
+      {/* The card IS the chart now: the picture the dashboard draws, full width at its own 9:16,
+          with no track list beside it. An earlier day has no picture and never can -- countdown_cards
+          keeps ONE file per countdown, overwritten in place -- so it gets the same box drawn below
+          from that day's rows. */}
       {!viewingPast && chart.card ? (
-        <View style={styles.chartCardRow}>
+        <View style={styles.chartCardBlock}>
           <Pressable
             onPress={() => Linking.openURL(chart.card!.url).catch(() => {})}
             accessibilityRole="button"
@@ -91,19 +100,16 @@ function ChartSection({ chart, station }: { chart: StationChart; station: 'radio
           >
             <Image source={{ uri: chart.card.url }} style={styles.chartCardImage} contentFit="cover" transition={200} />
           </Pressable>
-          <View style={styles.chartCardCopy}>
-            <Text style={styles.chartCardHint}>Today's chart as a picture, ready to post.</Text>
-            {share.enabled ? (
-              <Pressable
-                onPress={() => share.shareCard(chart.card?.caption ?? chart.title, chart.card?.url ?? '')}
-                accessibilityRole="button"
-                style={styles.chartCardShare}
-              >
-                <Feather name="share-2" size={14} color="#0B1730" />
-                <Text style={styles.chartCardShareText}>Share this chart</Text>
-              </Pressable>
-            ) : null}
-          </View>
+          {share.enabled ? (
+            <Pressable
+              onPress={() => share.shareCard(chart.card?.caption ?? chart.title, chart.card?.url ?? '')}
+              accessibilityRole="button"
+              style={styles.chartCardShare}
+            >
+              <Feather name="share-2" size={14} color="#0B1730" />
+              <Text style={styles.chartCardShareText}>Share this chart</Text>
+            </Pressable>
+          ) : null}
         </View>
       ) : null}
       {dates.length > 0 ? (
@@ -141,15 +147,42 @@ function ChartSection({ chart, station }: { chart: StationChart; station: 'radio
       ) : null}
       {viewingPast && past.isLoading ? <ActivityIndicator style={styles.chartStatus} /> : null}
       {viewingPast && past.isError ? <Text style={styles.chartStatusText}>That day's chart isn't available.</Text> : null}
-      {shown.map((entry) => (
-        <View key={`${chart.id}-${entry.position}`} style={styles.chartRow}>
-          <Text style={styles.chartPos}>{entry.position}</Text>
-          <View style={styles.historyCopy}>
-            <Text numberOfLines={1} style={styles.historyTitle}>{entry.title}</Text>
-            {!!entry.artist && <Text numberOfLines={1} style={styles.historyArtist}>{entry.artist}</Text>}
+      {/* The same card for an earlier day: same box, same kicker / title / rule, only the text
+          differs. minHeight from the measured width keeps it the card's own 9:16 while still being
+          able to grow, so a chart longer than ten rows is never clipped. shareCard() with an empty
+          URL shares the rows alone -- filter(Boolean) drops the missing link, so the message is the
+          chart plus the app link, exactly as the picture's share is. */}
+      {viewingPast && shown.length > 0 ? (
+        <View style={styles.chartCardBlock}>
+          <View
+            onLayout={(e) => setCardWidth(e.nativeEvent.layout.width)}
+            style={[styles.chartPastCard, cardWidth ? { minHeight: (cardWidth * 16) / 9 } : null]}
+          >
+            <Text style={styles.chartPastKicker}>{picked ? formatChartDay(picked).toUpperCase() : ''}</Text>
+            <Text style={styles.chartPastTitle}>{chart.title}</Text>
+            <View style={styles.chartPastRule} />
+            {shown.map((entry) => (
+              <View key={`${chart.id}-past-${entry.position}`} style={styles.chartPastRow}>
+                <Text style={styles.chartPastPos}>{entry.position}</Text>
+                <View style={styles.historyCopy}>
+                  <Text numberOfLines={1} style={styles.chartPastTrack}>{entry.title}</Text>
+                  {!!entry.artist && <Text numberOfLines={1} style={styles.chartPastArtist}>{entry.artist}</Text>}
+                </View>
+              </View>
+            ))}
           </View>
+          {share.enabled ? (
+            <Pressable
+              onPress={() => share.shareCard(pastCaption, '')}
+              accessibilityRole="button"
+              style={styles.chartCardShare}
+            >
+              <Feather name="share-2" size={14} color="#0B1730" />
+              <Text style={styles.chartCardShareText}>Share this chart</Text>
+            </Pressable>
+          ) : null}
         </View>
-      ))}
+      ) : null}
     </View>
   );
 }
@@ -412,6 +445,31 @@ export default function RadioScreen() {
           )}
         </View>
 
+        {viewingPreviousTracks.length > 0 && (
+          <View style={styles.historySection}>
+            <Text style={styles.sectionEyebrow}>PREVIOUS TRACKS</Text>
+            {viewingPreviousTracks.map((track, index) => (
+              <View key={`${track.artist}-${track.title}-${index}`} style={styles.historyRow}>
+                {track.imageUrl ? (
+                  <Image source={track.imageUrl} contentFit="cover" style={styles.historyArtwork} />
+                ) : (
+                  <View style={styles.historyArtworkFallback}>
+                    <Feather name="music" size={16} color={colors.accent} />
+                  </View>
+                )}
+                <View style={styles.historyCopy}>
+                  <Text numberOfLines={1} style={styles.historyTitle}>{track.title}</Text>
+                  {/* Guarded: an AzuraCast file with no artist tag would otherwise
+                      render an empty line under the title. */}
+                  {!!track.artist && (
+                    <Text numberOfLines={1} style={styles.historyArtist}>{track.artist}</Text>
+                  )}
+                </View>
+              </View>
+            ))}
+          </View>
+        )}
+
         {!isPodcasts && songFact.data ? (
           <View style={styles.factCard}>
             <Text style={styles.factKicker}>CLOCK THIS...</Text>
@@ -464,35 +522,6 @@ export default function RadioScreen() {
                 ))
               )}
             </LineupRow>
-          </View>
-        )}
-
-        {charts.map((chart) => (
-          <ChartSection key={chart.id} chart={chart} station={viewMode === 'extra' ? 'xtra' : 'radio'} />
-        ))}
-
-        {viewingPreviousTracks.length > 0 && (
-          <View style={styles.historySection}>
-            <Text style={styles.sectionEyebrow}>PREVIOUS TRACKS</Text>
-            {viewingPreviousTracks.map((track, index) => (
-              <View key={`${track.artist}-${track.title}-${index}`} style={styles.historyRow}>
-                {track.imageUrl ? (
-                  <Image source={track.imageUrl} contentFit="cover" style={styles.historyArtwork} />
-                ) : (
-                  <View style={styles.historyArtworkFallback}>
-                    <Feather name="music" size={16} color={colors.accent} />
-                  </View>
-                )}
-                <View style={styles.historyCopy}>
-                  <Text numberOfLines={1} style={styles.historyTitle}>{track.title}</Text>
-                  {/* Guarded: an AzuraCast file with no artist tag would otherwise
-                      render an empty line under the title. */}
-                  {!!track.artist && (
-                    <Text numberOfLines={1} style={styles.historyArtist}>{track.artist}</Text>
-                  )}
-                </View>
-              </View>
-            ))}
           </View>
         )}
 
@@ -704,6 +733,10 @@ export default function RadioScreen() {
         )}
           </>
         )}
+        {charts.map((chart) => (
+          <ChartSection key={chart.id} chart={chart} station={viewMode === 'extra' ? 'xtra' : 'radio'} />
+        ))}
+
       </KeyboardAwareScrollViewCompat>
     </LinearGradient>
   );
@@ -744,17 +777,22 @@ const styles = StyleSheet.create({
   factText: { color: '#F7F9FC', fontSize: 13, lineHeight: 19 },
   chartSection: { marginHorizontal: 20, marginTop: 26, borderTopWidth: 1, borderTopColor: '#204570', paddingTop: 18 },
   chartTitle: { color: '#F7F9FC', fontSize: 18, fontWeight: '700', letterSpacing: -0.4, marginBottom: 8 },
-  chartRow: { flexDirection: 'row', alignItems: 'center', minHeight: 48, borderBottomWidth: 1, borderBottomColor: '#17365E', paddingVertical: 6 },
-  chartPos: { color: '#FF6B6B', fontSize: 16, fontWeight: '700', width: 30 },
   chartTitleRow: { flexDirection: 'row', alignItems: 'center', gap: 10, marginBottom: 8 },
   chartDayButton: { padding: 6, borderRadius: 8, borderWidth: 1, borderColor: '#204570' },
   chartBack: { paddingBottom: 10 },
-  chartCardRow: { flexDirection: 'row', gap: 12, alignItems: 'center', paddingBottom: 14 },
-  // 9:16, the shape the dashboard's default design draws, kept small so the chart itself stays
-  // the subject of the section. contentFit cover means a square or wide card still fills it.
-  chartCardImage: { width: 72, height: 128, borderRadius: 8, backgroundColor: '#0E1E3A' },
-  chartCardCopy: { flex: 1, gap: 8 },
-  chartCardHint: { color: '#A7B7CC', fontSize: 12, lineHeight: 17 },
+  chartCardBlock: { gap: 12, paddingBottom: 14 },
+  // Full width at 9:16, the shape the dashboard's default design draws: the picture IS the chart
+  // on this screen now, so it is shown at the size you can read it rather than as a thumbnail.
+  chartCardImage: { width: '100%', aspectRatio: 9 / 16, borderRadius: 14, backgroundColor: '#0E1E3A' },
+  // The same box drawn here for a day that has no picture.
+  chartPastCard: { width: '100%', backgroundColor: '#0E1E3A', borderRadius: 14, padding: 18 },
+  chartPastKicker: { color: '#FF6B6B', fontSize: 12, fontWeight: '800', letterSpacing: 1.2 },
+  chartPastTitle: { color: '#F7F9FC', fontSize: 28, fontWeight: '800', letterSpacing: -0.6, marginTop: 6 },
+  chartPastRule: { width: 54, height: 4, borderRadius: 2, backgroundColor: '#FF6B6B', marginTop: 10, marginBottom: 14 },
+  chartPastRow: { flexDirection: 'row', alignItems: 'center', gap: 12, paddingVertical: 7 },
+  chartPastPos: { color: '#FF6B6B', fontSize: 18, fontWeight: '800', width: 30 },
+  chartPastTrack: { color: '#F7F9FC', fontSize: 15, fontWeight: '700' },
+  chartPastArtist: { color: '#A7B7CC', fontSize: 12.5 },
   chartCardShare: { flexDirection: 'row', alignItems: 'center', gap: 6, alignSelf: 'flex-start',
                     backgroundColor: '#FF6B6B', paddingVertical: 7, paddingHorizontal: 12, borderRadius: 999 },
   chartCardShareText: { color: '#0B1730', fontSize: 12, fontWeight: '700' },
