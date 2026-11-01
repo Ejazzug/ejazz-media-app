@@ -20,6 +20,10 @@ import { artistKey, titleKey, listFacts } from "../lib/songFacts";
 import { isGroqConfigured } from "../lib/groq";
 import { syncSheet, lastSheetSync, validateSheetUrl } from "../lib/songFactsSheet";
 import { attemptContentPush } from "../lib/contentPush";
+import {
+  cardCatalogue, cardTemplate, cardRatio, cardFormats, normaliseCardFields,
+  cardRenderPath, cardImageUrl, cardRatioFromUrl, cardRow, DEFAULT_CARD_RATIO,
+} from "../lib/cardTemplates";
 import { cleanHttpUrl } from "../lib/linkText";
 import { normalizeShowInput, describeRepeat, slotsOf, daysOf, todayInEat } from "../lib/showSchedule";
 import { recentAutoFacts, runDaypart } from "../lib/funFacts";
@@ -212,6 +216,188 @@ router.delete("/content", async (req, res) => {
     ? await db.delete(contentItemsTable).where(eq(contentItemsTable.status, "withdrawn")).returning({ id: contentItemsTable.id })
     : await db.delete(contentItemsTable).returning({ id: contentItemsTable.id });
   res.json({ ok: true, deleted: rows.length });
+});
+
+/* --------------------------------------------------------------------------- App Cards
+ *
+ * The Card Studio's server half. A card is a `content_items` row like any other -- same
+ * placement, schedule, push and status -- with `template_id` saying which of the twelve
+ * templates made it and `template_fields` holding what the operator typed. See
+ * ../lib/cardTemplates.ts for the catalogue and for why `image_url` is a signed path rather
+ * than a render URL.
+ *
+ * These sit under /api/admin/, which ejazz-proxy already forwards, so they need no nginx
+ * change. Everything that READS a card as the audience does stays on /api/content/active.
+ */
+
+/** The twelve templates, their fields, their three shapes and what feeds each one. */
+router.get("/cards/templates", (req, res) => {
+  const ratio = cardRatio(req.query.ratio) || DEFAULT_CARD_RATIO;
+  res.json({ ratio, items: cardCatalogue(ratio) });
+});
+
+/**
+ * A preview of a card that has not been saved yet, as a path the Studio can put in an <img>.
+ * This one DOES carry the card's words in its query string -- it has no row to read them back
+ * from, and it is only ever fetched by an operator who is already logged in here.
+ */
+router.post("/cards/preview", (req, res) => {
+  const b = (req.body || {}) as Record<string, unknown>;
+  const template = cardTemplate(b.templateId);
+  if (!template) { res.status(400).json({ error: "Choose one of the card templates." }); return; }
+  const ratio = cardRatio(b.ratio) || DEFAULT_CARD_RATIO;
+  const { fields, problems } = normaliseCardFields(template, b.fields);
+  res.json({
+    templateId: template.id,
+    ratio,
+    ratios: cardFormats(template).map((f) => f.ratio),
+    problems,
+    // A preview is offered even when a required field is still empty: the operator is mid-type
+    // and a blank slot simply draws nothing. `problems` is what stops it being SAVED.
+    previewPath: cardRenderPath(template, fields, ratio),
+  });
+});
+
+/**
+ * POST /api/admin/cards -- make one.
+ *
+ * Two steps on purpose: the signed image path contains the row's id, which only the insert can
+ * hand back. A card whose image_url could not be written afterwards is deleted rather than
+ * left on the list pointing at nothing.
+ */
+router.post("/cards", async (req, res) => {
+  const b = (req.body || {}) as Record<string, unknown>;
+  const template = cardTemplate(b.templateId);
+  if (!template) { res.status(400).json({ error: "Choose one of the card templates." }); return; }
+  const ratio = cardRatio(b.ratio) || DEFAULT_CARD_RATIO;
+  const { fields, problems } = normaliseCardFields(template, b.fields);
+  if (problems.length) { res.status(400).json({ error: problems[0], problems }); return; }
+
+  // The operator chooses placement, schedule, push and status; the CARD owns type, title,
+  // body and template_fields, and image_url is written after the insert. Spread in that
+  // order so a request cannot smuggle in a title that disagrees with the picture.
+  const operator = { ...b };
+  for (const key of ["templateId", "fields", "ratio", "imageUrl"]) delete operator[key];
+  const parsed = insertContentItemSchema.safeParse(withDates({
+    ...operator,
+    ...cardRow(template, fields),
+  }));
+  if (!parsed.success) { res.status(400).json({ error: parsed.error.flatten() }); return; }
+
+  const [item] = await db.insert(contentItemsTable).values(parsed.data).returning();
+  let saved;
+  try {
+    [saved] = await db.update(contentItemsTable)
+      .set({ imageUrl: cardImageUrl(item.id, template, fields, ratio), updatedAt: new Date() })
+      .where(eq(contentItemsTable.id, item.id)).returning();
+  } catch (err) {
+    await db.delete(contentItemsTable).where(eq(contentItemsTable.id, item.id));
+    res.status(500).json({ error: "The card could not be given a picture, so it was not kept.", detail: String(err).slice(0, 200) });
+    return;
+  }
+  // A card that is live the moment it is made pushes like any other item -- one choke point,
+  // lib/contentPush.ts, which writes the notifications audit row.
+  const pushDelivery = await attemptContentPush(saved);
+  const [current] = pushDelivery?.sent
+    ? await db.select().from(contentItemsTable).where(eq(contentItemsTable.id, saved.id))
+    : [saved];
+  res.status(201).json({ ...current, ratio, pushDelivery });
+});
+
+/**
+ * PATCH /api/admin/cards/:id -- change the words or the shape, and re-point the picture.
+ *
+ * The image path is signed over the card's content, so editing a card necessarily changes its
+ * URL. That is the point: nothing serves the old picture from a cache under the new card's
+ * name. Fields are REPLACED, not merged, the same way PATCH /api/admin/shows/:id works -- a
+ * half-filled card is a decision an operator can see, a merge is one they cannot.
+ */
+router.patch("/cards/:id", async (req, res) => {
+  const id = Number(req.params.id);
+  if (!Number.isInteger(id)) { res.status(400).json({ error: "invalid id" }); return; }
+  const [row] = await db.select().from(contentItemsTable).where(eq(contentItemsTable.id, id));
+  if (!row || row.type !== "card") { res.status(404).json({ error: "No such card." }); return; }
+  const b = (req.body || {}) as Record<string, unknown>;
+
+  const template = cardTemplate(b.templateId ?? row.templateId);
+  if (!template) { res.status(400).json({ error: "Choose one of the card templates." }); return; }
+  const ratio = cardRatio(b.ratio) || cardRatioFromUrl(row.imageUrl) || DEFAULT_CARD_RATIO;
+  const { fields, problems } = "fields" in b
+    ? normaliseCardFields(template, b.fields)
+    : normaliseCardFields(template, row.templateFields || {});
+  if (problems.length) { res.status(400).json({ error: problems[0], problems }); return; }
+
+  const operator = { ...b };
+  for (const key of ["templateId", "fields", "ratio", "imageUrl"]) delete operator[key];
+  const parsed = updateContentItemSchema.safeParse(withDates({
+    ...operator,
+    ...cardRow(template, fields),
+  }));
+  if (!parsed.success) { res.status(400).json({ error: parsed.error.flatten() }); return; }
+
+  const [item] = await db.update(contentItemsTable)
+    .set({ ...parsed.data, imageUrl: cardImageUrl(id, template, fields, ratio), updatedAt: new Date() })
+    .where(eq(contentItemsTable.id, id)).returning();
+  const becameLive = row.status !== "live" && item.status === "live";
+  const pushDelivery = becameLive ? await attemptContentPush(item) : null;
+  const [current] = pushDelivery?.sent
+    ? await db.select().from(contentItemsTable).where(eq(contentItemsTable.id, item.id))
+    : [item];
+  res.json({ ...current, ratio, pushDelivery });
+});
+
+/** The saved cards, newest first, each with the shape it was published in. */
+router.get("/cards", async (_req, res) => {
+  const rows = await db.select().from(contentItemsTable)
+    .where(eq(contentItemsTable.type, "card"))
+    .orderBy(desc(contentItemsTable.createdAt));
+  res.json(rows.map((row) => {
+    const template = cardTemplate(row.templateId);
+    return {
+      ...row,
+      ratio: cardRatioFromUrl(row.imageUrl),
+      templateName: template?.name || null,
+      // A row whose template has been renamed out of the catalogue is reported, not hidden:
+      // its picture still renders from whatever design it was made with.
+      templateKnown: Boolean(template),
+    };
+  }));
+});
+
+/**
+ * POST /api/admin/cards/:id/duplicate -- the brief's "duplicate", which is how a weekly card
+ * gets made a second time. The copy is always a DRAFT with no schedule and no push, whatever
+ * the original was doing: a duplicate that pushed itself on creation would be a second
+ * notification nobody chose to send.
+ */
+router.post("/cards/:id/duplicate", async (req, res) => {
+  const id = Number(req.params.id);
+  if (!Number.isInteger(id)) { res.status(400).json({ error: "invalid id" }); return; }
+  const [row] = await db.select().from(contentItemsTable).where(eq(contentItemsTable.id, id));
+  if (!row || row.type !== "card") { res.status(404).json({ error: "No such card." }); return; }
+  const template = cardTemplate(row.templateId);
+  if (!template) { res.status(400).json({ error: "This card was made with a template that is no longer in the catalogue." }); return; }
+  const fields = (row.templateFields || {}) as Record<string, string>;
+  const ratio = cardRatioFromUrl(row.imageUrl) || DEFAULT_CARD_RATIO;
+
+  const [copy] = await db.insert(contentItemsTable).values({
+    ...cardRow(template, fields),
+    placement: row.placement,
+    linkUrl: row.linkUrl,
+    openMode: row.openMode,
+    relatedArtist: row.relatedArtist,
+    relatedSong: row.relatedSong,
+    relatedShow: row.relatedShow,
+    relatedStation: row.relatedStation,
+    status: "draft",
+    pushEnabled: false,
+    pushTopic: row.pushTopic,
+    createdBy: typeof req.body?.createdBy === "string" ? req.body.createdBy : row.createdBy,
+  }).returning();
+  const [saved] = await db.update(contentItemsTable)
+    .set({ imageUrl: cardImageUrl(copy.id, template, fields, ratio), updatedAt: new Date() })
+    .where(eq(contentItemsTable.id, copy.id)).returning();
+  res.status(201).json({ ...saved, ratio });
 });
 
 /**

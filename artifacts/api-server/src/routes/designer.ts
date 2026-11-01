@@ -4,9 +4,12 @@ import fs from "node:fs";
 import fsp from "node:fs/promises";
 import path from "node:path";
 import { eq } from "drizzle-orm";
-import { db, brandAssetsTable, presetsTable, templatesTable } from "@workspace/db";
+import { db, brandAssetsTable, presetsTable, templatesTable, contentItemsTable } from "@workspace/db";
 import { requireAdmin } from "../middlewares/adminAuth";
 import { logger } from "../lib/logger";
+import {
+  cardTemplate, cardFormat, cardRenderData, cardImageToken, parseCardImagePath,
+} from "../lib/cardTemplates";
 
 /**
  * The EJazz in-house designer, server half.
@@ -443,6 +446,63 @@ router.post("/apply-preset", requireAdmin, async (req, res) => {
     res.status(r.status).json(out);
   } catch (err) {
     res.status(502).json({ error: "The renderer could not be reached.", detail: String(err).slice(0, 200) });
+  }
+});
+
+/**
+ * GET /api/designer/card/<id>-<token>-<shape>.jpg -- the picture of ONE saved card.
+ *
+ * This is what `content_items.image_url` holds and what a phone fetches, and it exists so the
+ * app is never handed a render URL. A render URL names the design and carries every word of
+ * the card in `data=`, which publishes how our cards are made and -- worse -- lets anyone
+ * render any text they like on EJazz branding by editing the query string. Here the only
+ * inputs are a row id, a signature over that row's content, and one of three shapes: the
+ * fields come from the ROW, so what comes out is the card the operator made and nothing else.
+ *
+ * Public, like /render/:template_id above, because the app sends no credentials -- there are
+ * no accounts and no tokens. The signature is what makes it unguessable and untamperable,
+ * which is the honest ceiling for an image a phone must be able to load.
+ *
+ * The shape is not signed, so one stored URL serves 1:1, 16:9 and 9:16 -- the sharer picks,
+ * the same way a design's three ratios work in the Designer.
+ */
+router.get("/card/:file", async (req, res) => {
+  const parsed = parseCardImagePath(String(req.params.file || ""));
+  // One answer for a malformed path, an unknown row, a row that is not a card and a bad
+  // signature: a 404 here must not tell a caller which of those it was.
+  const refuse = () => res.status(404).json({ error: "No such card image." });
+  if (!parsed) { refuse(); return; }
+
+  const [row] = await db.select().from(contentItemsTable)
+    .where(eq(contentItemsTable.id, parsed.cardId)).limit(1);
+  if (!row || row.type !== "card") { refuse(); return; }
+  const template = cardTemplate(row.templateId);
+  if (!template) { refuse(); return; }
+
+  const fields = (row.templateFields || {}) as Record<string, string>;
+  const expected = cardImageToken(row.id, template, fields);
+  const got = Buffer.from(parsed.token);
+  const want = Buffer.from(expected);
+  if (got.length !== want.length || !crypto.timingSafeEqual(got, want)) { refuse(); return; }
+
+  const format = cardFormat(template, parsed.ratio);
+  const body = await resolveTemplate(format.design);
+  if (!body) {
+    logger.warn({ design: format.design, card: row.id }, "a card's design is missing");
+    res.status(502).json({ error: "The design this card was made with is missing." });
+    return;
+  }
+  try {
+    const out = await renderJpeg(body, format.size, cardRenderData(template, fields) as Json, null);
+    res.type("image/jpeg");
+    res.setHeader("ETag", '"' + out.key + '"');
+    res.setHeader("X-Design-Cache", out.cached ? "hit" : "miss");
+    for (const [k, v] of Object.entries(out.headers)) res.setHeader(k, v);
+    res.send(out.bytes);
+  } catch (err) {
+    const e = err as Error & { status?: number; detail?: string };
+    logger.warn({ err, card: row.id }, "card render failed");
+    res.status(e.status || 502).json({ error: "The render failed.", detail: e.detail || String(err).slice(0, 300) });
   }
 });
 

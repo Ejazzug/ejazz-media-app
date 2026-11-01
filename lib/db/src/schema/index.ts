@@ -1,5 +1,6 @@
 // Export your models here. Add one export per file.
 export * from "./content";
+export * from "./engagement";
 export * from "./shows";
 export * from "./hosts";
 export * from "./appSettings";

@@ -10,9 +10,15 @@ export const contentTypeEnum = pgEnum("content_type", [
   "song_battle",
   "push_alert",
   "show_alert",
+  // A designed card: the same row shape, with template_id + template_fields saying which
+  // card template drew it.  See cardTemplates.ts for the catalogue.
+  "card",
 ]);
 export const contentStatusEnum = pgEnum("content_status", ["draft", "live", "withdrawn", "expired"]);
-export const contentPlacementEnum = pgEnum("content_placement", ["home"]);
+// Where a card or item appears in the app.  "home" is the single featured slot the shipped
+// app renders today; "carousel" and "feed" are stored and served now and become visible on
+// a phone at the next Codemagic build -- this box cannot produce one.
+export const contentPlacementEnum = pgEnum("content_placement", ["home", "carousel", "feed"]);
 export const pushTopicEnum = pgEnum("push_topic", ["all", "radio", "xtra"]);
 export type PushTopic = (typeof pushTopicEnum.enumValues)[number];
 
@@ -36,6 +42,19 @@ export const contentItemsTable = pgTable("content_items", {
   status: contentStatusEnum("status").notNull().default("draft"),
   pollOptions: jsonb("poll_options").$type<{ label: string; votes: number }[]>(),
   quizCorrectIndex: integer("quiz_correct_index"),
+  // Card templates: which one drew this card, and the values its placeholders were given.
+  // For a card the server writes a designer render URL into imageUrl from these two, so a
+  // card needs no new app field to be visible.
+  templateId: text("template_id"),
+  templateFields: jsonb("template_fields").$type<Record<string, string>>(),
+  // The approval decision for this item, as a fact on the row the scheduler already reads.
+  // Default "approved" so every pre-existing row and every kind whose gate is off behaves
+  // exactly as before.  The POLICY (which kinds need approving) stays in the dashboard's
+  // lib/content_os.py -- this is the decision only, never a second policy store.
+  approvalState: text("approval_state").notNull().default("approved"),
+  approvalNote: text("approval_note"),
+  approvalBy: text("approval_by"),
+  approvalAt: timestamp("approval_at", { withTimezone: true }),
   startAt: timestamp("start_at", { withTimezone: true }),
   endAt: timestamp("end_at", { withTimezone: true }),
   // When set on a draft item, the API scheduler publishes it (and sends its push) at this time.
@@ -46,11 +65,18 @@ export const contentItemsTable = pgTable("content_items", {
   updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
 });
 
+// The approval fields are deliberately NOT writable through the content CRUD: a card that
+// could approve itself with a PATCH would make the gate decorative.  They move only through
+// the approval endpoints.
 export const insertContentItemSchema = createInsertSchema(contentItemsTable).omit({
   id: true,
   createdAt: true,
   updatedAt: true,
   pushSentAt: true,
+  approvalState: true,
+  approvalNote: true,
+  approvalBy: true,
+  approvalAt: true,
 });
 export const updateContentItemSchema = insertContentItemSchema.partial();
 
