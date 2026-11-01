@@ -9,7 +9,7 @@
  *
  * Touches no database and no network.
  */
-import { parseApprovalDecision, APPROVAL_STATES, MAX_NOTE, MAX_BY } from "./approvals";
+import { parseApprovalDecision, APPROVAL_STATES, MAX_NOTE, MAX_BY, pushAllowedByApproval, PUSH_WITHHELD } from "./approvals";
 
 let pass = 0, fail = 0;
 function check(label: string, cond: boolean, extra?: unknown) {
@@ -59,6 +59,26 @@ check("an over-long name is refused", r.error?.includes(String(MAX_BY)) === true
 
 r = parseApprovalDecision({ state: "pending", by: "jj" });
 check("sending it back to pending is a decision like any other", r.decision?.state === "pending", r);
+
+// ---------------------------------------------------------------------------
+// Whether a row may be PUSHED. The one irreversible action in the system, so
+// it is the one the gate has to cover: a delivered notification stays in the
+// tray even after the item is retracted.
+// ---------------------------------------------------------------------------
+
+check("an approved row may push", pushAllowedByApproval("approved"), true);
+check("a pending row may NOT push", pushAllowedByApproval("pending") === false, true);
+check("a rejected row may NOT push", pushAllowedByApproval("rejected") === false, true);
+check("case and padding do not open the gate", pushAllowedByApproval("  APPROVED ") === true, true);
+check("a state nobody recognises may not push", pushAllowedByApproval("approvedish") === false, true);
+// Absent is allowed on purpose: a partial item has no row to read it from, and the column
+// defaults to "approved" for every row that exists, so nothing that worked before changes.
+check("an absent state still pushes, as it did before any of this", pushAllowedByApproval(undefined), true);
+check("so does a null one", pushAllowedByApproval(null), true);
+check("and an empty one", pushAllowedByApproval(""), true);
+check("the withheld message says what happened and what did not",
+  PUSH_WITHHELD.toLowerCase().includes("not approved")
+  && PUSH_WITHHELD.toLowerCase().includes("no notification"), PUSH_WITHHELD);
 
 console.log((fail === 0 ? "OK" : "FAILED") + ": " + pass + " passed, " + fail + " failed");
 if (fail > 0) process.exit(1);

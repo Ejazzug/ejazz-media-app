@@ -1,6 +1,7 @@
 import { and, eq, isNotNull, lte } from "drizzle-orm";
 import { db, contentItemsTable } from "@workspace/db";
 import { attemptContentPush } from "./contentPush";
+import { pushAllowedByApproval } from "./approvals";
 import { runDueFunFacts } from "./funFacts";
 import { syncSheetIfDue } from "./songFactsSheet";
 import { syncCountdownChartsIfDue } from "./countdownCharts";
@@ -30,6 +31,17 @@ async function tick(): Promise<void> {
         ),
       );
     for (const item of due) {
+      // An item the approval centre has not approved is HELD as a draft rather than published
+      // and then withheld: its scheduleAt is already past, so the first tick after someone
+      // approves it publishes it and sends its push. A rejected item simply stays a draft.
+      // The push itself is refused at the choke point too -- this is the schedule's half of
+      // the same rule, and it is what stops "Scheduled content published" being logged for
+      // something nobody approved.
+      if (!pushAllowedByApproval(item.approvalState)) {
+        logger.info({ contentId: item.id, approvalState: item.approvalState },
+          "Scheduled content held: waiting on approval");
+        continue;
+      }
       const [published] = await db
         .update(contentItemsTable)
         .set({ status: "live", updatedAt: new Date() })

@@ -2,6 +2,7 @@ import { eq } from "drizzle-orm";
 import { db, contentItemsTable, notificationsTable } from "@workspace/db";
 import type { PushTopic } from "@workspace/db";
 import { sendContentPush, type PushDeliveryResult } from "./pushNotifications";
+import { pushAllowedByApproval, PUSH_WITHHELD } from "./approvals";
 import { cleanHttpUrl, firstMarkupUrl } from "./linkText";
 import { logger } from "./logger";
 
@@ -21,8 +22,22 @@ export async function attemptContentPush(item: {
   imageUrl?: string | null;
   linkUrl?: string | null;
   openMode?: string | null;
+  // The approval decision on the row. Optional for the same reason the two fields above are:
+  // a caller that builds a partial item still works, and the column defaults to "approved".
+  approvalState?: string | null;
 }): Promise<PushDeliveryResult | null> {
   if (!item.pushEnabled || item.status !== "live" || item.pushSentAt) return null;
+
+  // The approval gate's teeth. Everything else the gate does is reversible -- an unapproved
+  // card is simply withheld from GET /api/content/active and can be approved tomorrow -- but
+  // a delivered notification cannot be recalled, so it is refused here rather than anywhere a
+  // caller might forget. Reported as a failed delivery, not as silence, because an operator
+  // who ticked "notify" is owed the reason.
+  if (!pushAllowedByApproval(item.approvalState)) {
+    logger.warn({ contentId: item.id, approvalState: item.approvalState },
+      "Push withheld: the item is not approved");
+    return { sent: false, topic: item.pushTopic, messageId: null, error: PUSH_WITHHELD };
+  }
 
   try {
     const delivery = await sendContentPush(item);

@@ -25,6 +25,27 @@ export interface ApprovalDecision {
   by: string;
 }
 
+/** What an operator is told when a push was withheld because the card is not approved. */
+export const PUSH_WITHHELD = "Not approved, so no notification was sent.";
+
+/**
+ * Whether a content row may be PUSHED, judged on its approval state alone.
+ *
+ * A push is the only thing this system does that cannot be taken back: "retract" keeps the
+ * audit row and drops the item from the app, but the notification stays in every tray it
+ * reached. So it is the one action the approval gate has to cover, and it is checked at the
+ * single choke point every FCM send passes through (lib/contentPush.ts) rather than at each
+ * caller -- the scheduler, both card routes and both content routes are covered by one call.
+ *
+ * An absent state is allowed on purpose, not by oversight: a caller that builds a partial
+ * item has no row to read it from, and `approval_state` itself defaults to "approved" for
+ * every row that exists, so this changes nothing for anything that worked before.
+ */
+export function pushAllowedByApproval(state: unknown): boolean {
+  if (state === undefined || state === null || state === "") return true;
+  return String(state).trim().toLowerCase() === "approved";
+}
+
 export function parseApprovalDecision(body: unknown): { decision?: ApprovalDecision; error?: string } {
   const b = (body && typeof body === "object" && !Array.isArray(body) ? body : {}) as Record<string, unknown>;
 
