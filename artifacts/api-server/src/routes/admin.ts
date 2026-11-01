@@ -25,6 +25,7 @@ import {
   cardRenderPath, cardImageUrl, cardRatioFromUrl, cardRow, DEFAULT_CARD_RATIO,
 } from "../lib/cardTemplates";
 import { cleanHttpUrl } from "../lib/linkText";
+import { approvalRequired } from "../lib/contentGate";
 import { normalizeShowInput, describeRepeat, slotsOf, daysOf, todayInEat } from "../lib/showSchedule";
 import { recentAutoFacts, runDaypart } from "../lib/funFacts";
 import { getAppConfig, saveAppConfig } from "../lib/appConfig";
@@ -284,7 +285,13 @@ router.post("/cards", async (req, res) => {
   }));
   if (!parsed.success) { res.status(400).json({ error: parsed.error.flatten() }); return; }
 
-  const [item] = await db.insert(contentItemsTable).values(parsed.data).returning();
+  // Where a card ENTERS the gate. The approval fields are left out of insertContentItemSchema
+  // on purpose -- a card that could approve itself with a PATCH would make the gate
+  // decorative -- so the state is chosen here, from the policy the dashboard holds, and
+  // changed afterwards only by a decision on /approvals.
+  const approvalState = (await approvalRequired("card")) ? "pending" : "approved";
+  const [item] = await db.insert(contentItemsTable)
+    .values({ ...parsed.data, approvalState }).returning();
   let saved;
   try {
     [saved] = await db.update(contentItemsTable)
@@ -380,8 +387,12 @@ router.post("/cards/:id/duplicate", async (req, res) => {
   const fields = (row.templateFields || {}) as Record<string, string>;
   const ratio = cardRatioFromUrl(row.imageUrl) || DEFAULT_CARD_RATIO;
 
+  // A duplicate is new content, so it faces the gate like any other new card -- it is never
+  // born carrying the original's approval.
+  const copyApproval = (await approvalRequired("card")) ? "pending" : "approved";
   const [copy] = await db.insert(contentItemsTable).values({
     ...cardRow(template, fields),
+    approvalState: copyApproval,
     placement: row.placement,
     linkUrl: row.linkUrl,
     openMode: row.openMode,
