@@ -58,6 +58,14 @@
         "projectId": "1da275ed-5456-4fbd-945b-4616f957c2fd"
       }
     },
-    "owner": "ejazz-media"
+    "owner": "ejazz-media",
+    "updates": {
+      "url": "https://u.expo.dev/1da275ed-5456-4fbd-945b-4616f957c2fd",
+      "enabled": true,
+      "fallbackToCacheTimeout": 0
+    },
+    "runtimeVersion": {
+      "policy": "fingerprint"
+    }
   }
 }
