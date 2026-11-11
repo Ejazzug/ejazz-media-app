@@ -52,6 +52,9 @@ router.get("/", async (req, res) => {
         entries: expandEntries(snap.entries as CompactEntries),
         pastDates: pastDates(cfg, today, first),
         card: c.cardUrl ? { url: c.cardUrl, caption: c.cardCaption ?? "" } : null,
+        // The app draws the chart itself, in this design's colours. Null means no design is
+        // chosen and the app uses its own styling -- it never means "show nothing".
+        design: c.design ?? null,
       });
     }
 

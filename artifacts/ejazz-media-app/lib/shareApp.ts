@@ -1,4 +1,6 @@
+import { Asset } from 'expo-asset';
 import { Share } from 'react-native';
+import RNShare from 'react-native-share';
 import { PLAY_STORE_URL, useAppConfig } from '@/lib/appConfig';
 
 /** Used until the Control Room sets its own wording (links.shareAppText). */
@@ -40,14 +42,43 @@ export function useShareApp() {
     /** Any other message (a station, a fun fact) with the app link added underneath. */
     shareWithLink: (text: string) => open(withAppLink(text, update.storeUrl)),
     /**
-     * A chart card: the caption written for it in the dashboard, then the picture's own link.
-     *
-     * The link rather than the file: this app bundles no sharing module that can hand over an
-     * image, and the card is a public https PNG, so a link is what every chat app can open (most
-     * show it as a picture). Adding a native image-share would mean a new dependency and a new
-     * build for something the link already does.
+     * A chart as WORDS: the caption and the rows, with the app link under them. Used for an earlier
+     * day, which has no picture and never can -- the dashboard keeps one card file per countdown,
+     * overwritten in place.
      */
     shareCard: (caption: string, imageUrl: string) =>
       open(withAppLink([caption.trim(), imageUrl.trim()].filter(Boolean).join('\n\n'), update.storeUrl)),
+    /**
+     * TODAY's chart as the PICTURE: the card itself attached, with the caption and the app link as
+     * the message beside it. No image URL in the text -- the image is there, so a link to it is
+     * just clutter.
+     *
+     * The file rather than the link: WhatsApp and X both attach the picture AND keep the words, so
+     * sending a link instead wasted a real picture on both. Instagram takes the image and drops the
+     * words -- its own rule, not ours, and it would drop them whatever we sent.
+     *
+     * Downloaded first because Android wants a local file to attach, not an https URL. The card's
+     * URL carries its own version (?v=), so a redrawn card is a new URL and never serves a cached
+     * yesterday. Falls back to the words-and-link share if anything here fails: a share button that
+     * does nothing is worse than one that sends text.
+     */
+    shareCardImage: async (caption: string, imageUrl: string) => {
+      const message = withAppLink(caption.trim() || 'EJazz chart', update.storeUrl);
+      try {
+        const asset = Asset.fromURI(imageUrl);
+        await asset.downloadAsync();
+        const local = asset.localUri;
+        if (!local) throw new Error('no local copy');
+        await RNShare.open({
+          message,
+          url: local,
+          type: 'image/png',
+          // Cancelling is not a failure, and must not reach the catch below as one.
+          failOnCancel: false,
+        });
+      } catch {
+        open(message);
+      }
+    },
   };
 }

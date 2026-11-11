@@ -143,6 +143,78 @@ export type CountdownCard = {
  * "the dashboard said so" is not a reason to hand a phone a javascript: or data: URL. A card with
  * no caption is still a card -- the picture is the point and the words are optional.
  */
+export type CountdownDesign = {
+  bgMode: "solid" | "gradient";
+  bgColor: string;
+  bgColor2: string;
+  gradientDirection: "vertical" | "horizontal" | "diagonal";
+  accentColor: string;
+  textColor: string;
+  headerText: string;
+  footerText: string;
+};
+
+const DESIGN_FALLBACK: CountdownDesign = {
+  bgMode: "solid",
+  bgColor: "#0B0B12",
+  bgColor2: "#2B1055",
+  gradientDirection: "vertical",
+  accentColor: "#FF0056",
+  textColor: "#FFFFFF",
+  headerText: "",
+  footerText: "",
+};
+
+const HEX = /^#[0-9a-f]{6}$/i;
+
+function hex(value: unknown, fallback: string): string {
+  return typeof value === "string" && HEX.test(value.trim()) ? value.trim().toUpperCase() : fallback;
+}
+
+function oneOf<T extends string>(value: unknown, allowed: readonly T[], fallback: T): T {
+  const v = typeof value === "string" ? value.trim().toLowerCase() : "";
+  return (allowed as readonly string[]).includes(v) ? (v as T) : fallback;
+}
+
+function words(value: unknown, max: number): string {
+  return typeof value === "string" ? value.trim().slice(0, max) : "";
+}
+
+/**
+ * The dashboard's `design` object, trusted only as far as its shape -- COLOURS AND WORDING ONLY.
+ *
+ * Every colour becomes a style value in the app, so each one is checked against a strict 6-digit
+ * hex pattern and anything else falls back to the default: "the dashboard said so" is not a reason
+ * to push an arbitrary string into a phone's stylesheet. Coerced rather than refused, the same way
+ * the dashboard coerces its own template files -- one bad colour should draw in the default colour,
+ * not blank the chart. Null only when no design is chosen at all.
+ *
+ * The dashboard also sends list_style, font_style, show_artwork, show_arrows, show_last_week,
+ * show_new_badge, canvas and track_count. They are dropped here on purpose: the app draws its own
+ * layout in the design's colours, so storing switches it does not honour would be a lie.
+ */
+export function readDesign(raw: unknown): CountdownDesign | null {
+  if (!raw || typeof raw !== "object") return null;
+  const d = raw as Record<string, unknown>;
+  return {
+    bgMode: oneOf(d.bg_mode, ["solid", "gradient"] as const, DESIGN_FALLBACK.bgMode),
+    bgColor: hex(d.bg_color, DESIGN_FALLBACK.bgColor),
+    bgColor2: hex(d.bg_color2, DESIGN_FALLBACK.bgColor2),
+    gradientDirection: oneOf(d.gradient_direction, ["vertical", "horizontal", "diagonal"] as const,
+                             DESIGN_FALLBACK.gradientDirection),
+    accentColor: hex(d.accent_color, DESIGN_FALLBACK.accentColor),
+    textColor: hex(d.text_color, DESIGN_FALLBACK.textColor),
+    // The dashboard's own limits (chart_templates.MAX_HEADER / MAX_FOOTER).
+    headerText: words(d.header_text, 48),
+    footerText: words(d.footer_text, 72),
+  };
+}
+
+export function sameDesign(a: CountdownDesign | null, b: CountdownDesign | null): boolean {
+  if (a === null || b === null) return a === b;
+  return (Object.keys(DESIGN_FALLBACK) as (keyof CountdownDesign)[]).every((k) => a[k] === b[k]);
+}
+
 export function readCard(raw: unknown): CountdownCard | null {
   if (!raw || typeof raw !== "object") return null;
   const c = raw as { public_url?: unknown; caption?: unknown };

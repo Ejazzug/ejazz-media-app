@@ -3,8 +3,8 @@ import { db, countdownChartStationsTable, countdownChartSnapshotsTable } from "@
 import { getAppConfig } from "./appConfig";
 import { todayInEat } from "./showSchedule";
 import {
-  addDays, compactEntries, readCard, rowsToPrune, sameEntries,
-  type ChartEntry, type CompactEntries, type CountdownCard,
+  addDays, compactEntries, readCard, readDesign, rowsToPrune, sameDesign, sameEntries,
+  type ChartEntry, type CompactEntries, type CountdownCard, type CountdownDesign,
 } from "./countdownChartsCore";
 import { logger } from "./logger";
 
@@ -27,6 +27,8 @@ export type DashboardCountdown = {
   /** True while daily_countdown.py is rebuilding it: the playlist is half-filled, so do not snapshot. */
   building: boolean;
   card: CountdownCard | null;
+  /** The colours of the chosen card design, for the app to draw the chart in. */
+  design: CountdownDesign | null;
   error?: string;
 };
 
@@ -44,6 +46,7 @@ export async function fetchDashboardCountdowns(): Promise<DashboardCountdown[]> 
     entries: Array.isArray(c.entries) ? c.entries : [],
     building: Boolean(c.building),
     card: readCard(c.card),
+    design: readDesign(c.design),
     ...(c.error ? { error: String(c.error) } : {}),
   }));
 }
@@ -149,6 +152,14 @@ export async function syncCountdownCharts(): Promise<{ checked: number; saved: n
         await db
           .update(countdownChartStationsTable)
           .set({ cardUrl: card?.url ?? null, cardCaption: card?.caption ?? null, cardUpdatedAt: new Date() })
+          .where(eq(countdownChartStationsTable.countdownId, a.countdownId));
+      }
+      // Same pass, same rule: written only when it actually changed, so an unchanged design is not
+      // rewritten every 15 minutes.
+      if (!sameDesign(c.design, a.design ?? null)) {
+        await db
+          .update(countdownChartStationsTable)
+          .set({ design: c.design })
           .where(eq(countdownChartStationsTable.countdownId, a.countdownId));
       }
       if ((await snapshotCountdown(c, today)) === "saved") saved += 1;

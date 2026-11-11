@@ -12,6 +12,7 @@ import {
   addDays, compactEntries, expandEntries, sameEntries, normalizeChartsConfig, earliestAllowed,
   pastDates,
   readCard, isViewable, resolveSnapshot, rowsToPrune, isDateString, type ChartsConfig,
+  readDesign, sameDesign,
 } from "./countdownChartsCore";
 
 let pass = 0, fail = 0;
@@ -117,6 +118,68 @@ check("a data: url is refused", readCard({ public_url: "data:image/png;base64,AA
 check("a url with whitespace in it is refused", readCard({ public_url: "https://a/ b.png" }) === null);
 check("a non-string caption becomes empty",
   readCard({ public_url: "https://a/b.png", caption: 42 })?.caption === "");
+
+
+// ---- the card design handed to the app (colours only) --------------------------------------
+const FULL = {
+  bg_mode: "gradient", bg_color: "#112233", bg_color2: "#AABBCC", gradient_direction: "diagonal",
+  accent_color: "#ff0056", text_color: "#FFFFFF", header_text: "EJazz Top 10",
+  footer_text: "Every weekday on EJazz Xtra",
+  // Sent by the dashboard and deliberately NOT stored:
+  list_style: "squares", font_style: "classic", show_artwork: true, show_arrows: false,
+  show_last_week: true, show_new_badge: true, canvas: "story", track_count: 10, name: "Billboard Dark",
+};
+
+{
+  const d = readDesign(FULL)!;
+  check("design: colours come through", d.bgColor === "#112233" && d.bgColor2 === "#AABBCC");
+  check("design: hex is normalised to upper case", d.accentColor === "#FF0056");
+  check("design: enums come through", d.bgMode === "gradient" && d.gradientDirection === "diagonal");
+  check("design: wording comes through", d.headerText === "EJazz Top 10");
+  check("design: layout switches are NOT stored",
+    !("listStyle" in d) && !("showArtwork" in d) && !("trackCount" in d), Object.keys(d));
+}
+
+check("design: no design at all is null", readDesign(null) === null && readDesign(undefined) === null);
+check("design: a non-object is null", readDesign("#fff") === null && readDesign(42) === null);
+
+{
+  // One bad colour draws in the default colour rather than blanking the chart.
+  const d = readDesign({ ...FULL, bg_color: "javascript:alert(1)", accent_color: "red" })!;
+  check("design: a junk colour falls back, it is never passed through",
+    d.bgColor === "#0B0B12" && d.accentColor === "#FF0056", d);
+  check("design: a good colour beside a bad one survives", d.bgColor2 === "#AABBCC");
+}
+
+{
+  const d = readDesign({ ...FULL, bg_mode: "disco", gradient_direction: "sideways" })!;
+  check("design: an unknown enum falls back", d.bgMode === "solid" && d.gradientDirection === "vertical");
+}
+
+{
+  const d = readDesign({ ...FULL, bg_color: "#abc" })!;
+  check("design: a 3-digit hex is not accepted", d.bgColor === "#0B0B12");
+}
+
+{
+  const d = readDesign({ header_text: "x".repeat(99), footer_text: "y".repeat(99) })!;
+  check("design: wording is clamped to the dashboard's own limits",
+    d.headerText.length === 48 && d.footerText.length === 72);
+}
+
+{
+  const d = readDesign({ header_text: 7, footer_text: null })!;
+  check("design: non-text wording becomes empty, not \"7\"", d.headerText === "" && d.footerText === "");
+}
+
+{
+  const a = readDesign(FULL), b = readDesign(FULL);
+  check("design: identical designs compare equal (no needless writes)", sameDesign(a, b));
+  check("design: a changed colour compares unequal",
+    !sameDesign(a, readDesign({ ...FULL, accent_color: "#000000" })));
+  check("design: null equals null", sameDesign(null, null));
+  check("design: null never equals a design", !sameDesign(null, a) && !sameDesign(a, null));
+}
 
 console.log(`${pass} passed, ${fail} failed`);
 if (fail) process.exit(1);

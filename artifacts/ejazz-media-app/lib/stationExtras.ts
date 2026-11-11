@@ -50,6 +50,25 @@ export type StationChartEntry = { position: number; title: string; artist: strin
  */
 export type StationChartCard = { url: string; caption: string };
 
+/**
+ * The COLOURS of the card design the operator chose on the dashboard, so this app can draw the
+ * chart itself in that design instead of showing the picture of it.
+ *
+ * Colours and wording only, on purpose: the dashboard's design also has layout switches
+ * (list_style, show_artwork, arrows, ...) which the server deliberately does not send on, because
+ * this app draws its own layout. Absent/null = no design chosen, and the app uses its own palette.
+ */
+export type StationChartDesign = {
+  bgMode: 'solid' | 'gradient';
+  bgColor: string;
+  bgColor2: string;
+  gradientDirection: 'vertical' | 'horizontal' | 'diagonal';
+  accentColor: string;
+  textColor: string;
+  headerText: string;
+  footerText: string;
+};
+
 export type StationChart = {
   id: string;
   title: string;
@@ -61,6 +80,7 @@ export type StationChart = {
   /** Earlier days the operator allows, newest first (YYYY-MM-DD). Empty/absent = today only. */
   pastDates?: string[];
   card?: StationChartCard | null;
+  design?: StationChartDesign | null;
 };
 
 /** A countdown's chart on an earlier day. Only requested when a date chip is tapped. */

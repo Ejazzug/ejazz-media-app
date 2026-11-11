@@ -3,7 +3,7 @@ import { Image } from 'expo-image';
 import { LinearGradient } from 'expo-linear-gradient';
 import { useLocalSearchParams } from 'expo-router';
 import React from 'react';
-import { ActivityIndicator, Linking, Modal, Pressable, ScrollView, StyleSheet, Text, TextInput, View } from 'react-native';
+import { ActivityIndicator, Modal, Pressable, ScrollView, StyleSheet, Text, TextInput, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { MINI_PLAYER_CLEARANCE, PlayButton, PlayingEqualizer } from '@/components/MediaComponents';
 import { KeyboardAwareScrollViewCompat } from '@/components/KeyboardAwareScrollViewCompat';
@@ -19,7 +19,10 @@ import {
   useExtraSongSearch,
   useSongRequest,
 } from '@/lib/radio';
-import { usePastChart, useSongFact, useStationCharts, type StationChart } from '@/lib/stationExtras';
+import {
+  usePastChart, useSongFact, useStationCharts,
+  type StationChart, type StationChartDesign, type StationChartEntry,
+} from '@/lib/stationExtras';
 import { classifyLineup, useShows } from '@/lib/shows';
 import { LineupCard, LineupRow, ShowLineupCard } from '@/components/LineupCard';
 import { useShareApp } from '@/lib/shareApp';
@@ -35,6 +38,86 @@ function formatChartDay(date: string): string {
   return Number.isNaN(d.getTime()) ? date : `${DAY_NAMES[d.getUTCDay()]} ${d.getUTCDate()} ${MONTH_NAMES[d.getUTCMonth()]}`;
 }
 
+/** Where a gradient runs, as the dashboard's three directions. */
+const GRADIENT_ENDS = {
+  vertical: { start: { x: 0.5, y: 0 }, end: { x: 0.5, y: 1 } },
+  horizontal: { start: { x: 0, y: 0.5 }, end: { x: 1, y: 0.5 } },
+  diagonal: { start: { x: 0, y: 0 }, end: { x: 1, y: 1 } },
+} as const;
+
+/** Used when a countdown has no design chosen -- the app's own palette, not a blank box. */
+const BOARD_FALLBACK = { bg: '#0E1E3A', accent: '#FF6B6B', text: '#F7F9FC' };
+
+/**
+ * The chart drawn as TEXT, in the colours of the card design the operator chose.
+ *
+ * It used to be the card PNG for today and a drawn box for earlier days. Now it is this box for
+ * both: text is crisp at any size, selectable, readable by a screen reader, costs no image
+ * download, and -- unlike the picture -- it still works for a countdown with no design and for a
+ * design that is not 9:16. The PICTURE is still what gets shared, so what people post is unchanged.
+ *
+ * Colours only, deliberately: the server sends no layout switches, because this draws the app's own
+ * layout rather than imitating the renderer's. It will not be pixel-identical to the picture and is
+ * not meant to be.
+ */
+function ChartBoard({
+  design, kicker, title, entries,
+}: {
+  design?: StationChartDesign | null;
+  kicker: string;
+  title: string;
+  entries: StationChartEntry[];
+}) {
+  const [width, setWidth] = React.useState(0);
+  const accent = design?.accentColor || BOARD_FALLBACK.accent;
+  const ink = design?.textColor || BOARD_FALLBACK.text;
+  // The card's own shape, while still free to grow: a chart longer than ten rows is never clipped.
+  const box = [styles.chartBoard, width ? { minHeight: (width * 16) / 9 } : null];
+  const onLayout = (e: { nativeEvent: { layout: { width: number } } }) => setWidth(e.nativeEvent.layout.width);
+
+  const inner = (
+    <>
+      {kicker ? <Text style={[styles.chartBoardKicker, { color: accent }]}>{kicker.toUpperCase()}</Text> : null}
+      <Text style={[styles.chartBoardTitle, { color: ink }]}>{title}</Text>
+      <View style={[styles.chartBoardRule, { backgroundColor: accent }]} />
+      {entries.map((entry) => (
+        <View key={`board-${entry.position}`} style={styles.chartBoardRow}>
+          <Text style={[styles.chartBoardPos, { color: accent }]}>{entry.position}</Text>
+          <View style={styles.historyCopy}>
+            <Text numberOfLines={1} style={[styles.chartBoardTrack, { color: ink }]}>{entry.title}</Text>
+            {!!entry.artist && (
+              <Text numberOfLines={1} style={[styles.chartBoardArtist, { color: ink }]}>{entry.artist}</Text>
+            )}
+          </View>
+        </View>
+      ))}
+      {design?.footerText ? (
+        <Text style={[styles.chartBoardFooter, { color: accent }]}>{design.footerText}</Text>
+      ) : null}
+    </>
+  );
+
+  if (design?.bgMode === 'gradient') {
+    const ends = GRADIENT_ENDS[design.gradientDirection] ?? GRADIENT_ENDS.vertical;
+    return (
+      <LinearGradient
+        colors={[design.bgColor, design.bgColor2]}
+        start={ends.start}
+        end={ends.end}
+        onLayout={onLayout}
+        style={box}
+      >
+        {inner}
+      </LinearGradient>
+    );
+  }
+  return (
+    <View onLayout={onLayout} style={[...box, { backgroundColor: design?.bgColor || BOARD_FALLBACK.bg }]}>
+      {inner}
+    </View>
+  );
+}
+
 /**
  * One chart on a station's screen -- ONE day of it, never several side by side. A saved countdown
  * shows today's, and, only if the Control Room has allowed past days, a calendar icon beside the
@@ -45,7 +128,6 @@ function formatChartDay(date: string): string {
 function ChartSection({ chart, station }: { chart: StationChart; station: 'radio' | 'xtra' }) {
   const [picked, setPicked] = React.useState<string | null>(null);
   const [choosing, setChoosing] = React.useState(false);
-  const [cardWidth, setCardWidth] = React.useState(0);
   const past = usePastChart(station, chart.countdownId, picked);
   const share = useShareApp();
   const dates = chart.kind === 'countdown' ? (chart.pastDates ?? []) : [];
@@ -87,31 +169,6 @@ function ChartSection({ chart, station }: { chart: StationChart; station: 'radio
           <Text style={styles.chartBackText}>Back to today</Text>
         </Pressable>
       ) : null}
-      {/* The card IS the chart now: the picture the dashboard draws, full width at its own 9:16,
-          with no track list beside it. An earlier day has no picture and never can -- countdown_cards
-          keeps ONE file per countdown, overwritten in place -- so it gets the same box drawn below
-          from that day's rows. */}
-      {!viewingPast && chart.card ? (
-        <View style={styles.chartCardBlock}>
-          <Pressable
-            onPress={() => Linking.openURL(chart.card!.url).catch(() => {})}
-            accessibilityRole="button"
-            accessibilityLabel={`Open the ${chart.title} card`}
-          >
-            <Image source={{ uri: chart.card.url }} style={styles.chartCardImage} contentFit="cover" transition={200} />
-          </Pressable>
-          {share.enabled ? (
-            <Pressable
-              onPress={() => share.shareCard(chart.card?.caption ?? chart.title, chart.card?.url ?? '')}
-              accessibilityRole="button"
-              style={styles.chartCardShare}
-            >
-              <Feather name="share-2" size={14} color="#0B1730" />
-              <Text style={styles.chartCardShareText}>Share this chart</Text>
-            </Pressable>
-          ) : null}
-        </View>
-      ) : null}
       {dates.length > 0 ? (
         <Modal visible={choosing} transparent animationType="fade" onRequestClose={() => setChoosing(false)}>
           {/* The backdrop is the way out as well as the Close row, so a tap anywhere sensible
@@ -147,33 +204,25 @@ function ChartSection({ chart, station }: { chart: StationChart; station: 'radio
       ) : null}
       {viewingPast && past.isLoading ? <ActivityIndicator style={styles.chartStatus} /> : null}
       {viewingPast && past.isError ? <Text style={styles.chartStatusText}>That day's chart isn't available.</Text> : null}
-      {/* The same card for an earlier day: same box, same kicker / title / rule, only the text
-          differs. minHeight from the measured width keeps it the card's own 9:16 while still being
-          able to grow, so a chart longer than ten rows is never clipped. shareCard() with an empty
-          URL shares the rows alone -- filter(Boolean) drops the missing link, so the message is the
-          chart plus the app link, exactly as the picture's share is. */}
-      {viewingPast && shown.length > 0 ? (
+      {/* ONE board for both days now, drawn as text in the design's colours -- today's used to be
+          the card PNG. The PICTURE is still what Share sends for today, so what people post is
+          unchanged; an earlier day has no picture and never can (one card file per countdown,
+          overwritten in place), so that one shares the rows as words. */}
+      {shown.length > 0 ? (
         <View style={styles.chartCardBlock}>
-          <View
-            onLayout={(e) => setCardWidth(e.nativeEvent.layout.width)}
-            style={[styles.chartPastCard, cardWidth ? { minHeight: (cardWidth * 16) / 9 } : null]}
-          >
-            <Text style={styles.chartPastKicker}>{picked ? formatChartDay(picked).toUpperCase() : ''}</Text>
-            <Text style={styles.chartPastTitle}>{chart.title}</Text>
-            <View style={styles.chartPastRule} />
-            {shown.map((entry) => (
-              <View key={`${chart.id}-past-${entry.position}`} style={styles.chartPastRow}>
-                <Text style={styles.chartPastPos}>{entry.position}</Text>
-                <View style={styles.historyCopy}>
-                  <Text numberOfLines={1} style={styles.chartPastTrack}>{entry.title}</Text>
-                  {!!entry.artist && <Text numberOfLines={1} style={styles.chartPastArtist}>{entry.artist}</Text>}
-                </View>
-              </View>
-            ))}
-          </View>
+          <ChartBoard
+            design={chart.design}
+            kicker={viewingPast && picked ? formatChartDay(picked) : (chart.design?.headerText ?? '')}
+            title={chart.title}
+            entries={shown}
+          />
           {share.enabled ? (
             <Pressable
-              onPress={() => share.shareCard(pastCaption, '')}
+              onPress={() =>
+                !viewingPast && chart.card
+                  ? share.shareCardImage(chart.card.caption || chart.title, chart.card.url)
+                  : share.shareCard(pastCaption, '')
+              }
               accessibilityRole="button"
               style={styles.chartCardShare}
             >
@@ -783,16 +832,17 @@ const styles = StyleSheet.create({
   chartCardBlock: { gap: 12, paddingBottom: 14 },
   // Full width at 9:16, the shape the dashboard's default design draws: the picture IS the chart
   // on this screen now, so it is shown at the size you can read it rather than as a thumbnail.
-  chartCardImage: { width: '100%', aspectRatio: 9 / 16, borderRadius: 14, backgroundColor: '#0E1E3A' },
-  // The same box drawn here for a day that has no picture.
-  chartPastCard: { width: '100%', backgroundColor: '#0E1E3A', borderRadius: 14, padding: 18 },
-  chartPastKicker: { color: '#FF6B6B', fontSize: 12, fontWeight: '800', letterSpacing: 1.2 },
-  chartPastTitle: { color: '#F7F9FC', fontSize: 28, fontWeight: '800', letterSpacing: -0.6, marginTop: 6 },
-  chartPastRule: { width: 54, height: 4, borderRadius: 2, backgroundColor: '#FF6B6B', marginTop: 10, marginBottom: 14 },
-  chartPastRow: { flexDirection: 'row', alignItems: 'center', gap: 12, paddingVertical: 7 },
-  chartPastPos: { color: '#FF6B6B', fontSize: 18, fontWeight: '800', width: 30 },
-  chartPastTrack: { color: '#F7F9FC', fontSize: 15, fontWeight: '700' },
-  chartPastArtist: { color: '#A7B7CC', fontSize: 12.5 },
+  // The chart board: one box for both days. Colours come from the design at render time, so only
+  // the shape and type live here.
+  chartBoard: { width: '100%', borderRadius: 14, padding: 18, overflow: 'hidden' },
+  chartBoardKicker: { fontSize: 12, fontWeight: '800', letterSpacing: 1.2 },
+  chartBoardTitle: { fontSize: 28, fontWeight: '800', letterSpacing: -0.6, marginTop: 6 },
+  chartBoardRule: { width: 54, height: 4, borderRadius: 2, marginTop: 10, marginBottom: 14 },
+  chartBoardRow: { flexDirection: 'row', alignItems: 'center', gap: 12, paddingVertical: 7 },
+  chartBoardPos: { fontSize: 18, fontWeight: '800', width: 30 },
+  chartBoardTrack: { fontSize: 15, fontWeight: '700' },
+  chartBoardArtist: { fontSize: 13, opacity: 0.7 },
+  chartBoardFooter: { fontSize: 12, fontWeight: '700', marginTop: 14, opacity: 0.9 },
   chartCardShare: { flexDirection: 'row', alignItems: 'center', gap: 6, alignSelf: 'flex-start',
                     backgroundColor: '#FF6B6B', paddingVertical: 7, paddingHorizontal: 12, borderRadius: 999 },
   chartCardShareText: { color: '#0B1730', fontSize: 12, fontWeight: '700' },

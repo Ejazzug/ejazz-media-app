@@ -6,6 +6,18 @@ import { pgTable, text, jsonb, timestamp, date, primaryKey } from "drizzle-orm/p
  * costs nothing for countdowns nobody shows.
  * countdown_id is the dashboard's own countdown id (countdowns.json), e.g. "daily-top-10".
  */
+/** The stored shape of a card design's colours. Mirrors CountdownDesign in the api-server. */
+export type CountdownDesignRow = {
+  bgMode: "solid" | "gradient";
+  bgColor: string;
+  bgColor2: string;
+  gradientDirection: "vertical" | "horizontal" | "diagonal";
+  accentColor: string;
+  textColor: string;
+  headerText: string;
+  footerText: string;
+};
+
 export const countdownChartStationsTable = pgTable("countdown_chart_stations", {
   countdownId: text("countdown_id").primaryKey(),
   name: text("name").notNull(),
@@ -24,6 +36,16 @@ export const countdownChartStationsTable = pgTable("countdown_chart_stations", {
   cardUrl: text("card_url"),
   cardCaption: text("card_caption"),
   cardUpdatedAt: timestamp("card_updated_at", { withTimezone: true }),
+  /**
+   * The LOOK of the card design the operator chose, so the app can draw the chart itself in that
+   * design's colours instead of showing the picture (dashboard: chart_lib/chart_templates.py).
+   *
+   * Colours and wording only -- the dashboard sends the layout switches too (list_style,
+   * show_artwork, ...) and the app deliberately does NOT honour them yet, so they are not stored:
+   * a column nobody reads is a promise nobody kept. Null means no design is chosen, and the app
+   * falls back to its own styling.
+   */
+  design: jsonb("design").$type<CountdownDesignRow | null>(),
 });
 
 /**
