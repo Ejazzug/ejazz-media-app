@@ -12,7 +12,7 @@ import {
   addDays, compactEntries, expandEntries, sameEntries, normalizeChartsConfig, earliestAllowed,
   pastDates,
   readCard, isViewable, resolveSnapshot, rowsToPrune, isDateString, type ChartsConfig,
-  readDesign, sameDesign,
+  readDesign, sameDesign, readEntries, type CompactEntries,
 } from "./countdownChartsCore";
 
 let pass = 0, fail = 0;
@@ -36,17 +36,80 @@ const entries = [
   { position: 4, title: "", artist: "No title is dropped" },
 ];
 const c = compactEntries(entries);
-check("sorted best-first and trimmed", JSON.stringify(c) === JSON.stringify([["Yoyo", "Joshua Baraka"], ["Oh No", "Rema"], ["Gratitude", "Asake"]]), c);
+check("sorted best-first and trimmed", JSON.stringify(c) === JSON.stringify([
+  ["Yoyo", "Joshua Baraka", "", 0, ""], ["Oh No", "Rema", "", 0, ""], ["Gratitude", "Asake", "", 0, ""],
+]), c);
 check("round trip positions are index+1", JSON.stringify(expandEntries(c).map((e) => e.position)) === "[1,2,3]");
 check("missing artist becomes empty string", compactEntries([{ position: 1, title: "X", artist: undefined as never }])[0][1] === "");
 check("same entries equal", sameEntries(c, compactEntries(entries)));
 check("different title not equal", !sameEntries(c, [["Yoyo", "Joshua Baraka"], ["Oh No", "Rema"], ["Other", "Asake"]]));
+// A chart with nothing extra must compare equal to the SHORT rows already in the database, or the
+// first sync after this change would rewrite every day that has not actually changed.
+check("a long row carrying nothing equals the short row it replaced",
+  sameEntries(c, [["Yoyo", "Joshua Baraka"], ["Oh No", "Rema"], ["Gratitude", "Asake"]]));
 check("different length not equal", !sameEntries(c, c.slice(0, 2)));
 check("caps entries at 100", compactEntries(Array.from({ length: 150 }, (_, i) => ({ position: i + 1, title: "t" + i, artist: "a" }))).length === 100);
 check("long text capped", compactEntries([{ position: 1, title: "x".repeat(500), artist: "y" }])[0][0].length === 200);
 // A Top 10 must stay small: this is the "most space friendly" requirement.
 const top10 = compactEntries(Array.from({ length: 10 }, (_, i) => ({ position: i + 1, title: "A fairly long song title " + i, artist: "Some Artist Name" })));
-check("Top 10 under 700 bytes as JSON", JSON.stringify(top10).length < 700, JSON.stringify(top10).length);
+check("Top 10 with no extras under 900 bytes as JSON", JSON.stringify(top10).length < 900, JSON.stringify(top10).length);
+
+// ---- covers, arrows and last week ---------------------------------------------------------
+// What the app needs to draw the chart the way the PICTURE draws it. Each of the three is
+// independently optional, and each one reaches a phone -- a cover becomes an <Image> source --
+// so every one of them is validated rather than trusted.
+const DASH_ROWS = [
+  { position: 1, title: "Yoyo", artist: "Joshua Baraka", move: "up", last_week: 4,
+    art_url: "https://control.ejazzug.com/api/chart-art/" + "a".repeat(40) + ".jpg" },
+  { position: 2, title: "Oh No", artist: "Rema", move: "new" },
+  { position: 3, title: "Gratitude", artist: "Asake", move: "same", last_week: 3 },
+];
+{
+  const read = readEntries(DASH_ROWS);
+  check("snake_case becomes camelCase", read[0].move === "up" && read[0].lastWeek === 4);
+  check("a cover url comes through", read[0].artUrl?.endsWith(".jpg") === true);
+  check("a row with no extras carries none",
+    read[1].lastWeek === undefined && read[1].artUrl === undefined && read[1].move === "new");
+  const round = expandEntries(compactEntries(read));
+  check("the extras survive storage", round[0].move === "up" && round[0].lastWeek === 4
+    && round[0].artUrl === DASH_ROWS[0].art_url);
+  check("absent extras are absent after storage, not zero",
+    round[1].lastWeek === undefined && round[1].artUrl === undefined);
+  check("a cover appearing is a real change (so the day gets rewritten)",
+    !sameEntries(compactEntries(read), compactEntries(read.map((e, i) => i ? e : { ...e, artUrl: undefined }))));
+  check("a changed arrow is a real change",
+    !sameEntries(compactEntries(read), compactEntries(read.map((e, i) => i ? e : { ...e, move: "down" as const }))));
+}
+{
+  // Movement words and positions, held to the dashboard's own vocabulary.
+  const junk = readEntries([
+    { position: 1, title: "A", artist: "B", move: "sideways", last_week: 0, art_url: "javascript:alert(1)" },
+    { position: 2, title: "C", artist: "D", move: "UP", last_week: "7", art_url: "http://control/x.jpg" },
+    { position: 3, title: "E", artist: "F", last_week: 101 },
+    { position: 4, title: "G", artist: "H", last_week: -2, art_url: "https://a/ b.jpg" },
+  ]);
+  check("an unknown movement word is dropped", junk[0].move === undefined);
+  check("a javascript: cover is refused", junk[0].artUrl === undefined);
+  check("plain http is refused too", junk[1].artUrl === undefined);
+  check("a movement word is case-insensitive", junk[1].move === "up");
+  check("a numeric string last week is read", junk[1].lastWeek === 7);
+  check("last week beyond the chart length is dropped", junk[2].lastWeek === undefined);
+  check("a negative last week is dropped", junk[3].lastWeek === undefined);
+  check("a cover url with whitespace is refused", junk[3].artUrl === undefined);
+  check("a row with no position or title is dropped",
+    readEntries([{ title: "no position" }, { position: 2, title: "   " }, { position: 3, title: "kept" }]).length === 1);
+  check("junk in place of rows is no rows", readEntries(null).length === 0 && readEntries("rows").length === 0);
+}
+{
+  // The short rows already in the database must keep working, unchanged, for ever.
+  const legacy: CompactEntries = [["Yoyo", "Joshua Baraka"], ["Oh No", "Rema"]];
+  const out = expandEntries(legacy);
+  check("a legacy day still expands", out.length === 2 && out[1].position === 2 && out[1].title === "Oh No");
+  check("a legacy day simply has no extras",
+    out[0].move === undefined && out[0].lastWeek === undefined && out[0].artUrl === undefined);
+  check("a stored row full of junk expands to a usable row",
+    JSON.stringify(expandEntries([["T", "A", "sideways", 999, "data:x"] as never])) === JSON.stringify([{ position: 1, title: "T", artist: "A" }]));
+}
 
 // ---- config validation ----
 check("default is off", normalizeChartsConfig(undefined).pastMode === "off");
@@ -125,9 +188,10 @@ const FULL = {
   bg_mode: "gradient", bg_color: "#112233", bg_color2: "#AABBCC", gradient_direction: "diagonal",
   accent_color: "#ff0056", text_color: "#FFFFFF", header_text: "EJazz Top 10",
   footer_text: "Every weekday on EJazz Xtra",
-  // Sent by the dashboard and deliberately NOT stored:
-  list_style: "squares", font_style: "classic", show_artwork: true, show_arrows: false,
-  show_last_week: true, show_new_badge: true, canvas: "story", track_count: 10, name: "Billboard Dark",
+  // Honoured by the app, so stored:
+  show_artwork: true, show_arrows: false, show_last_week: true, show_new_badge: true,
+  // Sent by the dashboard and deliberately NOT stored (the app draws its own layout):
+  list_style: "squares", font_style: "classic", canvas: "story", track_count: 10, name: "Billboard Dark",
 };
 
 {
@@ -136,8 +200,18 @@ const FULL = {
   check("design: hex is normalised to upper case", d.accentColor === "#FF0056");
   check("design: enums come through", d.bgMode === "gradient" && d.gradientDirection === "diagonal");
   check("design: wording comes through", d.headerText === "EJazz Top 10");
-  check("design: layout switches are NOT stored",
-    !("listStyle" in d) && !("showArtwork" in d) && !("trackCount" in d), Object.keys(d));
+  check("design: the four display switches ARE stored",
+    d.showArtwork === true && d.showArrows === false && d.showLastWeek === true && d.showNewBadge === true);
+  check("design: the layout switches are NOT stored",
+    !("listStyle" in d) && !("fontStyle" in d) && !("trackCount" in d) && !("canvas" in d), Object.keys(d));
+  check("design: a missing switch falls back to the dashboard's own default",
+    readDesign({ bg_color: "#112233" })!.showArtwork === true
+    && readDesign({ bg_color: "#112233" })!.showLastWeek === false);
+  check("design: a non-boolean switch falls back rather than being coerced",
+    readDesign({ show_artwork: "yes" })!.showArtwork === true
+    && readDesign({ show_arrows: 0 })!.showArrows === true);
+  check("design: a changed switch compares unequal (the app must be told)",
+    !sameDesign(readDesign(FULL), readDesign({ ...FULL, show_artwork: false })));
 }
 
 check("design: no design at all is null", readDesign(null) === null && readDesign(undefined) === null);

@@ -16,6 +16,11 @@ export type CountdownDesignRow = {
   textColor: string;
   headerText: string;
   footerText: string;
+  /** The four display switches the app honours, as the picture does. */
+  showArtwork: boolean;
+  showArrows: boolean;
+  showLastWeek: boolean;
+  showNewBadge: boolean;
 };
 
 export const countdownChartStationsTable = pgTable("countdown_chart_stations", {
@@ -40,10 +45,10 @@ export const countdownChartStationsTable = pgTable("countdown_chart_stations", {
    * The LOOK of the card design the operator chose, so the app can draw the chart itself in that
    * design's colours instead of showing the picture (dashboard: chart_lib/chart_templates.py).
    *
-   * Colours and wording only -- the dashboard sends the layout switches too (list_style,
-   * show_artwork, ...) and the app deliberately does NOT honour them yet, so they are not stored:
-   * a column nobody reads is a promise nobody kept. Null means no design is chosen, and the app
-   * falls back to its own styling.
+   * Colours, wording, and the four show_* switches the app honours (artwork, arrows, last week,
+   * NEW badge). The dashboard also sends list_style, font_style, canvas and track_count; those are
+   * NOT stored, because the app draws its own layout -- a column nobody reads is a promise nobody
+   * kept. Null means no design is chosen, and the app falls back to its own styling.
    */
   design: jsonb("design").$type<CountdownDesignRow | null>(),
 });
@@ -51,18 +56,23 @@ export const countdownChartStationsTable = pgTable("countdown_chart_stations", {
 /**
  * One countdown's chart as it stood on a calendar day (Kampala date).
  *
- * `entries` is the most compact shape that still round-trips: a bare array of
- * [title, artist] pairs ordered best-first, so a song's position is its index + 1 and no
- * keys are repeated per song (about 0.6 KB for a Top 10). A row is only written when the
- * chart actually CHANGED, so a day with no row means "same as the latest earlier row" --
- * readers resolve a date to the newest row on or before it.
+ * `entries` is the most compact shape that still round-trips: a bare array of tuples ordered
+ * best-first, so a song's position is its index + 1 and no keys are repeated per song. Rows are
+ * written as [title, artist, move, lastWeek, artUrl] -- the movement arrow, last week's position
+ * (0 for none) and the cover's absolute URL ("" for none), which is what the app needs to draw the
+ * chart the way the picture draws it. Days saved before those existed hold a plain [title, artist]
+ * pair and are still read; see CompactEntry in the api-server's countdownChartsCore.
+ *
+ * A row is only written when the chart actually CHANGED -- including its arrows and covers -- so a
+ * day with no row means "same as the latest earlier row", and readers resolve a date to the newest
+ * row on or before it.
  */
 export const countdownChartSnapshotsTable = pgTable(
   "countdown_chart_snapshots",
   {
     countdownId: text("countdown_id").notNull(),
     day: date("day", { mode: "string" }).notNull(),
-    entries: jsonb("entries").$type<[string, string][]>().notNull(),
+    entries: jsonb("entries").$type<([string, string] | [string, string, string, number, string])[]>().notNull(),
   },
   (t) => [primaryKey({ columns: [t.countdownId, t.day] })],
 );

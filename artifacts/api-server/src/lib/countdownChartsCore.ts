@@ -4,9 +4,35 @@
  * tested directly (countdownChartsCore.test.ts).
  */
 
-export type ChartEntry = { position: number; title: string; artist: string };
-/** The stored shape: [title, artist] best-first. A song's position is its index + 1. */
-export type CompactEntries = [string, string][];
+/** Which way a song moved since the previous chart, in the dashboard's own four words. */
+export type Move = "up" | "down" | "same" | "new";
+
+export type ChartEntry = {
+  position: number;
+  title: string;
+  artist: string;
+  /** How it moved since the previous chart. Absent when this chart carries no movement at all. */
+  move?: Move;
+  /** Its position on the previous chart, 1-based. Absent when it had none (a new entry). */
+  lastWeek?: number;
+  /** Absolute https URL of the cover the CARD renderer cached. Absent when that song has none. */
+  artUrl?: string;
+};
+
+/**
+ * The stored shape, best-first, so a song's position is still its index + 1:
+ *
+ *   [title, artist]                          rows written before covers and arrows existed
+ *   [title, artist, move, lastWeek, artUrl]  what is written now
+ *
+ * Both are read, because the database already holds thousands of the short form and a saved day
+ * is never rewritten by a migration -- the next sync that finds a real difference rewrites it, and
+ * covers appearing where there were none IS a real difference. In the long form "" and 0 mean
+ * "nothing here", never a falsy value with meaning: position 0 is not a position and an empty
+ * string is not a URL.
+ */
+export type CompactEntry = [string, string] | [string, string, string, number, string];
+export type CompactEntries = CompactEntry[];
 
 export type PastMode = "off" | "week" | "month" | "custom";
 export type ChartsConfig = {
@@ -24,6 +50,48 @@ export const MAX_PAST_DATES_SENT = 60;
 const TEXT_MAX = 200;
 
 const DATE_RE = /^\d{4}-\d{2}-\d{2}$/;
+const MOVES = ["up", "down", "same", "new"] as const;
+/**
+ * A cover URL becomes an <Image> source on a phone, so it is held to the same rule as a card's:
+ * https and nothing else. "The dashboard said so" is not a reason to hand a device a javascript:
+ * or data: URL, and the dashboard is read over loopback by a service that cannot see who wrote it.
+ */
+const ART_URL_RE = /^https:\/\/[^\s"'<>]+$/i;
+const ART_URL_MAX = 300;
+
+/** One of the four movement words, or "" for "this chart says nothing about movement". */
+function moveWord(value: unknown): Move | "" {
+  const v = typeof value === "string" ? value.trim().toLowerCase() : "";
+  return (MOVES as readonly string[]).includes(v) ? (v as Move) : "";
+}
+
+/**
+ * Last week's position as a whole number, or 0 for none. Bounded by MAX_CHART_ENTRIES because a
+ * number outside it is not a position any chart here could have had, so it is not one to show.
+ */
+function lastWeekPosition(value: unknown): number {
+  const n = Number(value);
+  return Number.isFinite(n) && n >= 1 && n <= MAX_CHART_ENTRIES ? Math.round(n) : 0;
+}
+
+function coverUrl(value: unknown): string {
+  const v = typeof value === "string" ? value.trim() : "";
+  return v.length <= ART_URL_MAX && ART_URL_RE.test(v) ? v : "";
+}
+
+/** A stored row read positionally, whatever length it was written at. */
+function rowFields(row: CompactEntry): [string, string, Move | "", number, string] {
+  // Indexed through unknown[] on purpose: the two stored lengths are one union, and a row that
+  // came back from jsonb is only a row by convention -- it is validated here, not trusted.
+  const r = row as unknown[];
+  return [
+    typeof r[0] === "string" ? r[0] : "",
+    typeof r[1] === "string" ? r[1] : "",
+    moveWord(r[2]),
+    lastWeekPosition(r[3]),
+    coverUrl(r[4]),
+  ];
+}
 
 export function isDateString(v: unknown): v is string {
   if (typeof v !== "string" || !DATE_RE.test(v)) return false;
@@ -50,22 +118,85 @@ export function normalizeChartsConfig(input: unknown): ChartsConfig {
   return { pastMode: mode === "custom" && !customFrom ? "off" : mode, customFrom, keepDays };
 }
 
+/**
+ * The dashboard's own rows, trusted only as far as their shape. snake_case there, camelCase here.
+ *
+ * A row with no usable position or no title is DROPPED rather than defaulted: an invented position
+ * would reorder the chart, and the dashboard sends the playlist's real order. The three extras are
+ * each independently optional -- a chart with covers but no movement is normal (the first day a
+ * countdown exists), and so is the reverse (a song whose cover was never cached).
+ */
+export function readEntries(raw: unknown): ChartEntry[] {
+  if (!Array.isArray(raw)) return [];
+  const out: ChartEntry[] = [];
+  for (const row of raw) {
+    if (!row || typeof row !== "object") continue;
+    const e = row as Record<string, unknown>;
+    const position = Number(e.position);
+    const title = typeof e.title === "string" ? e.title : "";
+    if (!Number.isFinite(position) || !title.trim()) continue;
+    const move = moveWord(e.move);
+    const lastWeek = lastWeekPosition(e.last_week);
+    const artUrl = coverUrl(e.art_url);
+    out.push({
+      position,
+      title,
+      artist: typeof e.artist === "string" ? e.artist : "",
+      ...(move ? { move } : {}),
+      ...(lastWeek ? { lastWeek } : {}),
+      ...(artUrl ? { artUrl } : {}),
+    });
+  }
+  return out;
+}
+
 /** Storage form: best position first, text trimmed and capped, nothing else kept. */
 export function compactEntries(entries: ChartEntry[]): CompactEntries {
   return [...entries]
     .filter((e) => e && Number.isFinite(Number(e.position)) && String(e.title ?? "").trim())
     .sort((a, b) => Number(a.position) - Number(b.position))
     .slice(0, MAX_CHART_ENTRIES)
-    .map((e) => [String(e.title).trim().slice(0, TEXT_MAX), String(e.artist ?? "").trim().slice(0, TEXT_MAX)] as [string, string]);
+    .map((e) => [
+      String(e.title).trim().slice(0, TEXT_MAX),
+      String(e.artist ?? "").trim().slice(0, TEXT_MAX),
+      moveWord(e.move),
+      lastWeekPosition(e.lastWeek),
+      coverUrl(e.artUrl),
+    ] as CompactEntry);
 }
 
 export function expandEntries(compact: CompactEntries): ChartEntry[] {
-  return compact.map(([title, artist], i) => ({ position: i + 1, title, artist }));
+  return compact.map((row, i) => {
+    const [title, artist, move, lastWeek, artUrl] = rowFields(row);
+    return {
+      position: i + 1,
+      title,
+      artist,
+      // Sent only when there is something to send, so the app can tell "no movement recorded"
+      // from "did not move" -- they draw differently (nothing, versus a dash).
+      ...(move ? { move } : {}),
+      ...(lastWeek ? { lastWeek } : {}),
+      ...(artUrl ? { artUrl } : {}),
+    };
+  });
 }
 
+/**
+ * Whether two stored charts say the same thing -- all five fields, not just the songs.
+ *
+ * The extras have to count. A snapshot is written only when the chart differs from the newest
+ * saved one, so if movement and covers were ignored here, the day a cover is finally cached or
+ * the arrows change would look identical to yesterday and the app would keep showing yesterday's
+ * arrows for as long as the running order held. It also makes the short legacy rows compare equal
+ * to a long row that carries nothing, so an old day is not rewritten for the sake of its shape.
+ */
 export function sameEntries(a: CompactEntries, b: CompactEntries): boolean {
   if (a.length !== b.length) return false;
-  for (let i = 0; i < a.length; i++) if (a[i][0] !== b[i][0] || a[i][1] !== b[i][1]) return false;
+  for (let i = 0; i < a.length; i++) {
+    const x = rowFields(a[i]);
+    const y = rowFields(b[i]);
+    for (let f = 0; f < x.length; f++) if (x[f] !== y[f]) return false;
+  }
   return true;
 }
 
@@ -152,6 +283,14 @@ export type CountdownDesign = {
   textColor: string;
   headerText: string;
   footerText: string;
+  /** Show each song's cover beside it, as the picture does. */
+  showArtwork: boolean;
+  /** Show the up/down/same arrow. */
+  showArrows: boolean;
+  /** Show last week's position. */
+  showLastWeek: boolean;
+  /** Mark an entry that was not on the previous chart. */
+  showNewBadge: boolean;
 };
 
 const DESIGN_FALLBACK: CountdownDesign = {
@@ -163,6 +302,12 @@ const DESIGN_FALLBACK: CountdownDesign = {
   textColor: "#FFFFFF",
   headerText: "",
   footerText: "",
+  // The dashboard's own defaults (chart_templates.DEFAULTS), so a design saved before these
+  // switches existed draws in the app the way the picture of it draws.
+  showArtwork: true,
+  showArrows: true,
+  showLastWeek: false,
+  showNewBadge: true,
 };
 
 const HEX = /^#[0-9a-f]{6}$/i;
@@ -174,6 +319,11 @@ function hex(value: unknown, fallback: string): string {
 function oneOf<T extends string>(value: unknown, allowed: readonly T[], fallback: T): T {
   const v = typeof value === "string" ? value.trim().toLowerCase() : "";
   return (allowed as readonly string[]).includes(v) ? (v as T) : fallback;
+}
+
+/** A switch is a boolean or it is not a switch: anything else falls back to the design default. */
+function flag(value: unknown, fallback: boolean): boolean {
+  return typeof value === "boolean" ? value : fallback;
 }
 
 function words(value: unknown, max: number): string {
@@ -189,9 +339,11 @@ function words(value: unknown, max: number): string {
  * the dashboard coerces its own template files -- one bad colour should draw in the default colour,
  * not blank the chart. Null only when no design is chosen at all.
  *
- * The dashboard also sends list_style, font_style, show_artwork, show_arrows, show_last_week,
- * show_new_badge, canvas and track_count. They are dropped here on purpose: the app draws its own
- * layout in the design's colours, so storing switches it does not honour would be a lie.
+ * The four show_* switches ARE kept, because the app now draws what they turn on -- covers,
+ * arrows, last week's number and the NEW badge -- and an operator who turned artwork off on the
+ * Card Designs tab means it off in both places. The dashboard also sends list_style, font_style,
+ * canvas and track_count; those stay dropped, because the app draws its own layout rather than
+ * imitating the renderer's, and storing a switch nothing honours would be a lie.
  */
 export function readDesign(raw: unknown): CountdownDesign | null {
   if (!raw || typeof raw !== "object") return null;
@@ -207,6 +359,10 @@ export function readDesign(raw: unknown): CountdownDesign | null {
     // The dashboard's own limits (chart_templates.MAX_HEADER / MAX_FOOTER).
     headerText: words(d.header_text, 48),
     footerText: words(d.footer_text, 72),
+    showArtwork: flag(d.show_artwork, DESIGN_FALLBACK.showArtwork),
+    showArrows: flag(d.show_arrows, DESIGN_FALLBACK.showArrows),
+    showLastWeek: flag(d.show_last_week, DESIGN_FALLBACK.showLastWeek),
+    showNewBadge: flag(d.show_new_badge, DESIGN_FALLBACK.showNewBadge),
   };
 }
 

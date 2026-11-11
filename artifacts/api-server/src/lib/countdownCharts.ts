@@ -3,7 +3,7 @@ import { db, countdownChartStationsTable, countdownChartSnapshotsTable } from "@
 import { getAppConfig } from "./appConfig";
 import { todayInEat } from "./showSchedule";
 import {
-  addDays, compactEntries, readCard, readDesign, rowsToPrune, sameDesign, sameEntries,
+  addDays, compactEntries, readCard, readDesign, readEntries, rowsToPrune, sameDesign, sameEntries,
   type ChartEntry, type CompactEntries, type CountdownCard, type CountdownDesign,
 } from "./countdownChartsCore";
 import { logger } from "./logger";
@@ -23,6 +23,10 @@ const SYNC_EVERY_MS = 15 * 60_000;
 export type DashboardCountdown = {
   id: string;
   name: string;
+  /**
+   * The chart as rows, each carrying what the PICTURE draws beside the song where the dashboard
+   * has one: the movement arrow, last week's position and the cover's absolute URL.
+   */
   entries: ChartEntry[];
   /** True while daily_countdown.py is rebuilding it: the playlist is half-filled, so do not snapshot. */
   building: boolean;
@@ -43,7 +47,9 @@ export async function fetchDashboardCountdowns(): Promise<DashboardCountdown[]> 
   return j.items.map((c) => ({
     id: String(c.id),
     name: String(c.name),
-    entries: Array.isArray(c.entries) ? c.entries : [],
+    // Read rather than passed through: the rows arrive in the dashboard's snake_case and with
+    // three new optional fields, each of which ends up in a phone's stylesheet or <Image>.
+    entries: readEntries(c.entries),
     building: Boolean(c.building),
     card: readCard(c.card),
     design: readDesign(c.design),

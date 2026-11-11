@@ -41,7 +41,24 @@ export function useSongFact(artist: string | undefined, title: string | undefine
   });
 }
 
-export type StationChartEntry = { position: number; title: string; artist: string };
+/** Which way a song moved since the previous chart, in the dashboard's own four words. */
+export type ChartMove = 'up' | 'down' | 'same' | 'new';
+
+/**
+ * One row of a chart. The last three are what the shared PICTURE draws beside a song, and each is
+ * independently optional: absent means the server has nothing to say about it, which is different
+ * from zero or "did not move" -- a chart on its first day has no movement at all, and a song whose
+ * cover was never cached has no cover here either (it has none on the picture either).
+ */
+export type StationChartEntry = {
+  position: number;
+  title: string;
+  artist: string;
+  move?: ChartMove;
+  lastWeek?: number;
+  /** Absolute https URL of the cover the dashboard's card renderer cached. */
+  artUrl?: string;
+};
 
 /**
  * A countdown's shareable card: the picture the dashboard draws of this chart, and the caption
@@ -54,9 +71,11 @@ export type StationChartCard = { url: string; caption: string };
  * The COLOURS of the card design the operator chose on the dashboard, so this app can draw the
  * chart itself in that design instead of showing the picture of it.
  *
- * Colours and wording only, on purpose: the dashboard's design also has layout switches
- * (list_style, show_artwork, arrows, ...) which the server deliberately does not send on, because
- * this app draws its own layout. Absent/null = no design chosen, and the app uses its own palette.
+ * Colours, wording, and the four switches that say WHAT to show -- artwork, arrows, last week's
+ * number, the NEW badge -- which this app honours exactly as the picture does: turning artwork off
+ * on the Card Designs tab turns it off here too. The design's layout switches (list_style,
+ * font_style, canvas, track_count) are deliberately not sent, because this draws its own layout.
+ * Absent/null = no design chosen, and the app uses its own palette and shows everything it has.
  */
 export type StationChartDesign = {
   bgMode: 'solid' | 'gradient';
@@ -67,6 +86,10 @@ export type StationChartDesign = {
   textColor: string;
   headerText: string;
   footerText: string;
+  showArtwork: boolean;
+  showArrows: boolean;
+  showLastWeek: boolean;
+  showNewBadge: boolean;
 };
 
 export type StationChart = {

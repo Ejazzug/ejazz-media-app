@@ -49,6 +49,52 @@ const GRADIENT_ENDS = {
 const BOARD_FALLBACK = { bg: '#0E1E3A', accent: '#FF6B6B', text: '#F7F9FC' };
 
 /**
+ * What happened to a song since the previous chart, drawn the way the picture draws it: an arrow,
+ * a NEW mark for an entry that was not there before, and last week's position.
+ *
+ * Inside the design's own two colours rather than the usual green and red -- the whole point of
+ * this board is that it is in the operator's palette, and a design has no "good" and "bad" colour
+ * to borrow. A rise gets the accent, a fall and a hold get the text colour at lower strength, so
+ * direction still reads at a glance without inventing a third colour.
+ *
+ * Nothing is drawn when the server said nothing (a chart on its first day has no movement for any
+ * row), which is why `move` being absent is not the same as "same".
+ */
+function ChartMoveMark({
+  entry, design, accent, ink,
+}: {
+  entry: StationChartEntry;
+  design?: StationChartDesign | null;
+  accent: string;
+  ink: string;
+}) {
+  const arrows = design ? design.showArrows : true;
+  const badge = design ? design.showNewBadge : true;
+  const lastWeek = design ? design.showLastWeek : false;
+  const isNew = entry.move === 'new';
+  const showBadge = isNew && badge;
+  const showArrow = arrows && (entry.move === 'up' || entry.move === 'down' || entry.move === 'same');
+  // Last week's number says nothing for a new entry -- it had none.
+  const showLast = lastWeek && !isNew && typeof entry.lastWeek === 'number';
+  if (!showBadge && !showArrow && !showLast) return null;
+  return (
+    <View style={styles.chartBoardMove}>
+      {showBadge ? (
+        <Text style={[styles.chartBoardNew, { color: accent, borderColor: accent }]}>NEW</Text>
+      ) : null}
+      {showArrow ? (
+        <Feather
+          name={entry.move === 'up' ? 'arrow-up' : entry.move === 'down' ? 'arrow-down' : 'minus'}
+          size={14}
+          color={entry.move === 'up' ? accent : `${ink}8C`}
+        />
+      ) : null}
+      {showLast ? <Text style={[styles.chartBoardLast, { color: `${ink}99` }]}>{entry.lastWeek}</Text> : null}
+    </View>
+  );
+}
+
+/**
  * The chart drawn as TEXT, in the colours of the card design the operator chose.
  *
  * It used to be the card PNG for today and a drawn box for earlier days. Now it is this box for
@@ -71,6 +117,10 @@ function ChartBoard({
   const [width, setWidth] = React.useState(0);
   const accent = design?.accentColor || BOARD_FALLBACK.accent;
   const ink = design?.textColor || BOARD_FALLBACK.text;
+  // With no design chosen the app shows what it has, which is what it did before these switches
+  // existed. With one, the operator's choice on the Card Designs tab decides -- the same choice
+  // the picture obeys, so the two never disagree about whether this chart has covers.
+  const artwork = design ? design.showArtwork : true;
   // The card's own shape, while still free to grow: a chart longer than ten rows is never clipped.
   const box = [styles.chartBoard, width ? { minHeight: (width * 16) / 9 } : null];
   const onLayout = (e: { nativeEvent: { layout: { width: number } } }) => setWidth(e.nativeEvent.layout.width);
@@ -83,12 +133,24 @@ function ChartBoard({
       {entries.map((entry) => (
         <View key={`board-${entry.position}`} style={styles.chartBoardRow}>
           <Text style={[styles.chartBoardPos, { color: accent }]}>{entry.position}</Text>
+          {artwork ? (
+            // The empty square is deliberate: a row with no cached cover keeps the same shape as
+            // the rows around it, so the list does not comb in and out down the chart.
+            <Image
+              source={entry.artUrl ? { uri: entry.artUrl } : undefined}
+              style={[styles.chartBoardArt, { backgroundColor: `${ink}1F` }]}
+              contentFit="cover"
+              transition={120}
+              accessibilityIgnoresInvertColors
+            />
+          ) : null}
           <View style={styles.historyCopy}>
             <Text numberOfLines={1} style={[styles.chartBoardTrack, { color: ink }]}>{entry.title}</Text>
             {!!entry.artist && (
               <Text numberOfLines={1} style={[styles.chartBoardArtist, { color: ink }]}>{entry.artist}</Text>
             )}
           </View>
+          <ChartMoveMark entry={entry} design={design} accent={accent} ink={ink} />
         </View>
       ))}
       {design?.footerText ? (
@@ -842,6 +904,11 @@ const styles = StyleSheet.create({
   chartBoardPos: { fontSize: 18, fontWeight: '800', width: 30 },
   chartBoardTrack: { fontSize: 15, fontWeight: '700' },
   chartBoardArtist: { fontSize: 13, opacity: 0.7 },
+  chartBoardArt: { width: 42, height: 42, borderRadius: 6 },
+  chartBoardMove: { flexDirection: 'row', alignItems: 'center', gap: 5, minWidth: 34, justifyContent: 'flex-end' },
+  chartBoardNew: { fontSize: 9, fontWeight: '800', letterSpacing: 0.6, borderWidth: 1, borderRadius: 4,
+                   paddingHorizontal: 3, paddingVertical: 1 },
+  chartBoardLast: { fontSize: 12, fontWeight: '700' },
   chartBoardFooter: { fontSize: 12, fontWeight: '700', marginTop: 14, opacity: 0.9 },
   chartCardShare: { flexDirection: 'row', alignItems: 'center', gap: 6, alignSelf: 'flex-start',
                     backgroundColor: '#FF6B6B', paddingVertical: 7, paddingHorizontal: 12, borderRadius: 999 },
