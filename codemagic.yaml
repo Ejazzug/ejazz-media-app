@@ -110,12 +110,26 @@ workflows:
   # failing the fingerprint check rather than publishing an update no installed
   # binary can accept.
   #
-  # NEITHER workflow declares `triggering:`, so Codemagic will not start them on
-  # a push, a tag or a pull request. They run only when someone starts them --
-  # from the Codemagic UI, or through the REST API. That is the whole safety
-  # model for production, and it is deliberate: as of 2026-11-12 the `production`
-  # channel on expo.dev is UNPROTECTED, so nothing server-side would stop a
-  # publish reaching every user.
+  # SINGLE-OWNER MODEL. There is one human release operator. Neither workflow
+  # declares `triggering:`, so Codemagic will not start either one on a push, a
+  # tag, a pull request or a schedule -- they run only when that person starts
+  # them, from the UI or the REST API. Production additionally requires a typed
+  # confirmation carrying the commit SHA (tools/ota/confirm-production.sh), so
+  # even a `triggering:` block added here by mistake could not publish: an
+  # automatic run has no way to produce that value.
+  #
+  # The guards live in tools/ota/, at the repo root, and are shared by both
+  # workflows. That location is deliberate. `eas.json` and the app's
+  # package.json `scripts` object are both NATIVE FINGERPRINT INPUTS, so putting
+  # release tooling in either would change the runtime version of every bundle
+  # built afterwards and silently de-synchronise OTA from every installed app.
+  # codemagic.yaml and tools/ota/ are outside the fingerprint entirely.
+  #
+  # As of 2026-11-12 the `production` channel on expo.dev is UNPROTECTED and
+  # both the operator and the codemagic-ci robot hold the Developer role, so
+  # nothing server-side would stop a publish reaching every user. See
+  # docs/OTA-DEPLOYMENT.md section 9 for the one-time Expo Admin/Owner steps
+  # that fix that, and why the role grant must come BEFORE the protection.
   # ---------------------------------------------------------------------------
 
   ejazz-ota-preview:
@@ -124,17 +138,27 @@ workflows:
     environment:
       node: 20
       groups:
-        - ejazz_eas          # must provide EAS_ACCESS_TOKEN (see docs/OTA below)
+        - ejazz_eas          # must provide EAS_ACCESS_TOKEN (see docs/OTA-DEPLOYMENT.md)
       vars:
         EAS_UPDATE_BRANCH: "preview"
         # Required from Expo SDK 55 onward: `eas update` refuses to run without
-        # it. This selects the server-side EAS environment whose variables are
-        # baked into the published bundle, so it must match what the installed
-        # binary was built with -- the production builds use "production".
-        EAS_UPDATE_ENVIRONMENT: "production"
-        # Set to "true" only when you have checked by hand that the installed
-        # binary's fingerprint matches this commit. See the runtime check below.
-        OTA_ALLOW_RUNTIME_MISMATCH: "false"
+        # it. It selects the server-side EAS environment whose variables are
+        # baked into the published bundle, so it must match the environment the
+        # installed binaries were built with. The preview build profile declares
+        # `environment: "preview"`, and build 21 was made that way, so this is
+        # "preview". It said "production" until 2026-11-12, which would have
+        # shipped production configuration to test phones the moment one value
+        # diverged; tools/ota/check-env-vars.sh now asserts the pairing so the
+        # two cannot drift apart again.
+        EAS_UPDATE_ENVIRONMENT: "preview"
+        # The hash read out of the binary that is actually installed:
+        #     unzip -p app-preview.apk assets/fingerprint
+        # Set this when the installed APK came from `eas build --local`, which is
+        # never registered on EAS and so cannot be compared against. Leaving it
+        # empty is normal; it does NOT disable the check, it only changes which
+        # reference the check uses. (It replaces the old
+        # OTA_ALLOW_RUNTIME_MISMATCH, which switched the guard off entirely.)
+        OTA_EXPECTED_FINGERPRINT: ""
     cache:
       cache_paths:
         - ~/.pnpm-store
@@ -152,6 +176,19 @@ workflows:
           # expects. Never echoed: `set -x` is deliberately not used in this
           # workflow, because it would print the token.
           echo "EXPO_TOKEN=$EAS_ACCESS_TOKEN" >> $CM_ENV
+      - name: Refuse to run as anything but a deliberate preview publish
+        script: |
+          set -euo pipefail
+          # The production workflow has always had this guard; preview did not,
+          # and asymmetric guards are how one of the pair ends up wrong. Preview
+          # reaches only internal test installs, so this is cheap insurance
+          # rather than a load-bearing control.
+          if [ -n "${CM_PULL_REQUEST:-}" ] && [ "${CM_PULL_REQUEST}" != "false" ]; then
+            echo "This is a pull-request build. Preview OTA is manual only."
+            echo "Nothing was published."
+            exit 1
+          fi
+          echo "Manual preview publish, commit $(git rev-parse HEAD)"
       - name: Enable pnpm (matches project's pinned version)
         script: |
           set -euo pipefail
@@ -214,88 +251,39 @@ workflows:
               process.exit(1);
             }
           '
+      - name: Check the target environment carries every required variable
+        script: |
+          set -euo pipefail
+          cd "${CM_BUILD_DIR:-$PWD}"
+          # Asserts the branch/environment pairing and that every
+          # EXPO_PUBLIC_* in tools/ota/required-public-vars.txt resolves to a
+          # non-empty value in that environment. Values are never printed.
+          # This is the only guard that catches a configuration gap: environment
+          # variables are not fingerprint inputs, so a bundle missing one passes
+          # every other check here and breaks the feature for every user.
+          bash tools/ota/check-env-vars.sh "$EAS_UPDATE_BRANCH" "$EAS_UPDATE_ENVIRONMENT"
       - name: Verify the runtime matches an installed build
         script: |
           set -euo pipefail
-          cd artifacts/ejazz-media-app
-
-          # With runtimeVersion.policy = "fingerprint", an update is only offered
-          # to a binary whose native fingerprint matches. Publishing a bundle
-          # whose fingerprint differs from what is installed is not dangerous --
-          # the app simply never takes it -- but it IS silent, and a silent
-          # no-op is the worst outcome for a workflow whose whole purpose is to
-          # ship a fix. So this compares them and says so.
-          #
-          # A real limitation, stated rather than hidden: Codemagic builds with
-          # `eas build --local`, and local builds are NOT registered on EAS. So
-          # the newest build EAS knows about may be older than what is actually
-          # installed. This check is therefore a guard, not a guarantee -- read
-          # its output rather than only its exit code.
-          CURRENT=$(eas fingerprint:generate \
-                      --platform android \
-                      --environment "$EAS_UPDATE_ENVIRONMENT" \
-                      --json --non-interactive | node -e '
-            // eas-cli prints an "Environment variables ... loaded" banner on
-            // STDOUT even with --json, so JSON.parse on the whole stream throws
-            // and the hash comes back empty. Verified 2026-11-12. Skip to the
-            // first brace rather than trusting the stream to start with one.
-            let s=""; process.stdin.on("data",d=>s+=d).on("end",()=>{
-              try {
-                const i = s.indexOf("{");
-                console.log(i < 0 ? "" : (JSON.parse(s.slice(i)).hash || ""));
-              } catch (e) { console.log(""); }
-            });')
-
-          LATEST=$(eas build:list --platform android --limit 1 \
-                      --non-interactive --json | node -e '
-            // Same banner problem, and this payload is an ARRAY.
-            let s=""; process.stdin.on("data",d=>s+=d).on("end",()=>{
-              try {
-                const i = s.indexOf("[");
-                const rows = i < 0 ? [] : JSON.parse(s.slice(i));
-                const b = (rows || [])[0] || {};
-                console.log(((b.fingerprint||{}).hash)||"");
-              } catch (e) { console.log(""); }
-            });')
-
-          echo "current project fingerprint : ${CURRENT:-(could not compute)}"
-          echo "newest registered build     : ${LATEST:-(none recorded on EAS)}"
-
-          if [ -z "$CURRENT" ]; then
-            echo "Could not compute this project's fingerprint. Refusing to publish."
-            exit 1
-          fi
-          if [ "$CURRENT" = "$LATEST" ]; then
-            echo "Runtime matches the newest registered build."
-          elif [ "${OTA_ALLOW_RUNTIME_MISMATCH:-false}" = "true" ]; then
-            echo "Fingerprints differ, and OTA_ALLOW_RUNTIME_MISMATCH is true."
-            echo "Publishing anyway, on the operator's word that the installed"
-            echo "binary matches this commit."
-          else
-            echo "The fingerprints differ (or EAS has no build to compare with)."
-            echo "Installed apps would ignore this update. Either run"
-            echo "ejazz-android-release so a matching binary exists, or set"
-            echo "OTA_ALLOW_RUNTIME_MISMATCH=true if you have verified the"
-            echo "installed build by hand. Nothing was published."
-            exit 1
-          fi
-      - name: Publish the update to the preview branch
+          cd "${CM_BUILD_DIR:-$PWD}"
+          # Compares this commit's native fingerprint against the newest build
+          # registered on the TARGET CHANNEL, or against OTA_EXPECTED_FINGERPRINT
+          # when the installed binary was built locally. Exports
+          # CURRENT_FINGERPRINT for the publish step to assert on.
+          bash tools/ota/check-fingerprint.sh "$EAS_UPDATE_BRANCH" "$EAS_UPDATE_ENVIRONMENT"
+      - name: Publish the update and verify it landed
         script: |
           set -euo pipefail
-          cd artifacts/ejazz-media-app
+          cd "${CM_BUILD_DIR:-$PWD}"
           MSG="${EAS_UPDATE_MESSAGE:-preview $(git rev-parse --short HEAD): $(git log -1 --pretty=%s)}"
-          echo "Message: $MSG"
-          eas update \
-            --branch "$EAS_UPDATE_BRANCH" \
-            --platform android \
-            --environment "$EAS_UPDATE_ENVIRONMENT" \
-            --message "$MSG" \
-            --non-interactive
-      - name: Show what is now at the head of the branch
-        script: |
-          set -euo pipefail
-          cd artifacts/ejazz-media-app
-          eas update:list --branch "$EAS_UPDATE_BRANCH" --limit 3 --non-interactive
+          # Publishes, then reports the group ID, update ID, runtime version,
+          # platform, branch and commit, and confirms from the server that the
+          # group it named is at the head of the branch. The old version printed
+          # `update:list` and left the reading to the operator, which is how the
+          # same test update came to be published twice on 2026-11-12 without
+          # anyone noticing.
+          bash tools/ota/verify-publication.sh \
+            "$EAS_UPDATE_BRANCH" "$EAS_UPDATE_ENVIRONMENT" "$MSG"
     publishing:
       email:
         recipients:
@@ -306,7 +294,9 @@ workflows:
     max_build_duration: 30
     # No `triggering:` block, as above: this cannot start from a git push. It is
     # the workflow that reaches real listeners, so starting it is always a
-    # deliberate act by a person.
+    # deliberate act by a person -- and tools/ota/confirm-production.sh requires
+    # that person to type this commit's short SHA, which an automatic run has no
+    # way to produce.
     environment:
       node: 20
       groups:
@@ -314,7 +304,18 @@ workflows:
       vars:
         EAS_UPDATE_BRANCH: "production"
         EAS_UPDATE_ENVIRONMENT: "production"
-        OTA_ALLOW_RUNTIME_MISMATCH: "false"
+        # Must be set, at start time, to the short SHA of the commit being
+        # published (`git rev-parse --short HEAD`). Deliberately left EMPTY in
+        # version control: a confirmation stored here would authorise every
+        # future run, which is the opposite of a confirmation. See
+        # tools/ota/confirm-production.sh for why a SHA and not a fixed word.
+        OTA_CONFIRM_PRODUCTION: ""
+        # See the preview workflow for what this does. Production binaries are
+        # built with `eas build --local` and are therefore NOT registered on
+        # EAS, so a production publish will usually need this set, read from the
+        # artifact that actually went to the Play Store:
+        #     unzip -p app-release.aab assets/fingerprint   (or the .apk)
+        OTA_EXPECTED_FINGERPRINT: ""
         # This workflow publishes the bundle built from THIS commit. It does not
         # promote, copy or re-point whatever is currently on the preview branch:
         # "the thing we tested" and "the thing we ship" are the same commit, or
@@ -333,22 +334,17 @@ workflows:
             exit 1
           fi
           echo "EXPO_TOKEN=$EAS_ACCESS_TOKEN" >> $CM_ENV
-      - name: Refuse to run as anything but a deliberate production publish
+      - name: Authorise this production publish
         script: |
           set -euo pipefail
-          # Belt and braces. The absent `triggering:` block already prevents a
-          # push from starting this, but if one is ever added by accident this
-          # stops the first automatic run rather than the second.
-          if [ -n "${CM_PULL_REQUEST:-}" ] && [ "${CM_PULL_REQUEST}" != "false" ]; then
-            echo "This is a pull-request build. Production OTA is manual only."
-            exit 1
-          fi
-          if [ "${OTA_PROMOTE_FROM_PREVIEW}" != "never" ]; then
-            echo "This workflow does not promote the preview branch. Publish the"
-            echo "commit you tested, from this workflow, instead."
-            exit 1
-          fi
-          echo "Manual production publish, commit $(git rev-parse HEAD)"
+          cd "${CM_BUILD_DIR:-$PWD}"
+          # Deliberately the SECOND step, before pnpm, the dependency install and
+          # eas-cli: an unauthorised run should fail in seconds and touch
+          # nothing, not after four minutes of setup.
+          #
+          # Refuses a pull-request build, refuses to promote the preview branch,
+          # and requires OTA_CONFIRM_PRODUCTION to equal this commit's short SHA.
+          bash tools/ota/confirm-production.sh
       - name: Enable pnpm (matches project's pinned version)
         script: |
           set -euo pipefail
@@ -398,73 +394,32 @@ workflows:
               process.exit(1);
             }
           '
+      - name: Check the target environment carries every required variable
+        script: |
+          set -euo pipefail
+          cd "${CM_BUILD_DIR:-$PWD}"
+          bash tools/ota/check-env-vars.sh "$EAS_UPDATE_BRANCH" "$EAS_UPDATE_ENVIRONMENT"
       - name: Verify the runtime matches an installed build
         script: |
           set -euo pipefail
-          cd artifacts/ejazz-media-app
-          CURRENT=$(eas fingerprint:generate \
-                      --platform android \
-                      --environment "$EAS_UPDATE_ENVIRONMENT" \
-                      --json --non-interactive | node -e '
-            // eas-cli prints an "Environment variables ... loaded" banner on
-            // STDOUT even with --json, so JSON.parse on the whole stream throws
-            // and the hash comes back empty. Verified 2026-11-12. Skip to the
-            // first brace rather than trusting the stream to start with one.
-            let s=""; process.stdin.on("data",d=>s+=d).on("end",()=>{
-              try {
-                const i = s.indexOf("{");
-                console.log(i < 0 ? "" : (JSON.parse(s.slice(i)).hash || ""));
-              } catch (e) { console.log(""); }
-            });')
-          LATEST=$(eas build:list --platform android --limit 1 \
-                      --non-interactive --json | node -e '
-            // Same banner problem, and this payload is an ARRAY.
-            let s=""; process.stdin.on("data",d=>s+=d).on("end",()=>{
-              try {
-                const i = s.indexOf("[");
-                const rows = i < 0 ? [] : JSON.parse(s.slice(i));
-                const b = (rows || [])[0] || {};
-                console.log(((b.fingerprint||{}).hash)||"");
-              } catch (e) { console.log(""); }
-            });')
-          echo "current project fingerprint : ${CURRENT:-(could not compute)}"
-          echo "newest registered build     : ${LATEST:-(none recorded on EAS)}"
-          if [ -z "$CURRENT" ]; then
-            echo "Could not compute this project's fingerprint. Refusing to publish."
-            exit 1
-          fi
-          if [ "$CURRENT" = "$LATEST" ]; then
-            echo "Runtime matches the newest registered build."
-          elif [ "${OTA_ALLOW_RUNTIME_MISMATCH:-false}" = "true" ]; then
-            echo "Fingerprints differ, and OTA_ALLOW_RUNTIME_MISMATCH is true."
-            echo "Publishing to PRODUCTION anyway, on the operator's word."
-          else
-            echo "The fingerprints differ (or EAS has no build to compare with)."
-            echo "Installed apps would ignore this update. Nothing was published."
-            exit 1
-          fi
-      - name: Publish the update to the production branch
+          cd "${CM_BUILD_DIR:-$PWD}"
+          bash tools/ota/check-fingerprint.sh "$EAS_UPDATE_BRANCH" "$EAS_UPDATE_ENVIRONMENT"
+      - name: Publish the update and verify it landed
         script: |
           set -euo pipefail
-          cd artifacts/ejazz-media-app
+          cd "${CM_BUILD_DIR:-$PWD}"
           if [ -z "${EAS_UPDATE_MESSAGE:-}" ]; then
             echo "EAS_UPDATE_MESSAGE is required for a production publish."
             echo "Say what is changing and why, so update:list reads as a history"
             echo "rather than a list of commit subjects. Nothing was published."
             exit 1
           fi
-          echo "Message: $EAS_UPDATE_MESSAGE"
-          eas update \
-            --branch "$EAS_UPDATE_BRANCH" \
-            --platform android \
-            --environment "$EAS_UPDATE_ENVIRONMENT" \
-            --message "$EAS_UPDATE_MESSAGE" \
-            --non-interactive
-      - name: Show what is now at the head of the branch
+          bash tools/ota/verify-publication.sh \
+            "$EAS_UPDATE_BRANCH" "$EAS_UPDATE_ENVIRONMENT" "$EAS_UPDATE_MESSAGE"
+      - name: Show the channel state after publishing
         script: |
           set -euo pipefail
           cd artifacts/ejazz-media-app
-          eas update:list --branch "$EAS_UPDATE_BRANCH" --limit 5 --non-interactive
           eas channel:view "$EAS_UPDATE_BRANCH" --non-interactive
     publishing:
       email:

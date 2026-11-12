@@ -1,0 +1,24 @@
+# Every EXPO_PUBLIC_* variable the app needs baked into its JS bundle.
+#
+# This file is the single source of truth for tools/ota/check-env-vars.sh, which
+# refuses to publish an OTA update unless every name below resolves to a
+# non-empty value in the target EAS environment.
+#
+# WHY THIS EXISTS: EXPO_PUBLIC_* is inlined at bundle time, and binaries and OTA
+# bundles draw it from two different places -- binaries from codemagic.yaml vars
+# (`eas build --local`), OTA bundles from the server-side EAS environment. Those
+# two sets drifted apart once already: EXPO_PUBLIC_PULSE_API_URL was set in
+# codemagic.yaml but absent from both EAS environments, so the first production
+# OTA would have shipped a bundle with Pulse silently disabled -- no cards on
+# Home, the Control Room reaching nobody, no crash and no error anywhere.
+#
+# The native fingerprint does NOT catch this: environment variables are not
+# fingerprint inputs, so the hashes match perfectly while the configuration is
+# wrong. This file is the only thing standing in that gap.
+#
+# Adding a name here makes it mandatory for every future publish. Do that in the
+# same commit as the code that reads it.
+EXPO_PUBLIC_PULSE_API_URL
+EXPO_PUBLIC_EJAZZ_RADIO_STREAM_URL
+EXPO_PUBLIC_EJAZZ_EXTRA_STREAM_URL
+EXPO_PUBLIC_EJAZZ_NEWS_API_URL
