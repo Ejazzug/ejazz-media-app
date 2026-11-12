@@ -13,7 +13,13 @@ import { useShows, classifyLineup, showStationFor } from '@/lib/shows';
 import { LineupRow, ShowLineupCard } from '@/components/LineupCard';
 import { ShareAppButton } from '@/components/ShareAppButton';
 import { useShareApp } from '@/lib/shareApp';
+// Both of these are rendered further down but COMMENTED OUT until their backend is ready (see the
+// notes beside <FreshEjazzSection /> and <ContinueEjazzSection /> below). The imports stay so that
+// re-enabling a section is uncommenting its one line -- deleting them would leave commented JSX
+// that no longer compiles when someone brings it back.
+// eslint-disable-next-line @typescript-eslint/no-unused-vars -- kept for the commented section below
 import { FreshEjazzSection } from '@/components/FreshEjazzSection';
+// eslint-disable-next-line @typescript-eslint/no-unused-vars -- kept for the commented section below
 import { ContinueEjazzSection } from '@/components/ContinueEjazzSection';
 import { TheTeaSection } from '@/components/TheTeaSection';
 import { FeaturedCard, PromoBanner, SponsorSlot, UpdateBanner } from '@/components/RemoteControls';
@@ -106,7 +112,8 @@ export default function HomeScreen() {
           <PlayButton playing={isPlaying} onPress={togglePlayback} size="small" />
         </View>
 
-        {/* <FreshEjazzSection /> - temporarily hidden until backend is ready; re-enable for a future release */}
+        {/* <FreshEjazzSection /> - temporarily hidden until backend is ready; re-enable for a future
+            release. Its import at the top of this file is kept alive for exactly this line. */}
 
         {features.pulse && funFact ? (
           <>
@@ -128,7 +135,8 @@ export default function HomeScreen() {
           </>
         ) : null}
 
-        {/* <ContinueEjazzSection /> - temporarily hidden until backend is ready; re-enable for a future release */}
+        {/* <ContinueEjazzSection /> - temporarily hidden until backend is ready; re-enable for a
+            future release. Its import at the top of this file is kept alive for exactly this line. */}
 
         {features.schedule && (lineup.now || lineup.next) ? (
           <>
