@@ -105,6 +105,49 @@ APK: `stream.ejazzug.com` is present, `control.ejazzug.com` is absent. Pulse was
 that binary, so the two preview updates — published with `--environment preview` — matched it
 exactly and regressed nothing.
 
+### The bundler cache can serve stale `EXPO_PUBLIC_*` values
+
+**"The environment is correct" and "the bundle is correct" are two different
+claims, and this is how they come apart.** It is the least obvious failure in
+this whole document.
+
+`process.env.EXPO_PUBLIC_*` is inlined by babel at **transform** time, and
+Metro's transform cache is **not keyed on the values of those variables**. A
+bundle can therefore be built from a warm cache carrying configuration that is
+no longer true, while every guard passes: `check-env-vars.sh` proves the EAS
+environment holds the right values, the fingerprint proves the native side
+matches, and **neither says anything about what was actually compiled in**.
+
+Measured on 2026-11-12, minutes after `EXPO_PUBLIC_PULSE_API_URL` was added to
+both EAS environments:
+
+| Export | Bundle | `control.ejazzug.com` |
+|---|---|---|
+| `eas env:exec preview` + `expo export`, warm cache | `entry-e9e00106….hbc`, 5,002,599 B | **absent** |
+| the same with `--clear` | `entry-4e7e86da….hbc`, 5,004,143 B | **present** |
+
+The cache at `/tmp/metro-cache` was serving a bundle built before the variable
+existed. The variable name was never wrong — `lib/pulse.ts`, `lib/shows.ts`,
+`lib/appConfig.tsx`, `lib/hosts.ts` and `lib/notificationFeed.ts` all read
+`process.env.EXPO_PUBLIC_PULSE_API_URL` exactly. Publishing that first bundle
+would have shipped Pulse silently disabled: the precise failure the environment
+check was written to prevent, one layer further down.
+
+**What is done about it:**
+
+- `verify-publication.sh` publishes with **`eas update --clear-cache`**. One full
+  rebuild per publish is the right price for knowing what shipped.
+- `check-publish-readiness.sh` exports with **`--clear`**, and asserts the
+  expected URLs are present **in the compiled bytecode** rather than merely in
+  the environment.
+
+**Where it bites:** Codemagic clones fresh and caches only `~/.pnpm-store`, so
+its bundler cache is cold and the flags change nothing there. The exposure is
+publishing from a machine with a warm cache — this box, for instance — and it
+would return to CI **the moment anyone adds a Metro cache path to `cache_paths`**
+as a build-speed optimisation. If that ever looks tempting, read this section
+first.
+
 ### Preview workflow misconfiguration — fixed 2026-11-12
 
 `ejazz-ota-preview` used to set `EAS_UPDATE_ENVIRONMENT: "production"` while publishing to the
@@ -232,6 +275,29 @@ git event can start it. Nine steps, in this order — the first that fails publi
 
 `OTA_EXPECTED_FINGERPRINT` is the escape hatch for a locally built binary; it replaced
 `OTA_ALLOW_RUNTIME_MISMATCH`, which switched the check off rather than redirecting it.
+
+### Validating without publishing
+
+Workflow **`ejazz-ota-validate`** — "OTA Validate (preview, NO PUBLISH)". It runs
+every check the preview publish runs and then stops.
+
+It is a **separate workflow rather than a `DRY_RUN` flag on
+`ejazz-ota-preview`**, deliberately. A flag would mean the thing you run to
+validate is the thing that publishes, with one variable standing between the
+two: one typo, one value left over from a previous run, one default flipped, and
+it publishes. There is no `eas update` anywhere in this workflow and no variable
+that could turn one on. Absence of capability over configuration — the same
+reasoning as the absent `triggering:` blocks.
+
+Hard-wired to preview, and it **asserts** that rather than defaulting to it,
+because Codemagic lets any variable be overridden at start time.
+
+Nine steps: the preview chain up to and including the fingerprint check, then
+`check-publish-readiness.sh` in place of the publish — token identity, channel
+state, the current head of the branch with the group ID to note for rollback,
+and the one thing no earlier step covers: **that the bundle actually compiles**,
+with its configuration verified in the compiled bytecode. A bundle that fails to
+build is the likeliest way a publish dies after every guard has reported success.
 
 ### What to expect on the device
 
@@ -428,6 +494,14 @@ are the ones the operator fully owns, and they are structural rather than permis
 | 6 | Publish verification — group ID, runtime, platform, commit, and head-of-branch confirmation | `verify-publication.sh` |
 | 7 | Pull-request guard added to the preview workflow, matching production | `codemagic.yaml` |
 
+### Done — 2026-11-12, follow-up commit
+
+| # | Change | Where |
+|---|---|---|
+| 8 | `ejazz-ota-validate` — runs every check and publishes nothing; hard-wired to preview | `codemagic.yaml`, `check-publish-readiness.sh` |
+| 9 | `eas update --clear-cache` on every publish, and `expo export --clear` in the readiness check — §2 | `verify-publication.sh`, `check-publish-readiness.sh` |
+| 10 | Assert the required `EXPO_PUBLIC_*` reach the **compiled bytecode**, not just the environment | `check-publish-readiness.sh` |
+
 ### Remaining
 
 | # | Change | File / system | Why |
@@ -445,6 +519,10 @@ are the ones the operator fully owns, and they are structural rather than permis
 | `preview` | `preview` | Unprotected | operator from this box, or `ejazz-ota-preview` |
 | `production` | `production` | Unprotected — see §9 | operator only, manually, `ejazz-ota-production` |
 | `development` | `development` | Unprotected | dev client only |
+
+Five Codemagic workflows, none declaring `triggering:`: `ejazz-android-release` and
+`ejazz-android-preview` build binaries; `ejazz-ota-preview` and `ejazz-ota-production` publish
+updates; `ejazz-ota-validate` checks without publishing (§6).
 
 Each `eas.json` build profile carries a `channel`, and that is what ties a binary to a channel:
 `preview` and `preview-aab` → `preview`; `production` and `production-apk` → `production`.
@@ -513,6 +591,26 @@ unzip -p app-release.apk assets/fingerprint
 — and the check still runs, against the thing that matters. This is how the `eas build --local`
 blind spot is handled now. Exports `CURRENT_FINGERPRINT` for the publish step to assert on.
 
+### `check-publish-readiness.sh <branch> <environment> [message]`
+
+Everything a publish would otherwise be the first thing to exercise, without
+publishing. Run by `ejazz-ota-validate` after the environment and fingerprint
+checks. Five parts, all read-only:
+
+1. **`eas whoami`** — token identity and role, so a permission problem surfaces
+   here by name rather than as a refusal at the publish.
+2. **`eas channel:view`** — the channel exists and is Active. An update published
+   to a channel that does not exist is a no-op that reports success.
+3. **`eas update:list`** — the current head, which is where the operator reads the
+   last-good group ID that §8 says to write down *before* publishing.
+4. **`expo export --clear` under `eas env:exec`** — the bundle compiles, and the
+   configuration is checked **in the compiled bytecode** via
+   `OTA_ASSERT_BUNDLE_CONTAINS`. `--clear` is not optional; see §2.
+5. **A summary of what a publish would send** — branch, environment, platform,
+   commit, message and runtime — so it can be compared against what was intended.
+
+Writes nothing. The export goes to a temporary directory and is deleted on exit.
+
 ### `confirm-production.sh`
 
 The approval gate. Refuses a pull-request build, refuses unless
@@ -523,7 +621,9 @@ the workflow, before any setup work.
 
 ### `verify-publication.sh <branch> <environment> <message>`
 
-Publishes with `--platform android`, then parses the result and asserts an Android group exists
+Publishes with `--platform android` and **`--clear-cache`** (§2 — without it a warm bundler
+cache can ship stale `EXPO_PUBLIC_*` values past every other guard), then parses the result and
+asserts an Android group exists
 carrying the expected runtime, reports group ID / update ID / runtime / platform / branch /
 commit / message, and confirms from the server that the group it named is at the head of the
 branch. It exists because the previous version printed `eas update:list` and left the reading to

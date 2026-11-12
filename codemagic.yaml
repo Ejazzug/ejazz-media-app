@@ -425,3 +425,140 @@ workflows:
       email:
         recipients:
           - madvibes.ug@gmail.com
+
+  # ---------------------------------------------------------------------------
+  # Validation only. This workflow runs every check the preview publish runs and
+  # then STOPS. There is no `eas update` anywhere in it, and no variable that
+  # could turn one on.
+  #
+  # That is deliberate, and it is why this is a separate workflow rather than a
+  # DRY_RUN flag on ejazz-ota-preview. A flag would mean the thing you run to
+  # validate is the thing that publishes, with one variable standing between the
+  # two: one typo, one value left over from a previous run, one default flipped,
+  # and it publishes. A workflow with no publish capability cannot publish.
+  # Absence of capability over configuration -- the same reasoning as the absent
+  # `triggering:` blocks.
+  #
+  # Hard-wired to the preview branch. It asserts that below rather than merely
+  # defaulting to it, because Codemagic lets any variable be overridden at start
+  # time, and a validation workflow that can be pointed at production is not the
+  # thing that was asked for.
+  # ---------------------------------------------------------------------------
+
+  ejazz-ota-validate:
+    name: EJazz Media - OTA Validate (preview, NO PUBLISH)
+    max_build_duration: 30
+    environment:
+      node: 20
+      groups:
+        - ejazz_eas
+      vars:
+        EAS_UPDATE_BRANCH: "preview"
+        EAS_UPDATE_ENVIRONMENT: "preview"
+        # As in the publishing workflows: the hash read out of the binary that
+        # is actually installed, for when it was built with `eas build --local`
+        # and so is not registered on EAS.
+        #     unzip -p app-preview.apk assets/fingerprint
+        OTA_EXPECTED_FINGERPRINT: ""
+    cache:
+      cache_paths:
+        - ~/.pnpm-store
+    scripts:
+      - name: Authenticate (fails before anything else if the token is absent)
+        script: |
+          set -euo pipefail
+          if [ -z "${EAS_ACCESS_TOKEN:-}" ]; then
+            echo "EAS_ACCESS_TOKEN is not set. Add it to the ejazz_eas variable"
+            echo "group in Codemagic, marked Secure."
+            exit 1
+          fi
+          echo "EXPO_TOKEN=$EAS_ACCESS_TOKEN" >> $CM_ENV
+      - name: Refuse to validate anything but preview
+        script: |
+          set -euo pipefail
+          # Hard-wired, not defaulted. Overriding either variable at start time
+          # is refused rather than honoured.
+          if [ "${EAS_UPDATE_BRANCH}" != "preview" ] || [ "${EAS_UPDATE_ENVIRONMENT}" != "preview" ]; then
+            echo "This workflow validates the preview channel only."
+            echo "  EAS_UPDATE_BRANCH      = ${EAS_UPDATE_BRANCH}"
+            echo "  EAS_UPDATE_ENVIRONMENT = ${EAS_UPDATE_ENVIRONMENT}"
+            echo "Both must be 'preview'. Nothing was checked."
+            exit 1
+          fi
+          echo "Validating preview, commit $(git rev-parse HEAD)"
+      - name: Enable pnpm (matches project's pinned version)
+        script: |
+          set -euo pipefail
+          corepack enable
+          corepack prepare pnpm@10.26.1 --activate
+      - name: Install workspace dependencies
+        script: |
+          set -euo pipefail
+          pnpm install --frozen-lockfile
+      - name: Install eas-cli
+        script: |
+          set -euo pipefail
+          npm install -g eas-cli@27.7.2
+          eas --version
+      - name: Check the working tree and the OTA configuration
+        script: |
+          set -euo pipefail
+          cd artifacts/ejazz-media-app
+          if [ -n "$(git status --porcelain)" ]; then
+            echo "The working tree is not clean. A publish from here would not"
+            echo "match any commit:"
+            git status --porcelain
+            exit 1
+          fi
+          echo "Validating from commit: $(git rev-parse HEAD)"
+          node -e '
+            const c = require("./app.config.base.json");
+            const e = c.expo || c;
+            const eas = require("./eas.json");
+            const fail = (m) => { console.error("CONFIG: " + m); process.exit(1); };
+            if (!e.updates || !e.updates.url) fail("expo.updates.url is not set");
+            if (!e.updates.enabled) fail("expo.updates.enabled is not true");
+            if (!e.runtimeVersion || e.runtimeVersion.policy !== "fingerprint")
+              fail("runtimeVersion.policy must be \"fingerprint\"");
+            if (!((e.extra||{}).eas||{}).projectId) fail("extra.eas.projectId is not set");
+            const want = process.env.EAS_UPDATE_BRANCH;
+            const chans = Object.values(eas.build || {}).map(p => p.channel);
+            if (!chans.includes(want))
+              fail("no build profile in eas.json uses the channel \"" + want + "\", so no installed app would receive an update published to it");
+            console.log("Config OK: url=" + e.updates.url + " policy=fingerprint channel=" + want);
+          '
+          node -e '
+            const v = require("expo-updates/package.json").version;
+            console.log("expo-updates " + v);
+            if (!v.startsWith("57.")) {
+              console.error("expo-updates " + v + " is not on the SDK 57 line.");
+              process.exit(1);
+            }
+          '
+      - name: Check the target environment carries every required variable
+        script: |
+          set -euo pipefail
+          cd "${CM_BUILD_DIR:-$PWD}"
+          bash tools/ota/check-env-vars.sh "$EAS_UPDATE_BRANCH" "$EAS_UPDATE_ENVIRONMENT"
+      - name: Verify the runtime matches an installed build
+        script: |
+          set -euo pipefail
+          cd "${CM_BUILD_DIR:-$PWD}"
+          bash tools/ota/check-fingerprint.sh "$EAS_UPDATE_BRANCH" "$EAS_UPDATE_ENVIRONMENT"
+      - name: Publication readiness (reads only, publishes nothing)
+        script: |
+          set -euo pipefail
+          cd "${CM_BUILD_DIR:-$PWD}"
+          MSG="${EAS_UPDATE_MESSAGE:-preview $(git rev-parse --short HEAD): $(git log -1 --pretty=%s)}"
+          # Token identity, channel state, current head of the branch, and -- the
+          # parts no earlier step covers -- that the bundle actually compiles and
+          # that the configuration reached the COMPILED BYTECODE, not merely the
+          # environment. Those are two different claims: see the --clear note in
+          # check-publish-readiness.sh for the cache gap that separates them.
+          OTA_ASSERT_BUNDLE_CONTAINS="control.ejazzug.com stream.ejazzug.com" \
+          bash tools/ota/check-publish-readiness.sh \
+            "$EAS_UPDATE_BRANCH" "$EAS_UPDATE_ENVIRONMENT" "$MSG"
+    publishing:
+      email:
+        recipients:
+          - madvibes.ug@gmail.com

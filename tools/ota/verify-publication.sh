@@ -95,9 +95,32 @@ echo "message: $MESSAGE"
 # --platform android, always. There is no iOS binary of this app, and the iOS
 # fingerprint differs, so an iOS group would match nothing and only clutter the
 # branch history.
+#
+# --clear-cache IS NOT OPTIONAL, and it is the least obvious line in this file.
+# `process.env.EXPO_PUBLIC_*` is inlined by babel at transform time, and Metro's
+# transform cache is NOT keyed on the values of those variables. So a bundle can
+# be built from a warm cache carrying configuration that is no longer true,
+# while every other guard here passes: check-env-vars.sh proves the EAS
+# environment is right, the fingerprint proves the native side is right, and
+# neither says anything about what actually got compiled in.
+#
+# Verified 2026-11-12, minutes after EXPO_PUBLIC_PULSE_API_URL was added to the
+# EAS environments. An export run under `eas env:exec preview` produced a bundle
+# with no control.ejazzug.com in it (5,002,599 bytes, served from
+# /tmp/metro-cache); the same export with the cache cleared produced a different
+# bundle (5,004,143 bytes) that contained it. Publishing the first one would
+# have shipped Pulse silently disabled -- the exact failure the environment
+# check was written to prevent, one layer further down.
+#
+# Codemagic clones fresh and caches only ~/.pnpm-store, so its cache is cold
+# today and this flag changes nothing there. It matters when publishing from a
+# machine with a warm cache, and it would matter in CI the moment someone adds a
+# Metro cache path to cache_paths as a build-speed optimisation. The cost is one
+# full rebuild per publish, which is the right price for knowing what shipped.
 eas update \
   --branch "$BRANCH" \
   --platform android \
+  --clear-cache \
   --environment "$ENVIRONMENT" \
   --message "$MESSAGE" \
   --non-interactive \
