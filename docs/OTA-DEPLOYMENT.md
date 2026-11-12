@@ -105,14 +105,17 @@ APK: `stream.ejazzug.com` is present, `control.ejazzug.com` is absent. Pulse was
 that binary, so the two preview updates — published with `--environment preview` — matched it
 exactly and regressed nothing.
 
-### Preview workflow misconfiguration (pending fix)
+### Preview workflow misconfiguration — fixed 2026-11-12
 
-`codemagic.yaml:134` sets `EAS_UPDATE_ENVIRONMENT: "production"` inside **`ejazz-ota-preview`**.
-That is wrong: the preview build profile declares `environment: "preview"`, and build 21 was
-made that way. It must be `"preview"`, so that preview updates carry the same configuration as
-the preview binaries they land on. Both EAS environments happen to hold the same four variable
-names today, so this is latent rather than actively broken — the day one value diverges,
-Codemagic starts shipping production configuration to test phones. Pending; see §9.
+`ejazz-ota-preview` used to set `EAS_UPDATE_ENVIRONMENT: "production"` while publishing to the
+preview branch. The preview build profile declares `environment: "preview"` and build 21 was
+made that way, so preview updates were being bundled with production configuration. Both EAS
+environments held the same four variable names at the time, which is the only reason nothing
+broke — the day one value diverged, Codemagic would have started shipping production
+configuration to test phones.
+
+It is now `"preview"`, and `tools/ota/check-env-vars.sh` asserts the branch/environment pairing
+on every run of both workflows, so the two cannot drift apart silently again. See §12.
 
 ## 3. What ships OTA and what needs a new build
 
@@ -168,7 +171,8 @@ Facts worth knowing:
   autolinking config. Nothing under `app/` or `components/` is in it.
 - `eas build --local` builds are **not registered on EAS**, so the newest build EAS knows about
   can be older than what is installed. Build 21 was a cloud build and *is* registered, which is
-  why its guard worked. Check (3) against the actual artifact when in doubt.
+  why its guard passed. For a locally built binary, read check (3) off the artifact and pass it
+  as `OTA_EXPECTED_FINGERPRINT` — §12.
 
 ## 5. The release flow
 
@@ -211,9 +215,23 @@ eas update --branch preview --platform android \
 ### From Codemagic
 
 Workflow `ejazz-ota-preview`, started by hand from the UI. It declares no `triggering:`, so no
-git event can start it. It refuses to publish on a dirty tree, on broken OTA config, or on a
-fingerprint mismatch against the newest EAS-registered build. `OTA_ALLOW_RUNTIME_MISMATCH=true`
-is the deliberate override for the local-build blind spot described in §4.
+git event can start it. Nine steps, in this order — the first that fails publishes nothing:
+
+1. **Authenticate** — refuses immediately if `EAS_ACCESS_TOKEN` is absent, and maps it to
+   `EXPO_TOKEN`, the name eas-cli reads. `set -x` is deliberately absent so the token never
+   reaches a log.
+2. **Refuse a pull-request build** — belt and braces behind the absent `triggering:`.
+3–5. **pnpm 10.26.1, `pnpm install --frozen-lockfile`, `eas-cli@27.7.2`** (pinned).
+6. **Working tree and OTA config** — clean tree, `updates.url`, `updates.enabled`,
+   `runtimeVersion.policy == "fingerprint"`, `extra.eas.projectId`, a build profile that uses
+   the target channel, and `expo-updates` on the 57 line.
+7. **`tools/ota/check-env-vars.sh`** — branch/environment pairing plus every required
+   `EXPO_PUBLIC_*`. §12.
+8. **`tools/ota/check-fingerprint.sh`** — §12.
+9. **`tools/ota/verify-publication.sh`** — publishes, then proves it landed. §12.
+
+`OTA_EXPECTED_FINGERPRINT` is the escape hatch for a locally built binary; it replaced
+`OTA_ALLOW_RUNTIME_MISMATCH`, which switched the check off rather than redirecting it.
 
 ### What to expect on the device
 
@@ -236,14 +254,35 @@ eas update --branch production --platform android --environment production \
   --rollout-percentage 10 --message "<what changed>" --non-interactive
 ```
 
-Codemagic equivalent: `ejazz-ota-production`, started by hand only. It additionally refuses to
-run on a pull-request build and does not promote the preview branch: "the thing we tested" and
-"the thing we ship" are the same commit or they are not the same thing at all.
+### From Codemagic — and the approval gate
 
-**Staged rollout is the single biggest risk reducer available** and it needs no permissions
-beyond Developer. Publish at 10%, watch `eas channel:insights` and `eas update:insights` for
-crash rate and adoption, then widen with `eas channel:rollout production --action edit --percent
-<n>`, or abandon with §8.
+Workflow `ejazz-ota-production`, started by hand only. Ten steps: the same chain as preview,
+plus **`tools/ota/confirm-production.sh` as the second step**, before pnpm and eas-cli, so an
+unauthorised run fails in seconds having touched nothing. It also ends with
+`eas channel:view production`.
+
+To publish, set **both** of these when starting the workflow:
+
+| Variable | Value |
+|---|---|
+| `OTA_CONFIRM_PRODUCTION` | the short SHA of the commit being published (`git rev-parse --short HEAD`) |
+| `EAS_UPDATE_MESSAGE` | what is changing and why — required, no default |
+
+`OTA_CONFIRM_PRODUCTION` is committed **empty**. A value stored in version control would
+authorise every future run, which is the opposite of a confirmation. Expect
+`OTA_EXPECTED_FINGERPRINT` to be needed too: production binaries are built with
+`eas build --local` and are therefore never registered on EAS, so read it off the artifact that
+went to the Play Store.
+
+The workflow does not promote the preview branch (`OTA_PROMOTE_FROM_PREVIEW: "never"`): "the
+thing we tested" and "the thing we ship" are the same commit or they are not the same thing at
+all.
+
+**Staged rollout is the single biggest risk reducer available.** Publish at 10%, watch
+`eas channel:insights` and `eas update:insights` for crash rate and adoption, then widen with
+`eas channel:rollout production --action edit --percent <n>`, or abandon with §8. Developer is
+enough **while the channel is unprotected**; once it is protected, starting and ending a rollout
+needs Release Manager like everything else in §9.
 
 ### Keep the robot at Developer
 
@@ -362,28 +401,42 @@ account **removes protection from all channels**.
 Production is unprotected, so the Developer token *can* publish to it. The controls that exist
 are the ones the operator fully owns, and they are structural rather than permission-based:
 
-- `ejazz-ota-production` declares no `triggering:`, so no push, tag, PR or schedule can start it;
-- it refuses pull-request builds, dirty working trees, broken OTA config and fingerprint mismatches;
+- `ejazz-ota-production` declares no `triggering:`, so no push, tag, PR or schedule can start it
+  — verified by `grep -n "^\s*triggering:" codemagic.yaml` returning nothing for the whole file;
+- **`OTA_CONFIRM_PRODUCTION` must equal the short SHA of the commit being published.** This is
+  the control that makes "never automatic" structural rather than a convention: an automatic run
+  has no way to produce that value, so it fails at the second step. A stale value from the last
+  release fails too, because the SHA moved;
+- it refuses pull-request builds, dirty working trees, broken OTA config, a missing required
+  `EXPO_PUBLIC_*`, and a fingerprint that matches no binary on the target channel;
 - `OTA_PROMOTE_FROM_PREVIEW: "never"`;
 - one human has Codemagic access;
-- and, for now, §1 — there is no production binary an update could reach.
+- and, for now, §1 — there is no production binary an update could reach. **This last one is an
+  accident of history, not a control**, and it expires the day the store build in §10 ships.
 
-A proposed addition is a typed-confirmation variable so a mis-click cannot publish: a workflow
-that aborts unless `OTA_CONFIRM_PRODUCTION` is set to an exact expected string at start time.
-Pending; it is a `codemagic.yaml` change and is not yet applied.
+## 10. Status of the Phase 1 work
 
-## 10. Pending changes — identified, deliberately NOT applied
+### Done — 2026-11-12, commit `7e5ddbb`
 
-Documented here so they are not lost. None of these has been made.
+| # | Change | Where |
+|---|---|---|
+| 1 | `EXPO_PUBLIC_PULSE_API_URL` added to the EAS `production` **and** `preview` environments | expo.dev, by the operator |
+| 2 | `EAS_UPDATE_ENVIRONMENT` corrected to `"preview"` in `ejazz-ota-preview`, plus an assertion that branch and environment always agree | `codemagic.yaml`, `check-env-vars.sh` |
+| 3 | Non-empty assertion for every required `EXPO_PUBLIC_*` before publishing | `check-env-vars.sh` |
+| 4 | `OTA_CONFIRM_PRODUCTION` approval gate, keyed to the commit SHA | `confirm-production.sh` |
+| 5 | Fingerprint check scoped to the target channel; `OTA_ALLOW_RUNTIME_MISMATCH` replaced by `OTA_EXPECTED_FINGERPRINT` | `check-fingerprint.sh` |
+| 6 | Publish verification — group ID, runtime, platform, commit, and head-of-branch confirmation | `verify-publication.sh` |
+| 7 | Pull-request guard added to the preview workflow, matching production | `codemagic.yaml` |
+
+### Remaining
 
 | # | Change | File / system | Why |
 |---|---|---|---|
-| 1 | Add `EXPO_PUBLIC_PULSE_API_URL` to the EAS `production` **and** `preview` environments | expo.dev | §2 — otherwise the first production OTA silently kills Pulse |
-| 2 | Reconcile the other `EXPO_PUBLIC_*` values between `codemagic.yaml` and the EAS environments; drop the stale `c32.radioboss.fm:8320` entry from the `ejazz_eas` group | expo.dev + Codemagic | §2 |
-| 3 | `EAS_UPDATE_ENVIRONMENT: "production"` → `"preview"` in `ejazz-ota-preview` | `codemagic.yaml:134` | §2 |
-| 4 | Add a non-empty assertion for every `EXPO_PUBLIC_*` before publishing | `codemagic.yaml` both OTA workflows | §2 — a missing public URL should break the workflow, not the app |
-| 5 | Add the `OTA_CONFIRM_PRODUCTION` typed-confirmation gate | `codemagic.yaml` | §9 |
-| 6 | Ship an OTA-capable production store build from `HEAD` or later | Codemagic + Play Store | §1 — production OTA has no reach until this exists |
+| A | **Ship an OTA-capable production store build** from `HEAD` or later | Codemagic + Play Store | §1 — production OTA has no reach until this exists. The single highest-value item here |
+| B | Reconcile the remaining `EXPO_PUBLIC_*` values between `codemagic.yaml` and the EAS environments; drop the stale `c32.radioboss.fm:8320` entry from the `ejazz_eas` group | expo.dev + Codemagic | §2 — names now agree, values are still maintained in two places |
+| C | Declare `"environment": "production"` on the `production` and `production-apk` build profiles | `eas.json` | §2 — **must ride in the same commit as item A**, because `eas.json` is a fingerprint input and changing it alone de-synchronises OTA from every installed binary |
+| D | Push `shareables-designer`, then bring `codemagic-release` forward | git | None of the guards exist in CI until Codemagic clones them |
+| E | Release Manager grant, then channel protection | Expo Admin/Owner | §9 — in that order |
 
 ## 11. Tooling and topology
 
@@ -411,3 +464,78 @@ server-side existence, so a publish had nowhere to land.
 - Codemagic clones from `github.com/Ejazzug/ejazz-media-app`. Work sits on `shareables-designer`;
   the build branch is `codemagic-release`. `main` is a separate protected root and is left alone.
   Check `git ls-remote --heads origin` against local HEAD before a build.
+
+## 12. The guard scripts in `tools/ota/`
+
+Five files, shared by both OTA workflows. They live at the **repo root, outside
+`artifacts/ejazz-media-app/`**, and that location is load-bearing rather than tidy: `eas.json`
+and the app's `package.json` `scripts` object are both **native fingerprint inputs**, so release
+tooling placed in either would change the runtime version of every bundle built afterwards and
+silently de-synchronise OTA from every installed app. `codemagic.yaml` and `tools/ota/` are
+outside the fingerprint entirely — confirmed by regenerating it after this work landed:
+still `18e635e1aaef1d554b355307de0f106f091d0201`.
+
+Each is invoked as `bash tools/ota/<script>` from the repo root, so the executable bit is not
+load-bearing either.
+
+### `required-public-vars.txt`
+
+The manifest of every `EXPO_PUBLIC_*` the app needs baked into its bundle. Comments and blank
+lines are ignored. Adding a name here makes it mandatory for every future publish — do that in
+the same commit as the code that reads it.
+
+### `check-env-vars.sh <branch> <environment>`
+
+Two assertions. First, that branch and environment agree (`preview:preview`,
+`production:production`, `development:development`); anything else is refused, because an update
+whose configuration comes from a different environment than the installed binaries' would
+silently reconfigure the app. Second, that every name in the manifest resolves to a non-empty
+value, checked with `eas env:exec` so it tests what the bundler will actually see rather than a
+listing of what someone believes is configured. **Values are never printed — only the name and
+the length.** This is the only guard that catches a configuration gap, because environment
+variables are not fingerprint inputs.
+
+### `check-fingerprint.sh <branch> <environment>`
+
+Computes this commit's Android fingerprint and compares it against the newest **FINISHED** build
+that lands on the target channel. The channel-to-profile mapping is read from `eas.json`, where
+it is actually defined, because `eas build:list --channel` returns nothing for this project —
+EAS has no channel recorded against these builds — and `--build-profile "$BRANCH"` would miss a
+binary built with `preview-aab` or `production-apk`.
+
+`OTA_EXPECTED_FINGERPRINT` is a **better reference, not an off switch**: pass the hash read from
+the binary that is genuinely installed —
+
+```bash
+unzip -p app-release.apk assets/fingerprint
+```
+
+— and the check still runs, against the thing that matters. This is how the `eas build --local`
+blind spot is handled now. Exports `CURRENT_FINGERPRINT` for the publish step to assert on.
+
+### `confirm-production.sh`
+
+The approval gate. Refuses a pull-request build, refuses unless
+`OTA_PROMOTE_FROM_PREVIEW=never`, and requires `OTA_CONFIRM_PRODUCTION` to equal the short SHA
+of `HEAD`. A SHA rather than a fixed word because an automatic run cannot produce one, a stale
+one fails, and typing it forces the operator to look at which commit is shipping. Runs second in
+the workflow, before any setup work.
+
+### `verify-publication.sh <branch> <environment> <message>`
+
+Publishes with `--platform android`, then parses the result and asserts an Android group exists
+carrying the expected runtime, reports group ID / update ID / runtime / platform / branch /
+commit / message, and confirms from the server that the group it named is at the head of the
+branch. It exists because the previous version printed `eas update:list` and left the reading to
+a human — which is how the same test update came to be published twice on 2026-11-12, sixteen
+minutes apart, with both runs reporting success.
+
+`--parse-only <file.json>` runs the assertions against a saved publish result and **publishes
+nothing**, which is how they were tested without sending anything to a phone.
+
+### A note on eas-cli output
+
+Every parser here skips to the first `{` or `[` before calling `JSON.parse`. eas-cli prints an
+`Environment variables ... loaded` banner on **stdout** even with `--json`, so parsing the whole
+stream throws and the value comes back empty. Verified 2026-11-12. Reuse the helpers rather than
+re-learning this.
