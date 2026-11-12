@@ -151,14 +151,24 @@ workflows:
         # diverged; tools/ota/check-env-vars.sh now asserts the pairing so the
         # two cannot drift apart again.
         EAS_UPDATE_ENVIRONMENT: "preview"
-        # The hash read out of the binary that is actually installed:
-        #     unzip -p app-preview.apk assets/fingerprint
-        # Set this when the installed APK came from `eas build --local`, which is
+        #
+        # OTA_EXPECTED_FINGERPRINT is NOT declared here, and cannot be: the
+        # codemagic.yaml schema requires every value in `vars` to be a nonempty
+        # string, an integer, a float or a boolean, so `OTA_EXPECTED_FINGERPRINT: ""`
+        # is rejected -- one empty value reports as four errors, one per branch of
+        # the schema's anyOf. A placeholder is not an option either: any nonempty
+        # value would be compared against this commit's real fingerprint and fail
+        # every publish. So it is supplied at START TIME, when it is needed:
+        #
+        #     OTA_EXPECTED_FINGERPRINT=$(unzip -p app-preview.apk assets/fingerprint)
+        #
+        # Set it when the installed APK came from `eas build --local`, which is
         # never registered on EAS and so cannot be compared against. Leaving it
-        # empty is normal; it does NOT disable the check, it only changes which
-        # reference the check uses. (It replaces the old
-        # OTA_ALLOW_RUNTIME_MISMATCH, which switched the guard off entirely.)
-        OTA_EXPECTED_FINGERPRINT: ""
+        # unset is normal; check-fingerprint.sh reads it as "${VAR:-}" and then
+        # compares against the newest registered build for the channel instead.
+        # Unset does NOT disable the check -- it only changes which reference the
+        # check uses. (It replaces the old OTA_ALLOW_RUNTIME_MISMATCH, which
+        # switched the guard off entirely.)
     cache:
       cache_paths:
         - ~/.pnpm-store
@@ -304,18 +314,25 @@ workflows:
       vars:
         EAS_UPDATE_BRANCH: "production"
         EAS_UPDATE_ENVIRONMENT: "production"
-        # Must be set, at start time, to the short SHA of the commit being
-        # published (`git rev-parse --short HEAD`). Deliberately left EMPTY in
-        # version control: a confirmation stored here would authorise every
-        # future run, which is the opposite of a confirmation. See
-        # tools/ota/confirm-production.sh for why a SHA and not a fixed word.
-        OTA_CONFIRM_PRODUCTION: ""
-        # See the preview workflow for what this does. Production binaries are
-        # built with `eas build --local` and are therefore NOT registered on
-        # EAS, so a production publish will usually need this set, read from the
-        # artifact that actually went to the Play Store:
-        #     unzip -p app-release.aab assets/fingerprint   (or the .apk)
-        OTA_EXPECTED_FINGERPRINT: ""
+        #
+        # OTA_CONFIRM_PRODUCTION is NOT declared here. It must be set at START
+        # TIME to the short SHA of the commit being published
+        # (`git rev-parse --short HEAD`), and it is absent from version control
+        # on purpose: a confirmation stored in this file would authorise every
+        # future run, which is the opposite of a confirmation. It cannot be
+        # declared as "" either -- the schema requires nonempty values in `vars`.
+        # Its absence is therefore both required by the schema AND the behaviour
+        # we want: confirm-production.sh reads it as "${VAR:-}" and REFUSES when
+        # it is unset, printing the SHA to use. See that file for why a SHA
+        # rather than a fixed word.
+        #
+        # OTA_EXPECTED_FINGERPRINT is likewise supplied at start time. Production
+        # binaries are built with `eas build --local` and so are NOT registered
+        # on EAS, which means a production publish will usually need it, read
+        # from the artifact that actually went to the Play Store:
+        #
+        #     OTA_EXPECTED_FINGERPRINT=$(unzip -p app-release.aab assets/fingerprint)
+        #
         # This workflow publishes the bundle built from THIS commit. It does not
         # promote, copy or re-point whatever is currently on the preview branch:
         # "the thing we tested" and "the thing we ship" are the same commit, or
@@ -455,11 +472,15 @@ workflows:
       vars:
         EAS_UPDATE_BRANCH: "preview"
         EAS_UPDATE_ENVIRONMENT: "preview"
-        # As in the publishing workflows: the hash read out of the binary that
-        # is actually installed, for when it was built with `eas build --local`
-        # and so is not registered on EAS.
-        #     unzip -p app-preview.apk assets/fingerprint
-        OTA_EXPECTED_FINGERPRINT: ""
+        #
+        # OTA_EXPECTED_FINGERPRINT is supplied at start time, as in the
+        # publishing workflows -- it cannot be declared empty here, because the
+        # schema requires nonempty values in `vars`:
+        #
+        #     OTA_EXPECTED_FINGERPRINT=$(unzip -p app-preview.apk assets/fingerprint)
+        #
+        # Needed only when the installed APK came from `eas build --local` and so
+        # is not registered on EAS. Unset is normal.
     cache:
       cache_paths:
         - ~/.pnpm-store
