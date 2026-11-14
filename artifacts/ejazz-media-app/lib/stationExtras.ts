@@ -106,6 +106,35 @@ export type StationChart = {
   design?: StationChartDesign | null;
 };
 
+/**
+ * The PICTURE of a countdown's chart on an earlier day, drawn by the dashboard in the same design
+ * as today's -- same background, same colours, same logos, with that day's songs and date.
+ *
+ * Asked of the dashboard directly rather than of this app's own API: the card is the dashboard's
+ * to draw, and routing the request through the API server would only mean two things to keep in
+ * step. Resolves to null (not an error) when that day has no card, and the screen then falls back
+ * to drawing the chart itself.
+ */
+export type PastChartCard = { url: string; caption: string; date: string };
+
+export function usePastChartCard(countdownId: string | undefined, date: string | null) {
+  return useQuery({
+    queryKey: ['ejazz-past-chart-card', countdownId, date],
+    queryFn: async (): Promise<PastChartCard | null> => {
+      const data = (await getJson('/api/countdown-card-day', {
+        countdown: countdownId ?? '',
+        date: date ?? '',
+      })) as { ok?: boolean; url?: string | null; caption?: string; date?: string };
+      if (!data?.ok || typeof data.url !== 'string' || !data.url) return null;
+      return { url: data.url, caption: data.caption ?? '', date: data.date ?? (date ?? '') };
+    },
+    enabled: isPulseConfigured() && Boolean(countdownId) && Boolean(date),
+    // A day that has been drawn never changes, and the URL carries the image's own version.
+    staleTime: 60 * 60 * 1000,
+    retry: 0,
+  });
+}
+
 /** A countdown's chart on an earlier day. Only requested when a date chip is tapped. */
 export function usePastChart(station: 'radio' | 'xtra', countdownId: string | undefined, date: string | null) {
   return useQuery({

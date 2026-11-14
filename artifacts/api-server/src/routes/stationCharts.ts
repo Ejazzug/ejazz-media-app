@@ -40,6 +40,9 @@ router.get("/", async (req, res) => {
       .filter((r) => r.stations.includes(station));
     const countdownItems = [];
     for (const c of countdowns) {
+      // Switched off on the dashboard: the assignment, the snapshots and the card all stay, and
+      // the app simply is not told about this chart until it is switched back on.
+      if (c.showInApp === false) continue;
       const snap = await snapshotOnOrBefore(c.countdownId, today);
       if (!snap) continue; // assigned but never saved yet: nothing true to show
       const first = await firstSavedDay(c.countdownId);
@@ -85,7 +88,7 @@ router.get("/past", async (req, res) => {
   }
   try {
     const [assignment] = await db.select().from(countdownChartStationsTable).where(eq(countdownChartStationsTable.countdownId, countdownId));
-    if (!assignment || !assignment.stations.includes(station)) {
+    if (!assignment || !assignment.stations.includes(station) || assignment.showInApp === false) {
       res.status(404).json({ error: "No such chart." });
       return;
     }

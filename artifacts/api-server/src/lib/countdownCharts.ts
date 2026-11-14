@@ -33,6 +33,8 @@ export type DashboardCountdown = {
   card: CountdownCard | null;
   /** The colours of the chosen card design, for the app to draw the chart in. */
   design: CountdownDesign | null;
+  /** The operator's switch for whether this chart is shown in the app (dashboard: Card Designs). */
+  showInApp?: boolean;
   error?: string;
 };
 
@@ -162,6 +164,15 @@ export async function syncCountdownCharts(): Promise<{ checked: number; saved: n
       }
       // Same pass, same rule: written only when it actually changed, so an unchanged design is not
       // rewritten every 15 minutes.
+      // The app switch, carried in the same pass and written only when it changed. A dashboard
+      // that predates the switch sends nothing, which reads as "shown" -- what it was doing.
+      const showInApp = c.showInApp !== false;
+      if (showInApp !== a.showInApp) {
+        await db
+          .update(countdownChartStationsTable)
+          .set({ showInApp })
+          .where(eq(countdownChartStationsTable.countdownId, a.countdownId));
+      }
       if (!sameDesign(c.design, a.design ?? null)) {
         await db
           .update(countdownChartStationsTable)

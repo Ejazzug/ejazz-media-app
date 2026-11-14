@@ -20,7 +20,7 @@ import {
   useSongRequest,
 } from '@/lib/radio';
 import {
-  usePastChart, useSongFact, useStationCharts,
+  usePastChart, usePastChartCard, useSongFact, useStationCharts,
   type StationChart, type StationChartDesign, type StationChartEntry,
 } from '@/lib/stationExtras';
 import { classifyLineup, useShows } from '@/lib/shows';
@@ -194,6 +194,18 @@ function ChartSection({ chart, station }: { chart: StationChart; station: 'radio
   const share = useShareApp();
   const dates = chart.kind === 'countdown' ? (chart.pastDates ?? []) : [];
   const viewingPast = picked !== null && dates.includes(picked);
+  // The picture of an earlier day, drawn in the SAME design as today's. Only asked for once a day
+  // is actually being looked at, so the usual case costs nothing.
+  const pastCard = usePastChartCard(chart.countdownId, viewingPast ? picked : null);
+  const [cardFailed, setCardFailed] = React.useState(false);
+  // The card for whichever day is on screen. Today's travels with the chart; an earlier day's is
+  // fetched. Null means this countdown has no design yet, and the chart is drawn below instead.
+  const card = viewingPast ? (pastCard.data ?? null) : (chart.card ?? null);
+  const cardLoading = viewingPast && pastCard.isLoading;
+  // A card that will not load must not leave an empty screen: one failure and this falls back to
+  // drawing the chart, which needs nothing from the network.
+  React.useEffect(() => { setCardFailed(false); }, [card?.url]);
+  const showPicture = Boolean(card?.url) && !cardFailed;
   const entries = viewingPast ? (past.data ?? []) : chart.entries;
   const shown = chart.kind === 'countdown' ? entries : entries.slice(0, 10);
   // An earlier day's caption, written the way the dashboard writes the picture's: title and date,
@@ -264,25 +276,36 @@ function ChartSection({ chart, station }: { chart: StationChart; station: 'radio
           </Pressable>
         </Modal>
       ) : null}
-      {viewingPast && past.isLoading ? <ActivityIndicator style={styles.chartStatus} /> : null}
+      {viewingPast && (past.isLoading || cardLoading) ? <ActivityIndicator style={styles.chartStatus} /> : null}
       {viewingPast && past.isError ? <Text style={styles.chartStatusText}>That day's chart isn't available.</Text> : null}
-      {/* ONE board for both days now, drawn as text in the design's colours -- today's used to be
-          the card PNG. The PICTURE is still what Share sends for today, so what people post is
-          unchanged; an earlier day has no picture and never can (one card file per countdown,
-          overwritten in place), so that one shares the rows as words. */}
-      {shown.length > 0 ? (
+      {/* The PICTURE is the chart on this screen: the card the dashboard drew, in the operator's
+          own design, logos and all. An earlier day has its own picture in that same design -- same
+          background, that day's songs -- fetched when the day is chosen. The drawn board below is
+          the fallback for a countdown with no design yet, and for an image that will not load. */}
+      {shown.length > 0 || showPicture ? (
         <View style={styles.chartCardBlock}>
-          <ChartBoard
-            design={chart.design}
-            kicker={viewingPast && picked ? formatChartDay(picked) : (chart.design?.headerText ?? '')}
-            title={chart.title}
-            entries={shown}
-          />
+          {showPicture && card ? (
+            <Image
+              source={{ uri: card.url }}
+              style={styles.chartCardImage}
+              contentFit="contain"
+              transition={180}
+              accessibilityLabel={`${chart.title}${picked ? ` — ${formatChartDay(picked)}` : ''}`}
+              onError={() => setCardFailed(true)}
+            />
+          ) : shown.length > 0 ? (
+            <ChartBoard
+              design={chart.design}
+              kicker={viewingPast && picked ? formatChartDay(picked) : (chart.design?.headerText ?? '')}
+              title={chart.title}
+              entries={shown}
+            />
+          ) : null}
           {share.enabled ? (
             <Pressable
               onPress={() =>
-                !viewingPast && chart.card
-                  ? share.shareCardImage(chart.card.caption || chart.title, chart.card.url)
+                card
+                  ? share.shareCardImage(card.caption || chart.title, card.url)
                   : share.shareCard(pastCaption, '')
               }
               accessibilityRole="button"
@@ -892,6 +915,10 @@ const styles = StyleSheet.create({
   chartDayButton: { padding: 6, borderRadius: 8, borderWidth: 1, borderColor: '#204570' },
   chartBack: { paddingBottom: 10 },
   chartCardBlock: { gap: 12, paddingBottom: 14 },
+  // Full width at 9:16, the shape the dashboard's default design draws. contentFit="contain"
+  // means a square or wide design is letterboxed rather than cropped -- a cropped chart loses
+  // the songs at the bottom, which is the whole point of it.
+  chartCardImage: { width: '100%', aspectRatio: 9 / 16, borderRadius: 14, backgroundColor: '#0B1730' },
   // Full width at 9:16, the shape the dashboard's default design draws: the picture IS the chart
   // on this screen now, so it is shown at the size you can read it rather than as a thumbnail.
   // The chart board: one box for both days. Colours come from the design at render time, so only

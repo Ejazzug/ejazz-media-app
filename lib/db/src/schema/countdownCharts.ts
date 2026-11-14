@@ -1,4 +1,4 @@
-import { pgTable, text, jsonb, timestamp, date, primaryKey } from "drizzle-orm/pg-core";
+import { pgTable, text, jsonb, timestamp, date, primaryKey, boolean } from "drizzle-orm/pg-core";
 
 /**
  * A saved countdown (the dashboard's /countdown picker) that the operator has put on one or
@@ -51,6 +51,16 @@ export const countdownChartStationsTable = pgTable("countdown_chart_stations", {
    * kept. Null means no design is chosen, and the app falls back to its own styling.
    */
   design: jsonb("design").$type<CountdownDesignRow | null>(),
+  /**
+   * Whether this chart appears in the app at all -- the operator's switch on the dashboard's Card
+   * Designs tab, carried here by the same sync. True for every row written before the switch
+   * existed, which is what they were doing.
+   *
+   * Separate from `stations`: an assignment says WHERE a chart belongs, this says whether it is
+   * being shown right now. Turning it off leaves the assignment, the snapshots and the card alone,
+   * so turning it back on shows the same chart rather than starting it over.
+   */
+  showInApp: boolean("show_in_app").notNull().default(true),
 });
 
 /**
