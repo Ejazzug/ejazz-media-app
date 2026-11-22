@@ -12,6 +12,7 @@ import { usePulseContent } from '@/lib/pulse';
 import { useShows, classifyLineup, showStationFor } from '@/lib/shows';
 import { LineupRow, ShowLineupCard } from '@/components/LineupCard';
 import { ShareAppButton } from '@/components/ShareAppButton';
+import { HomeCardRail } from '@/components/HomeCardRail';
 import { useShareApp } from '@/lib/shareApp';
 // Both of these are rendered further down but COMMENTED OUT until their backend is ready (see the
 // notes beside <FreshEjazzSection /> and <ContinueEjazzSection /> below). The imports stay so that
@@ -124,6 +125,11 @@ export default function HomeScreen() {
           </View>
           <PlayButton playing={isPlaying} onPress={togglePlayback} size="small" />
         </View>
+
+        {/* THE CARD RAIL, immediately after Now Playing, which is where the owner asked for it
+            (2026-11-23). It draws nothing at all when there are no cards to show, so Home
+            looks exactly as it did on a quiet day. */}
+        <HomeCardRail items={pulseContent.data ?? []} />
 
         {/* <FreshEjazzSection /> - temporarily hidden until backend is ready; re-enable for a future
             release. Its import at the top of this file is kept alive for exactly this line. */}

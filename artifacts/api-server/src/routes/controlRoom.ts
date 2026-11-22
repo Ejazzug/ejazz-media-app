@@ -1236,6 +1236,12 @@ const CONTROL_SECTIONS = [
     ['sponsor.startAt', 'datetime', 'Show from (optional)'],
     ['sponsor.endAt', 'datetime', 'Hide after (optional)'],
   ] },
+  { title: 'Cards on Home', hint: 'The card rail straight after Now Playing. WHICH cards are in it is not set here: it is the live, approved cards that have not expired, newest first, so withdrawing a card or giving it an expiry on the Approvals page is how you take one off Home. These are the limits of the rail itself.', fields: [
+    ['homeCards.enabled', 'bool', 'Show cards on Home'],
+    ['homeCards.heading', 'text', 'Heading above the rail'],
+    ['homeCards.max', 'text', 'How many cards at once (1\u20136)'],
+    ['homeCards.perCategory', 'text', 'How many may be the same kind of card (1\u20136). 2 lets a Radio song fact and an Xtra one show together; 1 means every card on the rail is a different kind.'],
+  ] },
   { title: 'Contact & general links', hint: 'Shown in the More tab for the whole app (each station has its own social sections below). Leave blank to keep the app defaults. Only https links are accepted.', fields: [
     ['links.contactEmail', 'text', 'Contact email'],
     ['links.instagramUrl', 'text', 'Instagram link'],

@@ -119,6 +119,18 @@ export type AppConfig = {
     startAt: string;
     endAt: string;
   };
+  /**
+   * HOME'S CARD RAIL. Shape only -- which cards are in it comes from the content feed, so
+   * `max` and `perCategory` are the operator's limits and nothing here is a list of cards.
+   * Declared in BOTH this type and DEFAULT_APP_CONFIG below, or `mergeDefaults` drops the
+   * whole section on the floor and the operator's save silently does nothing.
+   */
+  homeCards: {
+    enabled: boolean;
+    max: number;
+    perCategory: number;
+    heading: string;
+  };
   links: {
     contactEmail: string;
     instagramUrl: string;
@@ -165,6 +177,7 @@ export const DEFAULT_APP_CONFIG: AppConfig = {
     dest: '', linkUrl: '', startAt: '', endAt: '', dismissible: true, showUntilTapped: true,
   },
   sponsor: { enabled: false, label: 'SPONSORED', imageUrl: '', linkUrl: '', startAt: '', endAt: '' },
+  homeCards: { enabled: true, max: 3, perCategory: 2, heading: 'Fresh from EJazz' },
   links: {
     contactEmail: '',
     instagramUrl: '',
