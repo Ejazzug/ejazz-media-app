@@ -22,6 +22,17 @@ workflows:
       cache_paths:
         - ~/.pnpm-store
     scripts:
+      - name: Refuse a versionCode Play already has
+        script: |
+          set -euo pipefail
+          # Twenty seconds here instead of a rejected upload after a twenty-minute build.
+          # EAS holds the counter and bumps it on every build -- including these local ones,
+          # because the increment happens while the CLI PREPARES the job, not on EAS's
+          # machines. What EAS cannot see is Play, so the high-water mark is tracked in
+          # tools/ota/play-version-code.txt and compared here. It drifted once, on
+          # 2026-11-22: EAS said 23 while Play had 24.
+          export EXPO_TOKEN="${EAS_ACCESS_TOKEN:-${EXPO_TOKEN:-}}"
+          bash tools/ota/version-status.sh
       - name: Enable pnpm (matches project's pinned version)
         script: |
           corepack enable
@@ -72,6 +83,17 @@ workflows:
       cache_paths:
         - ~/.pnpm-store
     scripts:
+      - name: Refuse a versionCode Play already has
+        script: |
+          set -euo pipefail
+          # Twenty seconds here instead of a rejected upload after a twenty-minute build.
+          # EAS holds the counter and bumps it on every build -- including these local ones,
+          # because the increment happens while the CLI PREPARES the job, not on EAS's
+          # machines. What EAS cannot see is Play, so the high-water mark is tracked in
+          # tools/ota/play-version-code.txt and compared here. It drifted once, on
+          # 2026-11-22: EAS said 23 while Play had 24.
+          export EXPO_TOKEN="${EAS_ACCESS_TOKEN:-${EXPO_TOKEN:-}}"
+          bash tools/ota/version-status.sh
       - name: Enable pnpm (matches project's pinned version)
         script: |
           corepack enable
