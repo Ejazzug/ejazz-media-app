@@ -22,6 +22,15 @@ workflows:
       cache_paths:
         - ~/.pnpm-store
     scripts:
+      - name: Enable pnpm (matches project's pinned version)
+        script: |
+          corepack enable
+          corepack prepare pnpm@10.26.1 --activate
+      - name: Install workspace dependencies
+        script: |
+          pnpm install --frozen-lockfile
+      - name: Install eas-cli
+        script: npm install -g eas-cli
       - name: Refuse a versionCode Play already has
         script: |
           set -euo pipefail
@@ -33,15 +42,6 @@ workflows:
           # 2026-11-22: EAS said 23 while Play had 24.
           export EXPO_TOKEN="${EAS_ACCESS_TOKEN:-${EXPO_TOKEN:-}}"
           bash tools/ota/version-status.sh
-      - name: Enable pnpm (matches project's pinned version)
-        script: |
-          corepack enable
-          corepack prepare pnpm@10.26.1 --activate
-      - name: Install workspace dependencies
-        script: |
-          pnpm install --frozen-lockfile
-      - name: Install eas-cli
-        script: npm install -g eas-cli
       - name: Build signed AAB with eas build --local
         script: |
           cd artifacts/ejazz-media-app
@@ -83,6 +83,15 @@ workflows:
       cache_paths:
         - ~/.pnpm-store
     scripts:
+      - name: Enable pnpm (matches project's pinned version)
+        script: |
+          corepack enable
+          corepack prepare pnpm@10.26.1 --activate
+      - name: Install workspace dependencies
+        script: |
+          pnpm install --frozen-lockfile
+      - name: Install eas-cli
+        script: npm install -g eas-cli
       - name: Refuse a versionCode Play already has
         script: |
           set -euo pipefail
@@ -94,15 +103,6 @@ workflows:
           # 2026-11-22: EAS said 23 while Play had 24.
           export EXPO_TOKEN="${EAS_ACCESS_TOKEN:-${EXPO_TOKEN:-}}"
           bash tools/ota/version-status.sh
-      - name: Enable pnpm (matches project's pinned version)
-        script: |
-          corepack enable
-          corepack prepare pnpm@10.26.1 --activate
-      - name: Install workspace dependencies
-        script: |
-          pnpm install --frozen-lockfile
-      - name: Install eas-cli
-        script: npm install -g eas-cli
       - name: Build preview AAB for manual Play internal testing
         script: |
           cd artifacts/ejazz-media-app
