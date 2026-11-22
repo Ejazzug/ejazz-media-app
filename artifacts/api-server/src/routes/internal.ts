@@ -8,6 +8,7 @@ import { cardTemplate, cardRatioFromUrl } from "../lib/cardTemplates";
 import { createCard } from "../lib/cardCreate";
 import { artistKey, factCounts, rephraseFact, sweepTrack, titleKey, wordings } from "../lib/songFacts";
 import { cleanDestination, describeDestination } from "../lib/destinations";
+import { approvalRequired } from "../lib/contentGate";
 
 const router: IRouter = Router();
 
@@ -524,6 +525,91 @@ router.patch("/song-facts/:id", async (req, res) => {
     res.json({ ok: true, fact: factForDashboard(row) });
   } catch (error) {
     res.status(500).json({ error: error instanceof Error ? error.message : "the fact was not saved" });
+  }
+});
+
+/**
+ * TIPS -- /api/internal/tips  (owner, task #5)
+ *
+ * A tip is a content item of type `tip`: words, no template, no rendered picture. Two things
+ * make it different from a card, and both are deliberate:
+ *
+ *  - IT IS NEVER PUSHED. A card can interrupt someone; a tip waits to be found. The app paces
+ *    the series per listener (lib/tipDrip.ts: one on arrival, one a day after), so a tip
+ *    written today reaches a listener who installed last year at once and a listener who
+ *    installs tomorrow in their own order. Nothing here needs to know who anybody is.
+ *  - IT GOES OUT LIVE AND APPROVED unless the approval gate for tips is on. There is no
+ *    picture to render and no notification to recall, so the draft step a card needs would
+ *    only be a step.
+ *
+ * `start_at` is what the drip orders the series by, so an operator can slot a new tip into
+ * the middle of the series by dating it rather than by renumbering anything.
+ */
+router.get("/tips", async (_req, res) => {
+  try {
+    const rows = await db.select().from(contentItemsTable)
+      .where(eq(contentItemsTable.type, "tip")).orderBy(desc(contentItemsTable.createdAt));
+    res.json({ items: rows.map(forDashboard), counts: { total: rows.length } });
+  } catch (error) {
+    const message = error instanceof Error ? error.message : "tips failed";
+    // The one failure worth naming: the enum has to be widened by hand before a tip can
+    // exist at all, and "invalid input value for enum" tells an operator nothing.
+    res.status(500).json({ error: message, ...(enumMissing(message) ? { needsSql: TIP_ENUM_SQL } : {}) });
+  }
+});
+
+/** The hand-written DDL a tip needs before it can be stored. Never drizzle-kit push. */
+const TIP_ENUM_SQL = "ALTER TYPE content_type ADD VALUE IF NOT EXISTS 'tip';";
+const enumMissing = (message: string) =>
+  /invalid input value for enum/i.test(message) || /content_type/i.test(message);
+
+router.post("/tips", async (req, res) => {
+  const body = (req.body ?? {}) as Record<string, unknown>;
+  const title = String(body.title ?? "").trim();
+  const text = String(body.body ?? "").trim();
+  if (!title) { res.status(400).json({ error: "A tip needs a title." }); return; }
+  if (title.length > 120) { res.status(400).json({ error: "That title is longer than 120 characters." }); return; }
+  if (text.length > 600) { res.status(400).json({ error: "That tip is longer than 600 characters." }); return; }
+
+  const dest = String(body.dest ?? "").trim();
+  if (dest && !cleanDestination(dest)) {
+    res.status(400).json({ error: "That tap destination is not one the app can open." });
+    return;
+  }
+  const when = (value: unknown): Date | null | "bad" => {
+    const raw = String(value ?? "").trim();
+    if (!raw) return null;
+    const at = new Date(raw);
+    return Number.isNaN(at.getTime()) ? "bad" : at;
+  };
+  const startAt = when(body.start_at);
+  const endAt = when(body.end_at);
+  if (startAt === "bad" || endAt === "bad") {
+    res.status(400).json({ error: "That date is not one the server understands." });
+    return;
+  }
+
+  try {
+    const approvalState = (await approvalRequired("tip")) ? "pending" : "approved";
+    const [row] = await db.insert(contentItemsTable).values({
+      type: "tip",
+      title,
+      body: text || null,
+      placement: "home",
+      status: "live",
+      // A tip is paced by the app, never pushed -- see the comment above.
+      pushEnabled: false,
+      pushTopic: "all",
+      dest: cleanDestination(dest),
+      startAt: startAt ?? null,
+      endAt: endAt ?? null,
+      approvalState,
+      createdBy: String(body.by ?? "").trim() || null,
+    }).returning();
+    res.status(201).json({ ok: true, tip: forDashboard(row) });
+  } catch (error) {
+    const message = error instanceof Error ? error.message : "the tip was not saved";
+    res.status(500).json({ error: message, ...(enumMissing(message) ? { needsSql: TIP_ENUM_SQL } : {}) });
   }
 });
 

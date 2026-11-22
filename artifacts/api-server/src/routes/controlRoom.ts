@@ -290,6 +290,14 @@ const PAGE = `<!doctype html>
         <label for="f_dest">...or send the tap somewhere exact (optional)</label>
         <select id="f_dest"><option value="">Use the choice above</option></select>
         <input type="text" id="f_destArg" placeholder="" style="margin-top:6px;display:none;">
+        <!-- THE EPISODE PICKER. An episode's id is its feed guid, which no operator can be
+             expected to know, so picking "One podcast episode" offers the shows and then
+             lists what is actually in the feed. Clicking a row fills the box above. -->
+        <div id="f_episodePick" style="margin-top:6px;display:none;">
+          <select id="f_episodeShow" style="max-width:62%;"><option value="">Pick a show…</option></select>
+          <button type="button" id="f_episodeLoad" class="ghost" style="margin-left:6px;">LIST EPISODES</button>
+          <div id="f_episodeList" class="hint" style="margin-top:6px;max-height:190px;overflow:auto;"></div>
+        </div>
         <p class="hint" id="f_destHint" style="margin-top:4px;"></p>
       </div>
       <button type="button" class="secondary" id="insertLinkBtn" style="width:auto;margin-bottom:6px;">Insert a link in the body</button>
@@ -803,6 +811,63 @@ function destPicked() {
   $('f_destArg').style.display = needs ? '' : 'none';
   $('f_destArg').placeholder = needs ? (option.hint || option.needs) : '';
   $('f_destHint').textContent = option ? (option.hint || '') : '';
+  /* Only "episode" gets the picker: it is the one destination whose id is not a number or a
+     slug an operator can read off a page. */
+  var wantsEpisode = kind === 'episode';
+  $('f_episodePick').style.display = wantsEpisode ? '' : 'none';
+  if (wantsEpisode) loadEpisodeShows();
+}
+
+/* The shows come from the app's own config, so the picker lists exactly what the app lists.
+   Loaded once, on first use -- an operator who never aims at an episode never pays for it. */
+var EPISODE_SHOWS_LOADED = false;
+function loadEpisodeShows() {
+  if (EPISODE_SHOWS_LOADED) return;
+  EPISODE_SHOWS_LOADED = true;
+  fetch('/api/app-config').then(function (r) { return r.json(); }).then(function (data) {
+    var config = (data && data.config) || data || {};
+    var shows = config.podcasts || [];
+    var select = $('f_episodeShow');
+    shows.forEach(function (show) {
+      var el = document.createElement('option');
+      el.value = show.slug;
+      el.textContent = show.name;
+      select.appendChild(el);
+    });
+    if (!shows.length) $('f_episodeList').textContent = 'No podcast shows are configured.';
+  }).catch(function () {
+    EPISODE_SHOWS_LOADED = false;
+    $('f_episodeList').textContent = 'The show list could not be loaded.';
+  });
+}
+
+function loadEpisodes() {
+  var slug = $('f_episodeShow').value;
+  var box = $('f_episodeList');
+  if (!slug) { box.textContent = 'Pick a show first.'; return; }
+  box.textContent = 'Reading the feed…';
+  api('/podcast-episodes?show=' + encodeURIComponent(slug)).then(function (data) {
+    var episodes = (data && data.episodes) || [];
+    if (!episodes.length) { box.textContent = 'That feed listed no episodes.'; return; }
+    box.innerHTML = '';
+    episodes.forEach(function (episode) {
+      var row = document.createElement('button');
+      row.type = 'button';
+      row.className = 'ghost';
+      row.style.cssText = 'display:block;width:100%;text-align:left;margin-bottom:4px;';
+      row.textContent = episode.title + (episode.date ? '  —  ' + episode.date.slice(0, 16) : '');
+      row.addEventListener('click', function () {
+        /* The id box takes "<slug>:<ref>", which is what the grammar wants after
+           "episode:" -- the endpoint hands back the whole destination too, so this stays
+           the only place that knows how the two halves join. */
+        $('f_destArg').value = slug + ':' + episode.ref;
+        $('f_destHint').textContent = 'Aimed at: ' + episode.title;
+      });
+      box.appendChild(row);
+    });
+  }).catch(function (err) {
+    box.textContent = String((err && err.message) || err);
+  });
 }
 function destValue() {
   var kind = $('f_dest').value;
@@ -825,6 +890,7 @@ function destValue() {
       select.appendChild(el);
     });
     select.addEventListener('change', destPicked);
+    $('f_episodeLoad').addEventListener('click', loadEpisodes);
     fillDestSelects();
   } catch (err) {
     $('f_destHint').textContent = 'The destination list could not be loaded; taps will open the full message.';

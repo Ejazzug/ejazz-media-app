@@ -13,6 +13,14 @@ export const contentTypeEnum = pgEnum("content_type", [
   // A designed card: the same row shape, with template_id + template_fields saying which
   // card template drew it.  See cardTemplates.ts for the catalogue.
   "card",
+  // A TIP: one piece of advice, composed in the dashboard's /tips page and paced out per
+  // listener by the app's lib/tipDrip.ts rather than pushed. Words, not a picture, so it
+  // carries no template and gets no rendered image.
+  //
+  // THE DATABASE ENUM MUST BE WIDENED BY HAND FIRST, or an insert of one fails:
+  //     ALTER TYPE content_type ADD VALUE IF NOT EXISTS 'tip';
+  // (Never drizzle-kit push -- see the repo's rules.)
+  "tip",
 ]);
 export const contentStatusEnum = pgEnum("content_status", ["draft", "live", "withdrawn", "expired"]);
 // Where a card or item appears in the app.  "home" is the single featured slot the shipped

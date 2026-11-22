@@ -15,9 +15,15 @@ import { ActivityIndicator, Pressable, StyleSheet, Text, View } from 'react-nati
 
 import { useReachability, type ServiceKey } from '@/lib/reachability';
 
-type Kind = 'news' | 'podcasts' | 'charts' | 'nowplaying' | 'generic';
+type Kind = 'news' | 'podcasts' | 'charts' | 'nowplaying' | 'notifications' | 'generic';
 
 const COPY: Record<Kind, { icon: keyof typeof Feather.glyphMap; title: string; body: string; still?: string }> = {
+  notifications: {
+    icon: 'bell-off',
+    title: 'Your notifications need a connection',
+    body: 'Cards and tips cannot be reached right now, and nothing was kept on this phone yet.',
+    still: 'Anything already delivered stays on this phone.',
+  },
   news: {
     icon: 'file-text',
     title: 'Stories need a connection',

@@ -16,7 +16,15 @@ export type PulseContentType =
   | 'quiz'
   | 'song_battle'
   | 'push_alert'
-  | 'show_alert';
+  | 'show_alert'
+  /**
+   * A CARD is a picture: the Control Room renders it to a JPEG and `imageUrl` points at it.
+   * Nothing here draws its words -- the words are already in the image. The title and body
+   * are what a list row and a share sheet say about it.
+   */
+  | 'card'
+  /** A TIP: one piece of advice, paced out per listener by lib/tipDrip.ts. */
+  | 'tip';
 export type PulseContentStatus = 'draft' | 'live' | 'withdrawn' | 'expired';
 
 export type PulseContentItem = {
@@ -30,6 +38,11 @@ export type PulseContentItem = {
   relatedShow: string | null;
   relatedStation: string | null;
   placement: 'home';
+  /**
+   * Where a tap goes, in the grammar of lib/destination.ts. Validated by the server when it
+   * was saved; "" means a card that does not claim to go anywhere.
+   */
+  dest: string;
   pushEnabled: boolean;
   pushTopic: 'all' | 'radio' | 'xtra';
   status: PulseContentStatus;
@@ -50,6 +63,8 @@ const PULSE_KICKERS: Record<PulseContentType, string> = {
   song_battle: 'SONG BATTLE',
   push_alert: 'JAZZ ALERT',
   show_alert: 'SHOW ALERT',
+  card: 'FOR YOU',
+  tip: 'EJAZZ TIP',
 };
 
 export function pulseKickerLabel(type: PulseContentType): string {
@@ -59,7 +74,13 @@ export function pulseKickerLabel(type: PulseContentType): string {
 function isContentItem(value: unknown): value is PulseContentItem {
   if (!value || typeof value !== 'object') return false;
   const item = value as Partial<PulseContentItem>;
-  return typeof item.id === 'number' && typeof item.title === 'string' && typeof item.type === 'string';
+  if (!(typeof item.id === 'number' && typeof item.title === 'string' && typeof item.type === 'string')) {
+    return false;
+  }
+  // `dest` is newer than some rows and than some servers, and everything that reads it
+  // expects a string. Normalising here keeps every caller free of `?? ''`.
+  if (typeof item.dest !== 'string') (item as { dest: string }).dest = '';
+  return true;
 }
 
 /** Base URL of the Pulse API, or '' when not configured. Shared by the song-fact and chart hooks. */

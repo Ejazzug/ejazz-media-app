@@ -240,6 +240,51 @@ async function requestRelatedStories(categoryId: number, postId: string) {
   return data.map(mapPost);
 }
 
+/**
+ * SEARCH, ON THE SERVER (owner, task #2: search "scoped to a category or the whole archive").
+ *
+ * The screen used to filter the stories it had already loaded, which means a search could
+ * only ever find what you had already scrolled past -- ten stories, or thirty. This asks
+ * WordPress instead, so a search reaches the whole archive.
+ *
+ * `categoryId: null` means the whole archive, and DELIBERATELY drops the five-category
+ * filter that every other list here applies: it is the one way to reach an article in a
+ * category the app does not show a chip for, which is the point of "a way to reach ANY
+ * article". A story found that way still maps to a known category label, because that is
+ * what the card shows.
+ */
+async function requestSearchPage(page: number, query: string, categoryId: number | null): Promise<PostsPage> {
+  const { data, response } = await requestJson(apiUrl('', {
+    search: query,
+    ...(categoryId ? { categories: String(categoryId) } : {}),
+    per_page: '10',
+    _embed: '1',
+    page: String(page),
+  }));
+  if (!Array.isArray(data) || !data.every(isWordPressPost)) {
+    console.error('[EJazz News] Invalid search response.', { page, query, categoryId, data });
+    throw new Error('News API response did not contain a valid WordPress posts array.');
+  }
+  const totalPages = Number(response.headers.get('x-wp-totalpages') ?? page);
+  return { stories: data.map(mapPost), nextPage: page < totalPages ? page + 1 : undefined };
+}
+
+/** Two characters is the shortest search worth sending; anything less matches everything. */
+export const MIN_SEARCH_LENGTH = 2;
+
+export function useNewsSearch(query: string, categoryId: number | null) {
+  const term = query.trim();
+  return useInfiniteQuery({
+    queryKey: ['ejazz-news', 'search', term, categoryId ?? 'all'],
+    queryFn: ({ pageParam }) => requestSearchPage(pageParam, term, categoryId),
+    initialPageParam: 1,
+    getNextPageParam: (lastPage) => lastPage.nextPage,
+    enabled: term.length >= MIN_SEARCH_LENGTH,
+    staleTime: NEWS_CACHE_TTL_MS,
+    retry: 1,
+  });
+}
+
 export function useLatestNews(categoryId?: number) {
   return useInfiniteQuery({
     queryKey: ['ejazz-news', 'latest', categoryId ?? 'all'],

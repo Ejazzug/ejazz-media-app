@@ -25,7 +25,7 @@ import {
   cardRenderPath, cardImageUrl, cardRatioFromUrl, cardRow, DEFAULT_CARD_RATIO,
 } from "../lib/cardTemplates";
 import { cleanHttpUrl } from "../lib/linkText";
-import { cleanDestination, DESTINATIONS, describeDestination } from "../lib/destinations";
+import { cleanDestination, DESTINATIONS, describeDestination, episodeRef } from "../lib/destinations";
 // createCard owns the gate, the signed picture and the push choke point for BOTH card doors;
 // withDates lives beside it because card creation is the stricter caller of the two.
 import { createCard, withDates } from "../lib/cardCreate";
@@ -335,6 +335,64 @@ router.patch("/cards/:id", async (req, res) => {
 /** Every tap destination the app can open, for the Control Room's picker. */
 router.get("/destinations", (_req, res) => {
   res.json({ destinations: DESTINATIONS });
+});
+
+/**
+ * GET /api/admin/podcast-episodes?show=<slug>
+ *
+ * The episodes of one show, each with the REFERENCE that `episode:<slug>:<ref>` wants.
+ *
+ * This exists because the grammar was unusable without it: an episode's id is its feed guid,
+ * and an operator has no way to know that "Echoes Of Fame, 22 Nov" is
+ * `echoes_of_fame/echoes_of_fame_2026-11-22.mp3` unless something reads the feed for them.
+ * The reference is derived here with the same `episodeRef` the app uses, so the two always
+ * agree, and nothing is stored: the feed is the record.
+ *
+ * The parse is two regexes rather than an XML library on purpose -- this reads two fields
+ * from a well-formed feed the station publishes itself, for a picker, and a malformed feed
+ * should cost an operator an empty list rather than the service a dependency.
+ */
+router.get("/podcast-episodes", async (req, res) => {
+  const slug = String(req.query.show ?? "").trim().toLowerCase();
+  if (!slug) { res.status(400).json({ error: "Which show?" }); return; }
+
+  const config = await getAppConfig();
+  const show = config.podcasts.find((entry) => entry.slug === slug);
+  if (!show) { res.status(404).json({ error: "No show with that slug." }); return; }
+
+  try {
+    const answer = await fetch(show.feedUrl, {
+      headers: { Accept: "application/rss+xml,application/xml,text/xml" },
+      signal: AbortSignal.timeout(8000),
+    });
+    if (!answer.ok) throw new Error("the feed answered " + answer.status);
+    const xml = await answer.text();
+    const items = xml.split(/<item[\s>]/i).slice(1, 51);
+    const read = (block: string, tag: string) => {
+      const match = block.match(new RegExp("<" + tag + "[^>]*>([\\s\\S]*?)</" + tag + ">", "i"));
+      if (!match) return "";
+      return match[1]
+        .replace(/<!\[CDATA\[([\s\S]*?)\]\]>/g, "$1")
+        .replace(/<[^>]+>/g, "")
+        .trim();
+    };
+    const episodes = items.map((block) => {
+      const guid = read(block, "guid");
+      return {
+        title: read(block, "title").slice(0, 160),
+        date: read(block, "pubDate").slice(0, 40),
+        guid,
+        ref: episodeRef(guid),
+        // Exactly what an operator pastes into the id box, so there is nothing to assemble.
+        dest: episodeRef(guid) ? `episode:${slug}:${episodeRef(guid)}` : "",
+      };
+    }).filter((episode) => episode.ref);
+    res.json({ show: { slug: show.slug, name: show.name }, episodes });
+  } catch (error) {
+    res.status(502).json({
+      error: "That feed could not be read: " + (error instanceof Error ? error.message : "unknown"),
+    });
+  }
 });
 
 /** The saved cards, newest first, each with the shape it was published in. */
