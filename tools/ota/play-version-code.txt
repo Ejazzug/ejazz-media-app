@@ -1,0 +1,16 @@
+# The highest Android versionCode KNOWN to be uploaded to Google Play.
+#
+# This file exists because nothing on the build side can see Play. EAS holds its own counter
+# and increments it on every build, which is correct right up until the two disagree -- and on
+# 2026-11-22 they did: EAS said 23 while Play already had 24, because 24 was built in the
+# window when the versionCode lived in the repo and a build with a repo-held code never
+# touches the server counter. A build would have produced 24 and Play would have rejected the
+# upload.
+#
+# UPDATE IT WHEN YOU UPLOAD, not when you build. One number, no quotes:
+#
+#     bash tools/ota/version-status.sh --record 25
+#
+# Play Console -> Test and release -> App bundle explorer lists every code ever uploaded;
+# the highest one there is what belongs here, counting internal-testing uploads.
+24
