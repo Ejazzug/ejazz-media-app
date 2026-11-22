@@ -267,6 +267,45 @@ export function PlayerProvider({ children }: PropsWithChildren) {
     void extraNowPlaying.refetch();
   }, [extraNowPlaying, recentTracks, selectedStationId]);
 
+  /**
+   * ONE TICK WE OWN, instead of trusting the query's own interval.
+   *
+   * Owner, 2026-11-23: *"the sticky player doesn't update except when i go to the radio
+   * menu"* and *"if i am on the radio menu in the app, song changes are instant"*. A screen
+   * being open is the difference, and that points straight at how react-query schedules:
+   * `refetchInterval` belongs to the OBSERVERS of a query, and it is paused whenever the
+   * query has no active one or its `enabled` is false. The provider's own subscription is
+   * meant to keep it alive everywhere, and reading the code it should -- but the phone says
+   * otherwise, and a plain interval that this provider owns cannot be paused by anything
+   * except unmounting the provider itself, which only happens when the app closes.
+   *
+   * So the metadata refresh no longer depends on which screen is open. Live values are read
+   * through a ref rather than listed as dependencies, so the timer is created once and keeps
+   * an even cadence instead of restarting every time the player's clock ticks.
+   *
+   * While the app is in the background it only asks when something is actually playing:
+   * a phone in a pocket with the radio off has nothing to keep fresh.
+   */
+  const metadataTickRef = useRef({ active: true, playing: false, refresh: refreshMetadata });
+  useEffect(() => {
+    metadataTickRef.current = {
+      active: isAppActive,
+      playing: isPlaying || status.playing,
+      refresh: refreshMetadata,
+    };
+  }, [isAppActive, isPlaying, status.playing, refreshMetadata]);
+  useEffect(() => {
+    const id = setInterval(() => {
+      const { active, playing, refresh } = metadataTickRef.current;
+      if (!active && !playing) return;
+      // Logged on purpose: this one line in `adb logcat -s ReactNativeJS` is what tells
+      // whether a stale now-playing line is the app not asking or the station not moving.
+      console.log('[EJazz NowPlaying] metadata tick', new Date().toISOString());
+      refresh();
+    }, 20_000);
+    return () => clearInterval(id);
+  }, []);
+
   useEffect(() => {
     setAudioModeAsync({
       playsInSilentMode: true,

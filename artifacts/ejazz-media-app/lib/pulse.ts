@@ -48,6 +48,18 @@ export type PulseContentItem = {
   status: PulseContentStatus;
   pollOptions: { label: string; votes: number }[] | null;
   quizCorrectIndex: number | null;
+  /**
+   * WHICH TEMPLATE DREW A CARD ('song-fact', 'chart-move', ...). It is what tells two song
+   * facts apart from a song fact and a chart card, and so it is what Home's rail groups by
+   * (lib/homeCards.ts). Null for everything that is not a card.
+   */
+  templateId: string | null;
+  /**
+   * THE WORDS A SHARE CARRIES, written per card in the Control Room. Null means nobody wrote
+   * one and the title is used instead -- a title names a row for an operator, a caption is
+   * written to travel, and they are rarely the same sentence.
+   */
+  shareCaption: string | null;
   startAt: string | null;
   endAt: string | null;
   createdBy: string | null;

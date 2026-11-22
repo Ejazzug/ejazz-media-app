@@ -61,6 +61,13 @@ export const contentItemsTable = pgTable("content_items", {
   // card needs no new app field to be visible.
   templateId: text("template_id"),
   templateFields: jsonb("template_fields").$type<Record<string, string>>(),
+  // WHAT A LISTENER'S SHARE SAYS. The words that go out beside the picture when someone taps
+  // share on this card, which are not the same words as the card's own title: a title labels a
+  // row in the Control Room, a caption is written to travel. NULL means "no caption written",
+  // and the app falls back to the title -- so every row that existed before this column keeps
+  // sharing exactly as it did. Operators set it per card on the dashboard's /app-cards page.
+  // Added by hand (ALTER TABLE, 2026-11-23); this file is kept matching so a push stays a no-op.
+  shareCaption: text("share_caption"),
   // The approval decision for this item, as a fact on the row the scheduler already reads.
   // Default "approved" so every pre-existing row and every kind whose gate is off behaves
   // exactly as before.  The POLICY (which kinds need approving) stays in the dashboard's
