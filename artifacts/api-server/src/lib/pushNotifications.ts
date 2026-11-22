@@ -3,6 +3,7 @@ import { cert, getApps, initializeApp } from "firebase-admin/app";
 import { getMessaging } from "firebase-admin/messaging";
 import type { PushTopic } from "@workspace/db";
 import { cleanHttpUrl, firstMarkupUrl, stripLinkMarkup } from "./linkText";
+import { cleanDestination } from "./destinations";
 
 type FirebaseServiceAccount = {
   project_id: string;
@@ -66,6 +67,8 @@ export async function sendContentPush(input: {
   imageUrl?: string | null;
   linkUrl?: string | null;
   openMode?: string | null;
+  /** Where a tap goes (lib/destinations.ts). Empty keeps the old openMode behaviour. */
+  dest?: string | null;
 }): Promise<PushDeliveryResult> {
   const rawBody = input.body?.trim() ?? "";
   // The tray shows plain text; the markup survives in data so the app can render real links.
@@ -73,6 +76,10 @@ export async function sendContentPush(input: {
   const imageUrl = cleanHttpUrl(input.imageUrl);
   const linkUrl = cleanHttpUrl(input.linkUrl) ?? firstMarkupUrl(rawBody);
   const openMode = input.openMode === "link" && linkUrl ? "link" : "details";
+  // Sent as a plain string beside openMode, never instead of it: a phone running an older
+  // build ignores what it does not know and still opens the message, which is why the old
+  // field stays rather than being replaced.
+  const dest = cleanDestination(input.dest);
 
   const messageId = await getEJazzMessaging().send({
     topic: input.pushTopic,
@@ -87,6 +94,7 @@ export async function sendContentPush(input: {
       contentId: String(input.id),
       contentType: input.type,
       openMode,
+      ...(dest ? { dest } : {}),
       // FCM data is capped (~4 KB for everything), so the text is bounded here.
       fullTitle: input.title.slice(0, 200),
       fullBody: rawBody.slice(0, 1800),

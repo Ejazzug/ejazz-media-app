@@ -1,6 +1,7 @@
 import { Linking } from 'react-native';
 import type { useRouter } from 'expo-router';
 import { firstLinkUrl } from '@/lib/linkText';
+import { destinationRoute } from '@/lib/destination';
 
 /** Everything the full-message screen needs, so it works from a cold start with no network. */
 export type NotificationTarget = {
@@ -9,6 +10,12 @@ export type NotificationTarget = {
   image: string;
   url: string;
   openMode: 'details' | 'link';
+  /**
+   * Where the operator aimed this tap (lib/destination.ts). Empty means they did not aim it,
+   * and `openMode` decides as it always did -- which is what keeps a push sent by an older
+   * build, or by an operator who left the picker alone, behaving exactly as before.
+   */
+  dest: string;
 };
 
 function str(value: unknown): string {
@@ -36,6 +43,7 @@ export function notificationTarget(
     image: httpUrl(str(d.image)),
     url,
     openMode: d.openMode === 'link' && url ? 'link' : 'details',
+    dest: str(d.dest),
   };
 }
 
@@ -46,6 +54,14 @@ export function notificationTarget(
 type AppRouter = ReturnType<typeof useRouter>;
 
 export function openNotification(router: AppRouter, target: NotificationTarget): void {
+  // An aimed tap wins: the operator chose a place, and the message it came from is the
+  // fallback, not the destination. An unrecognised one falls through to that fallback rather
+  // than being guessed at.
+  const route = destinationRoute(target.dest);
+  if (route) {
+    router.push(route as never);
+    return;
+  }
   if (target.openMode === 'link' && target.url) {
     Linking.openURL(target.url).catch(() => undefined);
     return;

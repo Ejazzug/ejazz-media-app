@@ -34,7 +34,12 @@ export const brandAssetsTable = pgTable("brand_assets", {
  */
 export const presetsTable = pgTable("presets", {
   id: uuid("id").primaryKey().defaultRandom(),
-  name: text("name").notNull().unique(),
+  // The constraint is NAMED because the live table was created with Postgres' own default
+  // name (presets_name_key). Drizzle would otherwise look for presets_name_unique, not find
+  // it, and try to ADD a second unique constraint on the same column -- which makes
+  // `drizzle-kit push` stop and ask whether to truncate the table. Same column, same
+  // constraint, just spelled the way the database already spells it.
+  name: text("name").notNull().unique("presets_name_key"),
   kind: text("kind").notNull().default("design"),
   settings: jsonb("settings").$type<Record<string, unknown>>().notNull().default({}),
   updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),

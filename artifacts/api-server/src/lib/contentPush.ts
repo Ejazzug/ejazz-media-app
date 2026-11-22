@@ -5,6 +5,7 @@ import { sendContentPush, type PushDeliveryResult } from "./pushNotifications";
 import { pushAllowedByApproval, PUSH_WITHHELD } from "./approvals";
 import { cleanHttpUrl, firstMarkupUrl } from "./linkText";
 import { logger } from "./logger";
+import { cleanDestination } from "./destinations";
 
 export async function attemptContentPush(item: {
   id: number;
@@ -22,6 +23,8 @@ export async function attemptContentPush(item: {
   imageUrl?: string | null;
   linkUrl?: string | null;
   openMode?: string | null;
+  /** Where a tap goes (lib/destinations.ts); empty keeps the old behaviour. */
+  dest?: string | null;
   // The approval decision on the row. Optional for the same reason the two fields above are:
   // a caller that builds a partial item still works, and the column defaults to "approved".
   approvalState?: string | null;
@@ -63,6 +66,7 @@ export async function attemptContentPush(item: {
           imageUrl: cleanHttpUrl(item.imageUrl),
           linkUrl: cleanHttpUrl(item.linkUrl) ?? firstMarkupUrl(item.body ?? ""),
           openMode: item.openMode === "link" ? "link" : "details",
+          dest: cleanDestination(item.dest),
         });
       } catch (logError) {
         logger.error(

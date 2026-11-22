@@ -18,6 +18,7 @@ import * as SplashScreen from 'expo-splash-screen';
 import { PlayerProvider } from '@/context/PlayerContext';
 import { AppGate } from '@/components/RemoteControls';
 import { AppConfigProvider } from '@/lib/appConfig';
+import { ReachabilityProvider } from '@/lib/reachability';
 import { MiniPlayer, PictureInPicturePlayer } from '@/components/MediaComponents';
 import { initializeFirebaseAnalytics } from '@/lib/firebase';
 import { usePushNotifications } from '@/lib/notifications';
@@ -92,15 +93,20 @@ export default function RootLayout() {
     <SafeAreaProvider>
       <ErrorBoundary>
         <QueryClientProvider client={queryClient}>
-          <GestureHandlerRootView>
-            <KeyboardProvider>
-              <AppConfigProvider>
-                <PlayerProvider>
-                  <RootLayoutContent />
-                </PlayerProvider>
-              </AppConfigProvider>
-            </KeyboardProvider>
-          </GestureHandlerRootView>
+          {/* Inside the query client (it invalidates queries when a service comes back) and
+              outside everything that draws, so any screen can ask whether its service is
+              reachable without fetching to find out. */}
+          <ReachabilityProvider>
+            <GestureHandlerRootView>
+              <KeyboardProvider>
+                <AppConfigProvider>
+                  <PlayerProvider>
+                    <RootLayoutContent />
+                  </PlayerProvider>
+                </AppConfigProvider>
+              </KeyboardProvider>
+            </GestureHandlerRootView>
+          </ReachabilityProvider>
         </QueryClientProvider>
       </ErrorBoundary>
     </SafeAreaProvider>

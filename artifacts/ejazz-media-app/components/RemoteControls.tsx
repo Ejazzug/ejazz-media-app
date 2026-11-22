@@ -1,16 +1,20 @@
 import { Feather } from '@expo/vector-icons';
+import AsyncStorage from '@react-native-async-storage/async-storage';
 import { Image } from 'expo-image';
+import { useRouter } from 'expo-router';
 import React from 'react';
 import { Pressable, StyleSheet, Text, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import {
   getAppVersion,
   isVersionBelow,
+  isWithinWindow,
   openLink,
   PLAY_STORE_URL,
   useAppConfig,
   useAppConfigState,
 } from '@/lib/appConfig';
+import { canOpenDestination, goToDestination } from '@/lib/destination';
 
 /**
  * Pieces of the app that are driven by the Control Room's "App controls" tab.
@@ -112,6 +116,133 @@ export function PromoBanner() {
   );
 }
 
+/**
+ * THE TAKEOVER (owner, 2026-11-22: "i need a take over banner in the app ctrl").
+ *
+ * The loudest thing the app can do without sending a push: a panel bled to both screen edges
+ * across the top of Home. Deliberately NOT a modal -- someone who opened EJazz to hear the
+ * radio must still be able to reach the play button, so this takes the screen's attention and
+ * never its controls, and it scrolls away like everything else.
+ *
+ * Three things keep it from becoming wallpaper:
+ *  - it is retired PER LISTENER, not per session, so a dismissal survives a restart;
+ *  - `showUntilTapped` retires it the moment someone acts on it;
+ *  - the retirement is keyed to what the takeover SAYS, so editing it in the Control Room
+ *    makes a new takeover that everyone sees again -- including the people who dismissed the
+ *    last one.
+ */
+const TAKEOVER_RETIRED_KEY = 'ejazz-takeover-retired-v1';
+
+/** A short stable fingerprint of a takeover's contents. Same words in, same key out. */
+function takeoverKey(parts: ReadonlyArray<string>): string {
+  const joined = parts.join('\u0000');
+  let hash = 5381;
+  for (let i = 0; i < joined.length; i++) {
+    hash = ((hash << 5) + hash + joined.charCodeAt(i)) | 0;
+  }
+  return (hash >>> 0).toString(36);
+}
+
+export function TakeoverPanel() {
+  const { takeover } = useAppConfig();
+  const router = useRouter();
+  // `null` means "not read yet": the takeover is not drawn until the retirement is known, so
+  // one someone already dismissed never flashes up on launch.
+  const [retired, setRetired] = React.useState<string | null>(null);
+
+  React.useEffect(() => {
+    let active = true;
+    AsyncStorage.getItem(TAKEOVER_RETIRED_KEY)
+      .then((value) => {
+        if (active) setRetired(value ?? '');
+      })
+      .catch(() => {
+        // Storage can fail; showing the takeover is the honest fallback, hiding it is not.
+        if (active) setRetired('');
+      });
+    return () => {
+      active = false;
+    };
+  }, []);
+
+  const key = takeoverKey([
+    takeover.kicker, takeover.title, takeover.message, takeover.imageUrl,
+    takeover.buttonLabel, takeover.dest, takeover.linkUrl, takeover.startAt, takeover.endAt,
+  ]);
+  const retire = React.useCallback(() => {
+    setRetired(key);
+    AsyncStorage.setItem(TAKEOVER_RETIRED_KEY, key).catch(() => undefined);
+  }, [key]);
+
+  const hasDestination = canOpenDestination(takeover.dest);
+  const hasLink = Boolean(takeover.linkUrl);
+  const open = () => {
+    const went = hasDestination ? goToDestination(router, takeover.dest) : false;
+    if (!went && hasLink) openLink(takeover.linkUrl);
+    if (takeover.showUntilTapped && (went || hasLink)) retire();
+  };
+
+  if (retired === null || retired === key) return null;
+  if (!takeover.enabled || (!takeover.title && !takeover.message)) return null;
+  // The server's window, applied again against this phone's clock -- see isWithinWindow.
+  if (!isWithinWindow(takeover.startAt, takeover.endAt)) return null;
+
+  const actionable = hasDestination || hasLink;
+  const label = takeover.buttonLabel || (hasDestination ? 'OPEN' : 'LEARN MORE');
+  const body = (
+    <View style={styles.takeover}>
+      {takeover.imageUrl ? (
+        <Image
+          source={takeover.imageUrl}
+          contentFit="cover"
+          style={styles.takeoverImage}
+          accessibilityLabel={takeover.title || 'EJazz announcement'}
+        />
+      ) : null}
+      <View style={styles.takeoverCopy}>
+        {takeover.kicker ? <Text style={styles.takeoverKicker}>{takeover.kicker}</Text> : null}
+        {takeover.title ? <Text style={styles.takeoverTitle}>{takeover.title}</Text> : null}
+        {takeover.message ? <Text style={styles.takeoverMessage}>{takeover.message}</Text> : null}
+        {actionable ? (
+          <View style={styles.takeoverButton}>
+            <Text style={styles.takeoverButtonText}>{label}</Text>
+            <Feather name="arrow-right" size={14} color="#FFFFFF" />
+          </View>
+        ) : null}
+      </View>
+    </View>
+  );
+
+  return (
+    <View style={styles.takeoverWrap}>
+      {actionable ? (
+        <Pressable
+          onPress={open}
+          accessibilityRole="button"
+          accessibilityLabel={takeover.title || takeover.message}
+          accessibilityHint={label}
+          style={({ pressed }) => ({ opacity: pressed ? 0.92 : 1 })}
+        >
+          {body}
+        </Pressable>
+      ) : (
+        body
+      )}
+      {takeover.dismissible ? (
+        <Pressable
+          onPress={retire}
+          hitSlop={12}
+          accessibilityRole="button"
+          accessibilityLabel="Dismiss this announcement"
+          style={styles.takeoverClose}
+        >
+          <Feather name="x" size={16} color="#F7F9FC" />
+        </Pressable>
+      ) : null}
+    </View>
+  );
+}
+
 /** Big featured card under the Home hero. */
 export function FeaturedCard() {
   const { featured } = useAppConfig();
@@ -175,6 +306,28 @@ const styles = StyleSheet.create({
   stripText: { color: '#A7B7CC', fontSize: 12, lineHeight: 17 },
   stripAction: { color: '#FF6B6B', fontSize: 10, fontWeight: '700', letterSpacing: 1.2 },
   bannerImage: { width: 44, height: 44, backgroundColor: '#123363' },
+  // Bled to both screen edges: Home pads its content by 20, and a takeover that stops short
+  // of the edges reads as one more card instead of the loudest thing on the page.
+  takeoverWrap: { marginHorizontal: -20, marginTop: 18, marginBottom: 4 },
+  takeover: { overflow: 'hidden', borderTopWidth: 2, borderBottomWidth: 1, borderTopColor: '#E43B48', borderBottomColor: '#204570', backgroundColor: '#11234A' },
+  takeoverImage: { width: '100%', height: 170, backgroundColor: '#123363' },
+  takeoverCopy: { paddingHorizontal: 20, paddingVertical: 18, gap: 8 },
+  takeoverKicker: { color: '#FF6B6B', fontSize: 10, fontWeight: '700', letterSpacing: 1.5 },
+  takeoverTitle: { color: '#F7F9FC', fontSize: 24, lineHeight: 28, fontWeight: '700', letterSpacing: -0.8 },
+  takeoverMessage: { color: '#A7B7CC', fontSize: 14, lineHeight: 20 },
+  takeoverButton: { flexDirection: 'row', alignItems: 'center', alignSelf: 'flex-start', gap: 8, marginTop: 6, minHeight: 44, paddingHorizontal: 18, backgroundColor: '#E43B48' },
+  takeoverButtonText: { color: '#FFFFFF', fontSize: 11, fontWeight: '700', letterSpacing: 1.3 },
+  takeoverClose: {
+    position: 'absolute',
+    top: 10,
+    right: 12,
+    width: 32,
+    height: 32,
+    alignItems: 'center',
+    justifyContent: 'center',
+    borderRadius: 16,
+    backgroundColor: 'rgba(7,22,47,0.72)',
+  },
   featured: { marginBottom: 28, overflow: 'hidden', borderWidth: 1, borderColor: '#204570', backgroundColor: '#0D2A57' },
   featuredImage: { width: '100%', height: 180, backgroundColor: '#123363' },
   featuredCopy: { padding: 16, gap: 6 },

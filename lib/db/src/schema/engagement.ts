@@ -44,7 +44,12 @@ export const contentVotesTable = pgTable(
     createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
   },
   (t) => ({
-    oneVoteEach: unique().on(t.contentItemId, t.voterKey),
+    // Named for the reason explained beside presets.name in designer.ts: the live constraint
+    // carries Postgres' default name, so drizzle has to be told to look for that one.
+    oneVoteEach: unique("content_votes_content_item_id_voter_key_key").on(
+      t.contentItemId,
+      t.voterKey,
+    ),
     byItem: index("content_votes_item_idx").on(t.contentItemId),
   }),
 );

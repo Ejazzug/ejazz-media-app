@@ -2,17 +2,19 @@ import { Feather } from '@expo/vector-icons';
 import { Image } from 'expo-image';
 import { Stack, useLocalSearchParams, useRouter } from 'expo-router';
 import React from 'react';
-import { ActivityIndicator, Pressable, ScrollView, Share, StyleSheet, Text, View } from 'react-native';
+import { ActivityIndicator, Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { EditorialPlaceholder, MINI_PLAYER_CLEARANCE } from '@/components/MediaComponents';
 import { useColors } from '@/hooks/useColors';
 import { useArticle, useRelatedNews } from '@/lib/news';
+import { useShareApp } from '@/lib/shareApp';
 
 export default function ArticleScreen() {
   const colors = useColors();
   const insets = useSafeAreaInsets();
   const router = useRouter();
   const { id } = useLocalSearchParams<{ id?: string }>();
+  const { shareWithLink } = useShareApp();
   const article = useArticle(id);
   const related = useRelatedNews(article.data?.categoryId, article.data?.id);
   const story = article.data;
@@ -61,7 +63,14 @@ export default function ArticleScreen() {
             <Feather name="arrow-left" size={20} color={colors.foreground} />
           </Pressable>
           <Pressable
-            onPress={() => Share.share({ message: shareMessage, url: story.link || undefined })}
+            /* THE APP LINK TRAVELS WITH THE ARTICLE (owner, 2026-11-22: deep links to the
+               store on articles and podcasts too). This screen was the one share in the app
+               that went out raw -- the story's own link and nothing else -- so an article
+               doing the rounds on WhatsApp pointed at the website and never at the app.
+               `shareWithLink` is what every other share already uses; it appends the Play
+               Store link, carrying the install referrer that lets the Play Console count
+               installs that began with a share. */
+            onPress={() => shareWithLink(shareMessage)}
             style={styles.topButton}
             hitSlop={8}
           >

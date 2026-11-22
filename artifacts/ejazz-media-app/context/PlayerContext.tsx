@@ -327,12 +327,58 @@ export function PlayerProvider({ children }: PropsWithChildren) {
   const onAirShow = useOnAirShow(selectedStationId === 'extra' ? 'xtra' : 'radio', playbackKind === 'radio');
 
   const hasActivatedLockScreenRef = useRef(false);
+  /**
+   * ACTIVATE ONCE, THEN UPDATE (owner, 2026-11-22: the notification kept the song it started
+   * with).
+   *
+   * `setActiveForLockScreen` is not an update call. In expo-audio's Android service
+   * (`setPlayerOptions`) a second call for the SAME player **releases the MediaSession**,
+   * clears `sessionMetadataPlayer`, and rebuilds the session on `appContext.mainQueue` --
+   * and `appContext` is null once the activity is gone. So every track change while the
+   * phone was locked tore the session down and then failed to build the new one, which is
+   * precisely when the lock screen is the only thing a listener can see.
+   *
+   * `updateLockScreenMetadata` is the call meant for this: it routes to the service's
+   * `setPlayerMetadata` -> `updateMetadataInternal`, which swaps the words and the artwork
+   * on the session that is already there. So: activate the first time, update every time
+   * after, and only when the words have actually changed -- re-pushing identical metadata
+   * makes some launchers flash the notification.
+   */
+  const lastLockScreenRef = useRef('');
+  const lastLockOptionsRef = useRef('');
   useEffect(() => {
+    const push = (
+      metadata: { title: string; artist: string; albumTitle: string; artworkUrl?: string },
+      options: { isLiveStream?: boolean; showSeekForward: boolean; showSeekBackward: boolean },
+    ) => {
+      const fingerprint = [metadata.title, metadata.artist, metadata.albumTitle, metadata.artworkUrl ?? ''].join('\u0001');
+      // The CONTROLS are part of the session, not the metadata: going from the live stream to
+      // a podcast has to add the seek buttons, and only a re-activation does that. It happens
+      // when somebody presses play on an episode -- in the foreground, where rebuilding the
+      // session is safe -- never on a track change behind a locked screen.
+      const optionSig = [options.isLiveStream ?? false, options.showSeekForward, options.showSeekBackward].join('|');
+      if (!hasActivatedLockScreenRef.current || optionSig !== lastLockOptionsRef.current) {
+        hasActivatedLockScreenRef.current = true;
+        lastLockScreenRef.current = fingerprint;
+        lastLockOptionsRef.current = optionSig;
+        player.setActiveForLockScreen(true, metadata, options);
+        return;
+      }
+      if (fingerprint === lastLockScreenRef.current) return;
+      lastLockScreenRef.current = fingerprint;
+      // Older runtimes may not carry this method; falling back to re-activation is worse
+      // than doing nothing only when the session would be rebuilt, so the fallback stays
+      // but is reached just once per app version rather than once per song.
+      if (typeof player.updateLockScreenMetadata === 'function') {
+        player.updateLockScreenMetadata(metadata);
+      } else {
+        player.setActiveForLockScreen(true, metadata, options);
+      }
+    };
+
     if (playbackKind === 'podcast' && currentPodcast) {
       if (!status.playing && !hasActivatedLockScreenRef.current) return;
-      hasActivatedLockScreenRef.current = true;
-      player.setActiveForLockScreen(
-        true,
+      push(
         podcastLockScreenMetadata({
           episodeTitle: currentPodcast.title,
           showName: currentPodcast.showName,
@@ -343,9 +389,7 @@ export function PlayerProvider({ children }: PropsWithChildren) {
       return;
     }
     if (!status.playing && !hasActivatedLockScreenRef.current) return;
-    hasActivatedLockScreenRef.current = true;
-    player.setActiveForLockScreen(
-      true,
+    push(
       stationLockScreenMetadata({
         title: currentTrack?.title,
         artist: currentTrack?.artist,

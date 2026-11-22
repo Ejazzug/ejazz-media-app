@@ -57,8 +57,12 @@ const designsReadable = fs.existsSync(DESIGN_DIR);
 check("the designer templates are where the catalogue expects them", designsReadable, DESIGN_DIR);
 
 // ------------------------------------------------------------------ the catalogue itself
-check("twelve cards, as the brief asked for", CARD_TEMPLATES.length === 12, CARD_TEMPLATES.length);
-check("ids are unique", new Set(cardTemplateIds()).size === 12);
+// Thirteen since 2026-11-18. The brief asked for twelve and those twelve are unchanged below;
+// "Song Fact" was added so a song fact can leave the player, and it draws the fact designs
+// that were already on disk with no caller. The count is asserted, not loosened, so the next
+// addition is also a decision somebody makes here rather than a drift nobody notices.
+check("thirteen cards: the brief's twelve, plus Song Fact", CARD_TEMPLATES.length === 13, CARD_TEMPLATES.length);
+check("ids are unique", new Set(cardTemplateIds()).size === 13);
 check("lookup finds one", cardTemplate("chart-number-one")?.name === "Chart No. 1");
 check("lookup refuses a stranger", cardTemplate("no-such-card") === null);
 check("lookup refuses a non-string", cardTemplate(7) === null);
@@ -66,9 +70,9 @@ check("lookup refuses a non-string", cardTemplate(7) === null);
 const expectedNames = [
   "First Time Played", "Artist Spotlight", "Chart No. 1", "Most Requested", "Poll Winner",
   "Most Voted", "Most Liked", "New Music Release", "Trending Story", "Breaking Music News",
-  "Podcast Highlight", "Custom Promo",
+  "Podcast Highlight", "Custom Promo", "Song Fact",
 ];
-check("the twelve are the brief's twelve, in its order",
+check("the catalogue is the brief's twelve in its order, then Song Fact",
   JSON.stringify(CARD_TEMPLATES.map((t) => t.name)) === JSON.stringify(expectedNames),
   CARD_TEMPLATES.map((t) => t.name));
 
@@ -292,10 +296,10 @@ check("a card with only pinned text still has a title", cardRow(chart, {}).title
 
 // --------------------------------------------------------------------------- the catalogue
 const cat = cardCatalogue();
-check("the catalogue covers every card", cat.length === 12);
+check("the catalogue covers every card", cat.length === 13);
 check("it carries an example render for each", cat.every((c) => c.examplePath.includes("/api/designer/render/")));
 check("it says which feeds are real today",
-  cat.filter((c) => c.source.available).length === 8
+  cat.filter((c) => c.source.available).length === 9
   && cat.filter((c) => !c.source.available).length === 4,
   cat.filter((c) => !c.source.available).map((c) => c.id));
 check("the four with no feed are the vote/like three and the release one",

@@ -250,7 +250,7 @@
       var handle = el('span', 'dsHandle');
       handle.setAttribute('data-role', 'resize');
       box.appendChild(handle);
-      if (ph.type === 'logo' || ph.type === 'image') {
+      if (ph.type === 'logo' || ph.type === 'image' || ph.type === 'art') {
         box.setAttribute('data-drop', '1');
         box.title = 'Drop a brand logo here';
       }
@@ -502,7 +502,15 @@
       height: type === 'text' || type === 'data' ? Math.round(size.h * 0.1) : Math.round(size.h * 0.25),
       z: (zs.length ? Math.max.apply(null, zs) : 0) + 1
     };
-    if (type === 'image' || type === 'logo') ph.fit = 'cover';
+    if (type === 'image' || type === 'logo' || type === 'art') ph.fit = 'cover';
+    if (type === 'art') {
+      /* A sleeve is square. Starting one at the canvas's 60%-wide default would have the
+         operator drag it back to square every single time, so it starts that way. */
+      var side = Math.round(Math.min(size.w, size.h) * 0.25);
+      ph.width = side;
+      ph.height = side;
+      ph.style = { background: '#0A1838', radius: 18, plate_padding: 8 };
+    }
     if (type === 'text' || type === 'data' || type === 'cta') {
       ph.default = type === 'cta' ? 'Listen on EJazz' : 'New text';
       ph.style = { font: 'Liberation Sans Bold', size: 48, color: '#F2F4FF', align: 'left' };
@@ -600,8 +608,8 @@
         });
         chip.addEventListener('click', function () {
           var ph = state.selected ? findPh(state.selected) : null;
-          if (!ph || (ph.type !== 'logo' && ph.type !== 'image')) {
-            say('Select a logo or image placeholder first, or drag this onto one.', true);
+          if (!ph || (ph.type !== 'logo' && ph.type !== 'image' && ph.type !== 'art')) {
+            say('Select a logo, image or album-art placeholder first, or drag this onto one.', true);
             return;
           }
           pushHistory();
