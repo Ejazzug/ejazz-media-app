@@ -90,10 +90,11 @@ export function OfflineState({
       </View>
       {/* `service` is accepted so a caller can say what it waits on even while the retry
           button probes everything -- one tap repairing the whole app is kinder than making
-          somebody tap per section. */}
-      <View accessibilityElementsHidden pointerEvents="none" style={styles.hiddenTag}>
-        <Text style={styles.hiddenTagText}>{service ?? ''}</Text>
-      </View>
+          somebody tap per section. It is NOT rendered. It used to be parked in a hidden
+          <Text style={{ fontSize: 0 }}>, which crashed the app on launch: Fabric measures
+          every Text node, including invisible ones inside a 0x0 parent, and throws
+          "FontSize should be a positive value. Current value: 0" rather than skipping it.
+          There is no zero-size way to hide text; do not add one. */}
     </View>
   );
 }
@@ -152,6 +153,4 @@ const styles = StyleSheet.create({
     backgroundColor: '#FFC247',
   },
   bannerText: { flex: 1, color: '#0B1730', fontSize: 12, fontWeight: '700' },
-  hiddenTag: { width: 0, height: 0, overflow: 'hidden' },
-  hiddenTagText: { fontSize: 0 },
 });
