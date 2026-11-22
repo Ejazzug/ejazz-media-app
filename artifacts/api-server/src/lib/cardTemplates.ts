@@ -466,7 +466,11 @@ export const CARD_TEMPLATES: CardTemplate[] = [
       { key: "fact", label: "The fact", type: "paragraph", required: true, maxLength: 400, hint: "One or two sentences -- the same line that shows under the player.", example: "Billie Eilish recorded the vocal in a bathroom to catch the natural reverb." },
       { key: "song", label: "Song", type: "line", required: true, maxLength: 70, example: "When The Party's Over" },
       { key: "artist", label: "Artist", type: "line", maxLength: 60, example: "Billie Eilish" },
-      { key: "artwork", label: "Artwork", type: "asset", maxLength: 400, hint: "Optional. The fact reads on its own when there is no art -- the design says so.", example: "/opt/radio/podcasts/station_art/ejazz_xtra.png" },
+      { key: "artwork", label: "Artwork", type: "asset", maxLength: 400, hint: "Optional. The app fills this from the sleeve, a photograph of the artist, or an emoji tile; left empty the slot stays background.", example: "/opt/radio/designs_out/albumart/cover.jpg" },
+      // THE LICENCE IS WHY. A Commons photograph may only be drawn where its credit can be
+      // drawn with it, and the design has the slot -- but this list did not, so the app's
+      // card would have carried the face and dropped the attribution.
+      { key: "credit", label: "Picture credit", type: "line", maxLength: 120, hint: "Drawn under the picture. Filled automatically for a licensed photograph.", example: "Photo: Ssemmanda will / CC BY-SA 4.0" },
       { key: "cta", label: "Call to action", type: "line", maxLength: 40, example: "More on EJazz" },
       // The two the app's "Share this fact" fills in, so a fact doing the rounds says which
       // station it came from and carries that station's mark (owner, 2026-11-22). Both have
