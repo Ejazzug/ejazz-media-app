@@ -81,7 +81,33 @@ if ! [[ "$current" =~ ^[0-9]+$ ]]; then
   exit 2
 fi
 
-play="$(read_play)"
+# PLAY ITSELF when a service account is configured, the tracked file otherwise. The file is
+# a number someone has to remember to update; Play is the thing the number is about. Exit 3
+# from the helper means "no credential configured", which is the normal state until one is
+# set up -- anything else it prints is a real fault and stops the build.
+play=""
+play_source="tools/ota/play-version-code.txt"
+if [ -n "${GOOGLE_PLAY_SERVICE_ACCOUNT_JSON:-}" ]; then
+  PY_BIN="python3"
+  command -v /opt/radio/venv/bin/python >/dev/null 2>&1 && PY_BIN=/opt/radio/venv/bin/python
+  set +e
+  from_play="$("$PY_BIN" "$ROOT/tools/ota/play-highest-version-code.py" 2>/tmp/play-query.err)"
+  rc=$?
+  set -e
+  if [ "$rc" = "0" ] && [ -n "$from_play" ]; then
+    play="$from_play"
+    play_source="Google Play"
+  elif [ "$rc" = "3" ]; then
+    : # not configured after all; the file answers
+  else
+    echo "Could not ask Play for its highest versionCode:" >&2
+    cat /tmp/play-query.err >&2 || true
+    echo "This is a BROKEN CHECK, not a version collision. Fix the service account, or" >&2
+    echo "unset GOOGLE_PLAY_SERVICE_ACCOUNT_JSON to fall back to the tracked file." >&2
+    exit 2
+  fi
+fi
+[ -n "$play" ] || play="$(read_play)"
 # Validated, not trusted. An empty or malformed file would otherwise reach the arithmetic
 # below, where bash fails under `set -e` and the script dies with status 1 and no output --
 # indistinguishable from a real refusal, which is the failure this whole guard exists to
@@ -99,7 +125,7 @@ next=$((current + 1))
 
 echo "EAS counter (what a build bumps from) : $current"
 echo "Next production build will be         : $next"
-echo "Highest code recorded on Play         : $play"
+echo "Highest code on Play                  : $play  (source: $play_source)"
 
 if [ "$next" -le "$play" ]; then
   cat >&2 <<MSG
