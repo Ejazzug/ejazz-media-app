@@ -32,11 +32,32 @@ function verifySession(token: string | undefined): boolean {
   return Number(payload) > Date.now();
 }
 
-export function requireAdmin(req: Request, res: Response, next: NextFunction) {
-  const token = req.cookies?.[ADMIN_COOKIE];
-  if (!verifySession(token)) {
-    res.status(401).json({ error: "unauthorized" });
-    return;
-  }
+/**
+ * THE ADMIN PASSWORD IS OFF. Every admin route is open to anyone who can reach it.
+ *
+ * Removed 2026-11-18 at the owner's explicit instruction, after being shown that
+ * `https://control.ejazzug.com/api/admin/` answers from the open internet with no Cloudflare
+ * Access in front of it, and that ADMIN_PASSWORD was the only thing guarding it. So this is
+ * not a local convenience: the routes below this middleware are now reachable by anyone who
+ * finds the address, and they can publish app content, **send a push notification to every
+ * listener's phone**, and change facts, charts, logos and station settings.
+ *
+ * The session machinery above is left intact and working, so putting the gate back is one
+ * edit: restore the body to
+ *
+ *     const token = req.cookies?.[ADMIN_COOKIE];
+ *     if (!verifySession(token)) { res.status(401).json({ error: "unauthorized" }); return; }
+ *     next();
+ *
+ * then `pnpm --filter @workspace/api-server build && systemctl restart ejazz-media`.
+ *
+ * The safer middle setting, if the point was only to stop typing the password on this box:
+ * gate on the ABSENCE of `x-forwarded-for`, the way the designer routes already do here --
+ * no password from the machine itself, password still required from the internet.
+ */
+export function requireAdmin(_req: Request, _res: Response, next: NextFunction) {
   next();
 }
+
+/** Kept so the gate above can be restored by putting its body back. Not currently called. */
+void verifySession;

@@ -2,7 +2,7 @@
   "expo": {
     "name": "EJazz Media App",
     "slug": "ejazz-media-app",
-    "version": "2.0.5",
+    "version": "2.1.0",
     "orientation": "default",
     "icon": "./assets/images/ejazz-app-icon.png",
     "scheme": "ejazz-media-app",
@@ -21,6 +21,23 @@
         "android.permission.MODIFY_AUDIO_SETTINGS",
         "android.permission.FOREGROUND_SERVICE",
         "android.permission.FOREGROUND_SERVICE_MEDIA_PLAYBACK"
+      ],
+      "intentFilters": [
+        {
+          "action": "VIEW",
+          "autoVerify": true,
+          "data": [
+            {
+              "scheme": "https",
+              "host": "control.ejazzug.com",
+              "pathPrefix": "/app"
+            }
+          ],
+          "category": [
+            "BROWSABLE",
+            "DEFAULT"
+          ]
+        }
       ]
     },
     "web": {

@@ -8,6 +8,7 @@ import {
   type RequestStatus,
   type StationRequestSchedule,
 } from "./requestWindows";
+import { cleanDestination } from "./destinations";
 
 /**
  * Remote app configuration ("app controls").
@@ -113,6 +114,33 @@ export type AppConfig = {
     endAt: string;
     dismissible: boolean;
   };
+  /**
+   * THE TAKEOVER (owner, 2026-11-22: "i need a take over banner in the app ctrl").
+   *
+   * The loudest thing the app can do without a push: a full-width panel across the top of
+   * Home that cannot be missed -- a new chart, a show going live, a station announcement.
+   * It is NOT a modal over the app: a listener who opened EJazz to hear the radio must be
+   * able to press play, so this takes the screen's attention, never its controls.
+   *
+   * `dest` is the one-line grammar of lib/destinations.ts, so a takeover can send a tap to
+   * the same places a notification can -- a chart, an article, a station playing.
+   * `showUntilTapped` makes it go away for good once that listener has acted on it, which is
+   * what stops the loudest element in the app from becoming the most ignored one.
+   */
+  takeover: {
+    enabled: boolean;
+    kicker: string;
+    title: string;
+    message: string;
+    imageUrl: string;
+    buttonLabel: string;
+    dest: string;
+    linkUrl: string;
+    startAt: string;
+    endAt: string;
+    dismissible: boolean;
+    showUntilTapped: boolean;
+  };
   sponsor: {
     enabled: boolean;
     label: string;
@@ -131,6 +159,21 @@ export type AppConfig = {
     shareText: string;
     /** Wording of the "share the app" invitation. Blank = the app's built-in wording. The download link is added by the app. */
     shareAppText: string;
+    /**
+     * Wording of the "Flex this song" share, which is what the button under the player sends.
+     *
+     * Four placeholders, each optional and each replaced by the app at the moment of the
+     * share: `{song}`, `{artist}`, `{station}` and `{link}`. Leave `{link}` out and the app
+     * still appends the download link, the way every other share does -- the placeholder is
+     * there so an operator can put it mid-sentence instead of at the end.
+     *
+     * Blank = the app's built-in wording:
+     *   "\u{1F3A7} I am listening to {song} - {artist} on {station}. Catch the vibe, Listen live:"
+     *
+     * 300 rather than 200 characters: this one carries a song, an artist and a station name
+     * inside it before anybody types a word of their own.
+     */
+    nowPlayingShareText: string;
     /** Each station's own socials, shown in the More tab under that station's name. */
     radio: StationLinks;
     xtra: StationLinks;
@@ -169,6 +212,10 @@ export const DEFAULT_APP_CONFIG: AppConfig = {
   },
   featured: { enabled: false, kicker: "FEATURED", title: "", body: "", imageUrl: "", linkUrl: "", startAt: "", endAt: "" },
   banner: { enabled: false, title: "", message: "", imageUrl: "", linkUrl: "", startAt: "", endAt: "", dismissible: true },
+  takeover: {
+    enabled: false, kicker: "", title: "", message: "", imageUrl: "", buttonLabel: "",
+    dest: "", linkUrl: "", startAt: "", endAt: "", dismissible: true, showUntilTapped: true,
+  },
   sponsor: { enabled: false, label: "SPONSORED", imageUrl: "", linkUrl: "", startAt: "", endAt: "" },
   links: {
     contactEmail: "",
@@ -179,6 +226,7 @@ export const DEFAULT_APP_CONFIG: AppConfig = {
     termsUrl: "",
     shareText: "",
     shareAppText: "",
+    nowPlayingShareText: "",
     radio: { instagramUrl: "", facebookUrl: "", xUrl: "", tiktokUrl: "", youtubeUrl: "", whatsappUrl: "", websiteUrl: "" },
     xtra: { instagramUrl: "", facebookUrl: "", xUrl: "", tiktokUrl: "", youtubeUrl: "", whatsappUrl: "", websiteUrl: "" },
   },
@@ -360,6 +408,7 @@ export function normalizeAppConfig(input: unknown): AppConfig {
   const ft = obj(src.featured);
   const bn = obj(src.banner);
   const sp = obj(src.sponsor);
+  const tk = obj(src.takeover);
   const lk = obj(src.links);
 
   return {
@@ -414,6 +463,22 @@ export function normalizeAppConfig(input: unknown): AppConfig {
       endAt: isoDate(bn.endAt),
       dismissible: bool(bn.dismissible, d.banner.dismissible),
     },
+    takeover: {
+      enabled: bool(tk.enabled, d.takeover.enabled),
+      kicker: text(tk.kicker, "", 24),
+      title: text(tk.title, "", 90),
+      message: text(tk.message, "", 300),
+      imageUrl: url(tk.imageUrl),
+      buttonLabel: text(tk.buttonLabel, "", 28),
+      // An unrecognised destination becomes "" rather than an error: the takeover still shows
+      // and still reads correctly, it just does not claim to go anywhere.
+      dest: cleanDestination(tk.dest),
+      linkUrl: url(tk.linkUrl),
+      startAt: isoDate(tk.startAt),
+      endAt: isoDate(tk.endAt),
+      dismissible: bool(tk.dismissible, d.takeover.dismissible),
+      showUntilTapped: bool(tk.showUntilTapped, d.takeover.showUntilTapped),
+    },
     sponsor: {
       enabled: bool(sp.enabled, d.sponsor.enabled),
       label: text(sp.label, d.sponsor.label, 30) || d.sponsor.label,
@@ -431,6 +496,7 @@ export function normalizeAppConfig(input: unknown): AppConfig {
       termsUrl: url(lk.termsUrl),
       shareText: text(lk.shareText, "", 200),
       shareAppText: text(lk.shareAppText, "", 200),
+      nowPlayingShareText: text(lk.nowPlayingShareText, "", 300),
       radio: stationLinks(lk.radio),
       xtra: stationLinks(lk.xtra),
     },
@@ -477,6 +543,15 @@ export function toPublicConfig(config: AppConfig, now: number = Date.now()): Pub
     songRequests: publicSongRequests(config, now),
     featured: { ...config.featured, enabled: config.featured.enabled && inWindow(config.featured.startAt, config.featured.endAt, now) },
     banner: { ...config.banner, enabled: config.banner.enabled && inWindow(config.banner.startAt, config.banner.endAt, now) },
+    // A takeover with nothing to say is off whatever the switch says: the loudest element in
+    // the app must never appear empty.
+    takeover: {
+      ...config.takeover,
+      enabled:
+        config.takeover.enabled &&
+        Boolean(config.takeover.title || config.takeover.message) &&
+        inWindow(config.takeover.startAt, config.takeover.endAt, now),
+    },
     sponsor: { ...config.sponsor, enabled: config.sponsor.enabled && inWindow(config.sponsor.startAt, config.sponsor.endAt, now) },
   };
 }

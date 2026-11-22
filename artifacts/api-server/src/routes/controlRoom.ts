@@ -286,12 +286,30 @@ const PAGE = `<!doctype html>
           <option value="link">Go straight to the link</option>
         </select>
       </div>
+      <div class="field">
+        <label for="f_dest">...or send the tap somewhere exact (optional)</label>
+        <select id="f_dest"><option value="">Use the choice above</option></select>
+        <input type="text" id="f_destArg" placeholder="" style="margin-top:6px;display:none;">
+        <!-- THE EPISODE PICKER. An episode's id is its feed guid, which no operator can be
+             expected to know, so picking "One podcast episode" offers the shows and then
+             lists what is actually in the feed. Clicking a row fills the box above. -->
+        <div id="f_episodePick" style="margin-top:6px;display:none;">
+          <select id="f_episodeShow" style="max-width:62%;"><option value="">Pick a show…</option></select>
+          <button type="button" id="f_episodeLoad" class="ghost" style="margin-left:6px;">LIST EPISODES</button>
+          <div id="f_episodeList" class="hint" style="margin-top:6px;max-height:190px;overflow:auto;"></div>
+        </div>
+        <p class="hint" id="f_destHint" style="margin-top:4px;"></p>
+      </div>
       <button type="button" class="secondary" id="insertLinkBtn" style="width:auto;margin-bottom:6px;">Insert a link in the body</button>
       <p class="hint">A notification tray cannot hold a tappable word, so it shows the plain words (for example "Click Here"). In the app the words become a real link. Insert one with the button, or type it as [Click Here](https://...).</p>
     </div>
     <div class="field" style="margin-top:10px;">
       <label for="f_schedule">Send later (optional) - saves as a draft and publishes + sends the push at this time</label>
       <input type="datetime-local" id="f_schedule">
+    </div>
+    <div class="field" style="margin-top:10px;">
+      <label for="f_endAt">Expires (optional) - the app stops showing it after this, and the notification stops counting as current</label>
+      <input type="datetime-local" id="f_endAt">
     </div>
     <div style="margin-top:14px;">
       <button id="createBtn">Create</button>
@@ -456,6 +474,7 @@ const PAGE = `<!doctype html>
           <select id="dsAddType">
             <option value="text">text</option>
             <option value="image">image</option>
+            <option value="art">album art</option>
             <option value="logo">logo</option>
             <option value="cta">cta</option>
             <option value="data">data</option>
@@ -753,6 +772,131 @@ $('insertLinkBtn').addEventListener('click', () => {
   if (!$('f_link').value) $('f_link').value = target.trim();
 });
 
+/* WHERE A TAP GOES (owner, 2026-11-22). The list comes from the server
+   (/api/admin/destinations -> lib/destinations.ts) rather than being typed out here, so the
+   places the app can actually open and the places this form offers are the same list and
+   cannot drift apart. Picking one that needs an id reveals the box for it. */
+var DEST_OPTIONS = [];
+var DEST_KINDS_WITH_ARG = ['article', 'category', 'podcast', 'episode'];
+/* Fills every picker rendered by the App CTRL field table. Idempotent and safe to call
+   before the list has arrived: it refills when loadDestinations() finishes, which is why
+   the stored value is read back off the select rather than kept in a variable. */
+function fillDestSelects() {
+  const selects = document.querySelectorAll('select[data-dest]');
+  for (let i = 0; i < selects.length; i += 1) {
+    const select = selects[i];
+    const chosen = select.getAttribute('data-value') || select.value;
+    if (select.options.length <= 1 && DEST_OPTIONS.length) {
+      DEST_OPTIONS.forEach(function (option) {
+        // "details" and "link" describe a notification's own message, which a takeover does
+        // not have; a takeover's web link is its own field.
+        if (option.kind === 'details' || option.kind === 'link') return;
+        const el = document.createElement('option');
+        el.value = option.kind;
+        el.textContent = option.label;
+        select.appendChild(el);
+      });
+    }
+    if (chosen) {
+      select.setAttribute('data-value', chosen);
+      select.value = chosen;
+    }
+  }
+}
+function destPicked() {
+  var kind = $('f_dest').value;
+  var option = null;
+  for (var i = 0; i < DEST_OPTIONS.length; i += 1) if (DEST_OPTIONS[i].kind === kind) option = DEST_OPTIONS[i];
+  var needs = option && option.needs && option.needs !== 'url';
+  $('f_destArg').style.display = needs ? '' : 'none';
+  $('f_destArg').placeholder = needs ? (option.hint || option.needs) : '';
+  $('f_destHint').textContent = option ? (option.hint || '') : '';
+  /* Only "episode" gets the picker: it is the one destination whose id is not a number or a
+     slug an operator can read off a page. */
+  var wantsEpisode = kind === 'episode';
+  $('f_episodePick').style.display = wantsEpisode ? '' : 'none';
+  if (wantsEpisode) loadEpisodeShows();
+}
+
+/* The shows come from the app's own config, so the picker lists exactly what the app lists.
+   Loaded once, on first use -- an operator who never aims at an episode never pays for it. */
+var EPISODE_SHOWS_LOADED = false;
+function loadEpisodeShows() {
+  if (EPISODE_SHOWS_LOADED) return;
+  EPISODE_SHOWS_LOADED = true;
+  fetch('/api/app-config').then(function (r) { return r.json(); }).then(function (data) {
+    var config = (data && data.config) || data || {};
+    var shows = config.podcasts || [];
+    var select = $('f_episodeShow');
+    shows.forEach(function (show) {
+      var el = document.createElement('option');
+      el.value = show.slug;
+      el.textContent = show.name;
+      select.appendChild(el);
+    });
+    if (!shows.length) $('f_episodeList').textContent = 'No podcast shows are configured.';
+  }).catch(function () {
+    EPISODE_SHOWS_LOADED = false;
+    $('f_episodeList').textContent = 'The show list could not be loaded.';
+  });
+}
+
+function loadEpisodes() {
+  var slug = $('f_episodeShow').value;
+  var box = $('f_episodeList');
+  if (!slug) { box.textContent = 'Pick a show first.'; return; }
+  box.textContent = 'Reading the feed…';
+  api('/podcast-episodes?show=' + encodeURIComponent(slug)).then(function (data) {
+    var episodes = (data && data.episodes) || [];
+    if (!episodes.length) { box.textContent = 'That feed listed no episodes.'; return; }
+    box.innerHTML = '';
+    episodes.forEach(function (episode) {
+      var row = document.createElement('button');
+      row.type = 'button';
+      row.className = 'ghost';
+      row.style.cssText = 'display:block;width:100%;text-align:left;margin-bottom:4px;';
+      row.textContent = episode.title + (episode.date ? '  —  ' + episode.date.slice(0, 16) : '');
+      row.addEventListener('click', function () {
+        /* The id box takes "<slug>:<ref>", which is what the grammar wants after
+           "episode:" -- the endpoint hands back the whole destination too, so this stays
+           the only place that knows how the two halves join. */
+        $('f_destArg').value = slug + ':' + episode.ref;
+        $('f_destHint').textContent = 'Aimed at: ' + episode.title;
+      });
+      box.appendChild(row);
+    });
+  }).catch(function (err) {
+    box.textContent = String((err && err.message) || err);
+  });
+}
+function destValue() {
+  var kind = $('f_dest').value;
+  if (!kind) return '';
+  var arg = $('f_destArg').value.trim();
+  return arg ? kind + ':' + arg : kind;
+}
+(async function loadDestinations() {
+  try {
+    const data = await api('/destinations');
+    DEST_OPTIONS = (data && data.destinations) || [];
+    const select = $('f_dest');
+    DEST_OPTIONS.forEach(function (option) {
+      // "details" and "link" are the two the select above already offers; offering them
+      // twice would let one row say two different things about the same tap.
+      if (option.kind === 'details' || option.kind === 'link') return;
+      const el = document.createElement('option');
+      el.value = option.kind;
+      el.textContent = option.label;
+      select.appendChild(el);
+    });
+    select.addEventListener('change', destPicked);
+    $('f_episodeLoad').addEventListener('click', loadEpisodes);
+    fillDestSelects();
+  } catch (err) {
+    $('f_destHint').textContent = 'The destination list could not be loaded; taps will open the full message.';
+  }
+})();
+
 $('createBtn').addEventListener('click', async () => {
   $('createErr').textContent = '';
   const type = $('f_type').value;
@@ -771,7 +915,9 @@ $('createBtn').addEventListener('click', async () => {
     imageUrl: $('f_image').value.trim() || null,
     linkUrl: $('f_link').value.trim() || null,
     openMode: $('f_openMode').value,
+    dest: destValue(),
   };
+  if ($('f_endAt').value) payload.endAt = localToIso($('f_endAt').value);
   if ($('f_schedule').value) {
     payload.status = 'draft';
     payload.scheduleAt = localToIso($('f_schedule').value);
@@ -814,6 +960,8 @@ $('createBtn').addEventListener('click', async () => {
     $('pushTopicField').style.display = 'none';
     $('pushExtraFields').style.display = 'none';
     $('f_image').value = ''; $('f_link').value = ''; $('f_openMode').value = 'details';
+    $('f_dest').value = ''; $('f_destArg').value = ''; destPicked();
+    $('f_endAt').value = '';
     await loadItems();
   } catch (e) {
     $('createErr').textContent = 'Could not create: ' + e.message;
@@ -1056,6 +1204,20 @@ const CONTROL_SECTIONS = [
     ['featured.startAt', 'datetime', 'Show from (optional)'],
     ['featured.endAt', 'datetime', 'Hide after (optional)'],
   ] },
+  { title: 'Takeover', hint: 'The loudest thing the app can do without sending a notification: a full-width panel across the top of Home. It never covers the player, so a listener can still press play. "Only until they tap it" stops the loudest element becoming the most ignored one.', fields: [
+    ['takeover.enabled', 'bool', 'Run the takeover'],
+    ['takeover.kicker', 'text', 'Small label above the title (e.g. NEW CHART)'],
+    ['takeover.title', 'text', 'Title'],
+    ['takeover.message', 'textarea', 'Message'],
+    ['takeover.imageUrl', 'text', 'Image URL (optional, https)'],
+    ['takeover.buttonLabel', 'text', 'Button words (e.g. See the chart)'],
+    ['takeover.dest', 'dest', 'Where the button goes'],
+    ['takeover.linkUrl', 'text', 'Web link instead (optional)'],
+    ['takeover.dismissible', 'bool', 'Listeners can close it'],
+    ['takeover.showUntilTapped', 'bool', 'Only until they tap it'],
+    ['takeover.startAt', 'datetime', 'Show from (optional)'],
+    ['takeover.endAt', 'datetime', 'Hide after (optional)'],
+  ] },
   { title: 'Promo banner', hint: 'A message strip at the top of Home for events, contests and campaigns.', fields: [
     ['banner.enabled', 'bool', 'Show banner'],
     ['banner.title', 'text', 'Title'],
@@ -1083,6 +1245,7 @@ const CONTROL_SECTIONS = [
     ['links.termsUrl', 'text', 'Terms link'],
     ['links.shareText', 'text', 'Message when listeners share a station (the app link is added automatically)'],
     ['links.shareAppText', 'text', 'Message when listeners share the app (the app link is added automatically; blank = built-in wording)'],
+    ['links.nowPlayingShareText', 'text', 'Caption for "Flex this song" under the player. Use {song}, {artist}, {station} and {link}. Blank = \u{1F3A7} I am listening to {song} - {artist} on {station}. Catch the vibe, Listen live:'],
   ] },
   { title: 'EJazz Radio socials', hint: 'Shown in the More tab under this station. Leave blank to hide. Only https links are accepted.', fields: [
     ['links.radio.instagramUrl', 'text', 'Instagram'],
@@ -1117,6 +1280,14 @@ function renderControls() {
       }
       if (f[1] === 'textarea') {
         return '<div class="field"><label for="' + id + '">' + escapeHtml(f[2]) + '</label><textarea id="' + id + '" rows="2"></textarea></div>';
+      }
+      if (f[1] === 'dest') {
+        // The same picker the notification form uses, from the same server list, so a
+        // takeover and a push cannot offer different places to land.
+        return '<div class="field"><label for="' + id + '">' + escapeHtml(f[2]) + '</label>'
+          + '<select id="' + id + '" data-dest="1"><option value="">Nowhere - no button</option></select>'
+          + '<input type="text" id="' + id + '_arg" placeholder="the id it needs, if any" style="margin-top:6px;">'
+          + '</div>';
       }
       const type = f[1] === 'datetime' ? 'datetime-local' : 'text';
       return '<div class="field"><label for="' + id + '">' + escapeHtml(f[2]) + '</label><input type="' + type + '" id="' + id + '"></div>';
@@ -1169,8 +1340,20 @@ function fillControls(cfg) {
     const v = getPath(cfg, f[0]);
     if (f[1] === 'bool') el.checked = Boolean(v);
     else if (f[1] === 'datetime') el.value = isoToLocal(v);
+    else if (f[1] === 'dest') {
+      const stored = String(v == null ? '' : v);
+      const kinds = DEST_KINDS_WITH_ARG;
+      const cut = stored.indexOf(':');
+      const head = cut > 0 ? stored.slice(0, cut) : stored;
+      // "radio:xtra" is one choice, not a kind with an argument -- only the four that take an
+      // id get split, or the picker would show "radio" with "xtra" typed in a box.
+      const split = cut > 0 && kinds.indexOf(head) !== -1;
+      el.value = split ? head : stored;
+      $(fid(f[0]) + '_arg').value = split ? stored.slice(cut + 1) : '';
+    }
     else el.value = v == null ? '' : v;
   }));
+  fillDestSelects();
   const nl = String.fromCharCode(10);
   $('cfg_podcasts').value = (cfg.podcasts || []).map((p) => p.name + ' | ' + p.feedUrl).join(nl);
   fillSongRequests(cfg);
@@ -1280,6 +1463,8 @@ function songFactsSectionHtml() {
   return sectionHtml('Song facts',
     'A short fact under the player while a matching song plays.',
     '<p class="hint">Written by AI the first time a song plays, or typed here. A fact you type always wins and is never overwritten. Leave the song title blank for a fact about the artist that suits any of their songs.</p>' +
+    '<p class="hint"><b>Say it another way</b> asks the faster AI to reword a fact it already has, so a song heard twice a day does not show the same sentence twice. It adds a wording rather than replacing one, and a reply that changes a number or alters a quote is thrown away. You can also give a song a second fact by putting two lines for it in the spreadsheet on the Repurpose page.</p>' +
+    '<p class="hint"><b>Push to hub</b> sends a fact to the Repurpose page on the dashboard, where you pick where it goes - a card, the app, the socials, a podcast subject or an article - and whether it goes now or at a time you set. Pushing changes nothing for listeners: the fact keeps showing under the player exactly as it does now.</p>' +
     '<div class="checkbox" style="margin-bottom:10px;"><input type="checkbox" id="sf_auto"><label for="sf_auto" style="margin:0;">Write a fact with AI the first time a song plays (saved with the Save button below)</label></div>' +
     '<div class="field"><label for="sf_provider">AI that writes the facts</label><select id="sf_provider">' +
     '<option value="gemini">Gemini (checks the web first when it can)</option><option value="none">No AI - only the sheet and facts I type</option><option value="groq">Groq (faster, no web check - leave facts you are unsure about to the sheet)</option>' +
@@ -1315,11 +1500,19 @@ async function loadSongFacts() {
       const marker = f.body ? '' : ' <span class="badge expired">no fact found</span>';
       return '<div class="item" data-id="' + f.id + '"><div class="lead"><div style="flex:1;min-width:0;">' +
         '<div class="title">' + escapeHtml(who) + ' <span class="badge ' + (f.source === 'manual' ? 'live' : 'draft') + '">' + (f.source === 'manual' ? 'typed' : f.source === 'sheet' ? 'sheet' : 'AI') + '</span>' +
-        (f.enabled || !f.body ? '' : ' <span class="badge expired">off</span>') + marker + '</div>' +
-        '<div class="meta">' + escapeHtml(f.body) + '</div></div>' +
+        (f.enabled || !f.body ? '' : ' <span class="badge expired">off</span>') + marker +
+        (f.pushedAt ? ' <span class="badge live">in the hub</span>' : '') +
+        (f.wordings && f.wordings.length > 1 ? ' <span class="badge">' + f.wordings.length + ' wordings</span>' : '') + '</div>' +
+        '<div class="meta">' + escapeHtml(f.body) + '</div>' +
+        ((f.wordings || []).length > 1
+          ? '<div class="meta" style="opacity:.75;">Also: ' +
+            escapeHtml(f.wordings.slice(1).join('  |  ')) + '</div>'
+          : '') + '</div>' +
         '<div class="actions">' +
         '<button type="button" class="secondary sfEdit" data-id="' + f.id + '">Edit</button>' +
         (f.body ? '<button type="button" class="secondary sfToggle" data-id="' + f.id + '">' + (f.enabled ? 'Turn off' : 'Turn on') + '</button>' : '') +
+        (f.body ? '<button type="button" class="secondary sfPush" data-id="' + f.id + '">' + (f.pushedAt ? 'Take back' : 'Push to hub') + '</button>' : '') +
+        (f.body ? '<button type="button" class="secondary sfSay" data-id="' + f.id + '">Say it another way</button>' : '') +
         '<button type="button" class="secondary sfDel" data-id="' + f.id + '">Delete</button></div></div></div>';
     }).join('');
     const byId = {};
@@ -1335,6 +1528,30 @@ async function loadSongFacts() {
       const f = byId[b.dataset.id];
       try { await api('/song-facts/' + f.id, { method: 'PATCH', body: JSON.stringify({ body: f.body, enabled: !f.enabled }) }); loadSongFacts(); }
       catch (e) { $('sf_err').textContent = e.message; }
+    }));
+    host.querySelectorAll('.sfPush').forEach((b) => b.addEventListener('click', async () => {
+      const f = byId[b.dataset.id];
+      try {
+        await api('/song-facts/' + f.id + '/push', { method: 'POST', body: JSON.stringify({ pushed: !f.pushedAt }) });
+        $('sf_err').textContent = f.pushedAt ? 'Taken back out of the hub.' : 'Pushed. Choose where it goes on the Repurpose page of the dashboard.';
+        loadSongFacts();
+      } catch (e) { $('sf_err').textContent = e.message; }
+    }));
+    host.querySelectorAll('.sfSay').forEach((b) => b.addEventListener('click', async () => {
+      const f = byId[b.dataset.id];
+      const was = b.textContent;
+      b.disabled = true;
+      b.textContent = 'Thinking...';
+      $('sf_err').textContent = '';
+      try {
+        const r = await api('/song-facts/' + f.id + '/rephrase', { method: 'POST', body: JSON.stringify({ want: 2 }) });
+        $('sf_err').textContent = r.message || 'Done.';
+        loadSongFacts();
+      } catch (e) {
+        $('sf_err').textContent = e.message;
+        b.disabled = false;
+        b.textContent = was;
+      }
     }));
     host.querySelectorAll('.sfDel').forEach((b) => b.addEventListener('click', async () => {
       if (!window.confirm('Delete this fact? A new one may be written by AI the next time the song plays.')) return;
@@ -1511,6 +1728,11 @@ $('saveControlsBtn').addEventListener('click', async () => {
       const el = $(fid(f[0]));
       if (f[1] === 'bool') setPath(next, f[0], el.checked);
       else if (f[1] === 'datetime') setPath(next, f[0], localToIso(el.value));
+      else if (f[1] === 'dest') {
+        const kind = el.value;
+        const arg = $(fid(f[0]) + '_arg').value.trim();
+        setPath(next, f[0], !kind ? '' : (arg ? kind + ':' + arg : kind));
+      }
       else setPath(next, f[0], el.value);
     }));
     const nl = String.fromCharCode(10);

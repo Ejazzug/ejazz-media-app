@@ -29,6 +29,9 @@ export const notificationsTable = pgTable("notifications", {
   imageUrl: text("image_url"),
   linkUrl: text("link_url"),
   openMode: text("open_mode").notNull().default("details"),
+  /** Where a tap goes, in lib/destinations.ts's grammar. Empty = what open_mode says.
+   *  Added by hand (ALTER TABLE, 2026-11-22); kept here so a push stays a no-op. */
+  dest: text("dest").notNull().default(""),
   topic: pushTopicEnum("topic").notNull().default("all"),
   sentAt: timestamp("sent_at", { withTimezone: true }).notNull().defaultNow(),
   // Null = never expires. Set to hide the notification from the app after a moment passes.

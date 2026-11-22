@@ -2,17 +2,19 @@ import { Feather } from '@expo/vector-icons';
 import { Image } from 'expo-image';
 import { Stack, useLocalSearchParams, useRouter } from 'expo-router';
 import React from 'react';
-import { ActivityIndicator, Pressable, ScrollView, Share, StyleSheet, Text, View } from 'react-native';
+import { ActivityIndicator, Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { EditorialPlaceholder, MINI_PLAYER_CLEARANCE } from '@/components/MediaComponents';
 import { useColors } from '@/hooks/useColors';
-import { useArticle, useRelatedNews } from '@/lib/news';
+import { NEWS_CATEGORIES, useArticle, useRelatedNews } from '@/lib/news';
+import { useShareApp } from '@/lib/shareApp';
 
 export default function ArticleScreen() {
   const colors = useColors();
   const insets = useSafeAreaInsets();
   const router = useRouter();
   const { id } = useLocalSearchParams<{ id?: string }>();
+  const { shareWithLink } = useShareApp();
   const article = useArticle(id);
   const related = useRelatedNews(article.data?.categoryId, article.data?.id);
   const story = article.data;
@@ -61,7 +63,14 @@ export default function ArticleScreen() {
             <Feather name="arrow-left" size={20} color={colors.foreground} />
           </Pressable>
           <Pressable
-            onPress={() => Share.share({ message: shareMessage, url: story.link || undefined })}
+            /* THE APP LINK TRAVELS WITH THE ARTICLE (owner, 2026-11-22: deep links to the
+               store on articles and podcasts too). This screen was the one share in the app
+               that went out raw -- the story's own link and nothing else -- so an article
+               doing the rounds on WhatsApp pointed at the website and never at the app.
+               `shareWithLink` is what every other share already uses; it appends the Play
+               Store link, carrying the install referrer that lets the Play Console count
+               installs that began with a share. */
+            onPress={() => shareWithLink(shareMessage)}
             style={styles.topButton}
             hitSlop={8}
           >
@@ -112,6 +121,32 @@ export default function ArticleScreen() {
             </Pressable>
           ) : null}
         </View>
+
+        {/* WHERE ELSE TO GO (owner, task #3). "More in <category>" above is four stories from
+            this one's own category; these chips are the way OUT of it, into any other. They
+            push News with the `category` param it already understands from an aimed tap, so
+            there is one route into a filtered News screen, not two.
+            The story's own category is marked rather than hidden: its list holds more than the
+            four shown above. */}
+        <View style={styles.categoryChips}>
+          <Text style={styles.relatedLabel}>READ MORE EJAZZ</Text>
+          <View style={styles.chipWrap}>
+            {NEWS_CATEGORIES.map((category) => {
+              const isOwn = category.id === story.categoryId;
+              return (
+                <Pressable
+                  key={category.id}
+                  onPress={() => router.push({ pathname: '/(tabs)/news', params: { category: String(category.id) } })}
+                  accessibilityRole="button"
+                  accessibilityLabel={`Open ${category.label} stories`}
+                  style={[styles.chip, isOwn && styles.chipOwn]}
+                >
+                  <Text style={[styles.chipText, isOwn && styles.chipTextOwn]}>{category.label.toUpperCase()}</Text>
+                </Pressable>
+              );
+            })}
+          </View>
+        </View>
       </ScrollView>
     </View>
   );
@@ -139,6 +174,12 @@ const styles = StyleSheet.create({
   relatedTitle: { color: '#F7F9FC', fontSize: 14, lineHeight: 19, fontWeight: '600' },
   relatedDate: { color: '#7890AE', fontSize: 9, fontWeight: '700', letterSpacing: 1 },
   relatedRetry: { color: '#A7B7CC', fontSize: 13, lineHeight: 19, paddingVertical: 12 },
+  categoryChips: { marginTop: 10, paddingHorizontal: 20, paddingTop: 24, borderTopWidth: 1, borderTopColor: '#204570' },
+  chipWrap: { flexDirection: 'row', flexWrap: 'wrap', gap: 8 },
+  chip: { minHeight: 38, justifyContent: 'center', paddingHorizontal: 13, borderWidth: 1, borderColor: '#2C4B75' },
+  chipOwn: { borderColor: '#E43B48' },
+  chipText: { color: '#A7B7CC', fontSize: 10, fontWeight: '700', letterSpacing: 1 },
+  chipTextOwn: { color: '#F7F9FC' },
   statusTitle: { color: '#F7F9FC', fontSize: 18, fontWeight: '600', textAlign: 'center' },
   statusText: { color: '#A7B7CC', fontSize: 14 },
   retry: { color: '#E43B48', fontSize: 11, fontWeight: '700', letterSpacing: 1.2, padding: 10 },

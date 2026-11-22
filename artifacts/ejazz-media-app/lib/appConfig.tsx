@@ -86,6 +86,31 @@ export type AppConfig = {
     endAt: string;
     dismissible: boolean;
   };
+  /**
+   * THE TAKEOVER: the loudest thing the app can do without a push -- a full-width panel
+   * across the top of Home. Never a modal: someone who opened EJazz to hear the radio must
+   * still be able to press play, so this takes the screen's attention, never its controls.
+   *
+   * `enabled` already has the server's window applied, but a CACHED config carries the answer
+   * the server gave when it was fetched, so the window is checked again here before drawing.
+   * `dest` is the grammar of lib/destination.ts; `showUntilTapped` retires it for this
+   * listener once they have acted on it, which is what stops the loudest element in the app
+   * from becoming the most ignored one.
+   */
+  takeover: {
+    enabled: boolean;
+    kicker: string;
+    title: string;
+    message: string;
+    imageUrl: string;
+    buttonLabel: string;
+    dest: string;
+    linkUrl: string;
+    startAt: string;
+    endAt: string;
+    dismissible: boolean;
+    showUntilTapped: boolean;
+  };
   sponsor: {
     enabled: boolean;
     label: string;
@@ -104,6 +129,8 @@ export type AppConfig = {
     shareText: string;
     /** Wording of the "share the app" invitation; the download link is added automatically. */
     shareAppText: string;
+    /** Wording of "Flex this song": {song}, {artist}, {station}, {link}. Blank = built-in. */
+    nowPlayingShareText: string;
     radio: StationLinks;
     xtra: StationLinks;
   };
@@ -133,6 +160,10 @@ export const DEFAULT_APP_CONFIG: AppConfig = {
   streams: { radio: { url: '', backupUrl: '' }, xtra: { url: '', backupUrl: '' } },
   featured: { enabled: false, kicker: 'FEATURED', title: '', body: '', imageUrl: '', linkUrl: '', startAt: '', endAt: '' },
   banner: { enabled: false, title: '', message: '', imageUrl: '', linkUrl: '', startAt: '', endAt: '', dismissible: true },
+  takeover: {
+    enabled: false, kicker: '', title: '', message: '', imageUrl: '', buttonLabel: '',
+    dest: '', linkUrl: '', startAt: '', endAt: '', dismissible: true, showUntilTapped: true,
+  },
   sponsor: { enabled: false, label: 'SPONSORED', imageUrl: '', linkUrl: '', startAt: '', endAt: '' },
   links: {
     contactEmail: '',
@@ -143,6 +174,7 @@ export const DEFAULT_APP_CONFIG: AppConfig = {
     termsUrl: '',
     shareText: '',
     shareAppText: '',
+    nowPlayingShareText: '',
     radio: { instagramUrl: '', facebookUrl: '', xUrl: '', tiktokUrl: '', youtubeUrl: '', whatsappUrl: '', websiteUrl: '' },
     xtra: { instagramUrl: '', facebookUrl: '', xUrl: '', tiktokUrl: '', youtubeUrl: '', whatsappUrl: '', websiteUrl: '' },
   },
@@ -205,6 +237,22 @@ export function isVersionBelow(current: string, required: string): boolean {
     if (x !== y) return x < y;
   }
   return false;
+}
+
+/**
+ * True when `now` falls inside [startAt, endAt]; a blank or unparseable end is an open one.
+ *
+ * The server already applies this window before it answers, but the answer is CACHED: a phone
+ * that has been offline since Tuesday is holding Tuesday's verdict. Anything timed -- the
+ * takeover above all, because it is the loudest -- re-checks it here before drawing.
+ */
+export function isWithinWindow(startAt: string, endAt: string, now: Date = new Date()): boolean {
+  const at = now.getTime();
+  const start = startAt ? Date.parse(startAt) : NaN;
+  const end = endAt ? Date.parse(endAt) : NaN;
+  if (!Number.isNaN(start) && at < start) return false;
+  if (!Number.isNaN(end) && at > end) return false;
+  return true;
 }
 
 export function getAppVersion(): string {

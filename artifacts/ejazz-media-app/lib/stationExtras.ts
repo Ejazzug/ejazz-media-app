@@ -17,23 +17,64 @@ async function getJson(path: string, params: Record<string, string>): Promise<un
   }
 }
 
-export type SongFact = { id: number; body: string; source: 'ai' | 'manual' };
+export type SongFact = {
+  id: number;
+  body: string;
+  source: 'ai' | 'manual';
+  /** Which fact of the song's list this is, counted from 0. */
+  index: number;
+  /** How many facts the song has. More than one means the card offers another. */
+  total: number;
+  /** Absolute URL of this one fact drawn as a share card, or null when the server has none. */
+  shareUrl: string | null;
+};
 
 /**
- * The "Clock this..." fact for the song on air. Keyed on artist + title, so it refetches
- * when the track changes and is cached per song. A first-time song can take several seconds
- * while the server writes its fact; the card simply stays hidden until it arrives.
- * Resolves to null (not an error) when there is nothing to show.
+ * The "Clock this..." fact for the song on air — ONE fact, never the song's whole list.
+ *
+ * Keyed on artist + title (and on `which`), so it refetches when the track changes and is
+ * cached per song. A first-time song can take several seconds while the server writes its
+ * fact; the card simply stays hidden until it arrives. Resolves to null (not an error) when
+ * there is nothing to show.
+ *
+ * `which` is which fact of the song's list to ask for, and it is what the card's "Another one"
+ * tap advances. Left undefined, the server rotates — so a song heard twice does not open with
+ * the same line. The server wraps an index past the end rather than failing, because the list
+ * can change between two taps and a listener must never be shown an error for tapping.
+ *
+ * `shareUrl` arrives as a path and is made absolute here: the share sheet downloads the
+ * picture, so it needs a whole URL, and only this layer knows which base the app is on.
  */
-export function useSongFact(artist: string | undefined, title: string | undefined) {
+export function useSongFact(
+  artist: string | undefined,
+  title: string | undefined,
+  which?: number,
+  station?: 'radio' | 'xtra',
+) {
   const a = (artist ?? '').trim();
   const t = (title ?? '').trim();
   return useQuery({
-    queryKey: ['ejazz-song-fact', a.toLowerCase(), t.toLowerCase()],
+    queryKey: ['ejazz-song-fact', a.toLowerCase(), t.toLowerCase(), which ?? 'rotate', station ?? ''],
     queryFn: async (): Promise<SongFact | null> => {
-      const data = (await getJson('/api/facts/for-track', { artist: a, title: t })) as { fact?: SongFact | null };
+      const params: Record<string, string> = { artist: a, title: t };
+      // Only the share CARD changes with the station -- its footer and its corner logo. The
+      // fact is the song's and reads the same on either.
+      if (station) params.station = station;
+      if (typeof which === 'number' && Number.isFinite(which)) params.n = String(Math.trunc(which));
+      const data = (await getJson('/api/facts/for-track', params)) as { fact?: Partial<SongFact> | null };
       const fact = data?.fact;
-      return fact && typeof fact.body === 'string' && fact.body ? fact : null;
+      if (!fact || typeof fact.body !== 'string' || !fact.body) return null;
+      const share = typeof fact.shareUrl === 'string' && fact.shareUrl
+        ? (fact.shareUrl.startsWith('http') ? fact.shareUrl : `${pulseBaseUrl()}${fact.shareUrl}`)
+        : null;
+      return {
+        id: typeof fact.id === 'number' ? fact.id : 0,
+        body: fact.body,
+        source: fact.source === 'manual' ? 'manual' : 'ai',
+        index: typeof fact.index === 'number' ? fact.index : 0,
+        total: typeof fact.total === 'number' && fact.total > 0 ? fact.total : 1,
+        shareUrl: share,
+      };
     },
     enabled: isPulseConfigured() && a.length > 0 && t.length > 0,
     staleTime: 30 * 60 * 1000,
@@ -105,6 +146,35 @@ export type StationChart = {
   card?: StationChartCard | null;
   design?: StationChartDesign | null;
 };
+
+/**
+ * The PICTURE of a countdown's chart on an earlier day, drawn by the dashboard in the same design
+ * as today's -- same background, same colours, same logos, with that day's songs and date.
+ *
+ * Asked of the dashboard directly rather than of this app's own API: the card is the dashboard's
+ * to draw, and routing the request through the API server would only mean two things to keep in
+ * step. Resolves to null (not an error) when that day has no card, and the screen then falls back
+ * to drawing the chart itself.
+ */
+export type PastChartCard = { url: string; caption: string; date: string };
+
+export function usePastChartCard(countdownId: string | undefined, date: string | null) {
+  return useQuery({
+    queryKey: ['ejazz-past-chart-card', countdownId, date],
+    queryFn: async (): Promise<PastChartCard | null> => {
+      const data = (await getJson('/api/countdown-card-day', {
+        countdown: countdownId ?? '',
+        date: date ?? '',
+      })) as { ok?: boolean; url?: string | null; caption?: string; date?: string };
+      if (!data?.ok || typeof data.url !== 'string' || !data.url) return null;
+      return { url: data.url, caption: data.caption ?? '', date: data.date ?? (date ?? '') };
+    },
+    enabled: isPulseConfigured() && Boolean(countdownId) && Boolean(date),
+    // A day that has been drawn never changes, and the URL carries the image's own version.
+    staleTime: 60 * 60 * 1000,
+    retry: 0,
+  });
+}
 
 /** A countdown's chart on an earlier day. Only requested when a date chip is tapped. */
 export function usePastChart(station: 'radio' | 'xtra', countdownId: string | undefined, date: string | null) {

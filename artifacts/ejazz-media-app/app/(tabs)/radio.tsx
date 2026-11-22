@@ -20,12 +20,14 @@ import {
   useSongRequest,
 } from '@/lib/radio';
 import {
-  usePastChart, useSongFact, useStationCharts,
+  usePastChart, usePastChartCard, useSongFact, useStationCharts,
   type StationChart, type StationChartDesign, type StationChartEntry,
 } from '@/lib/stationExtras';
 import { classifyLineup, useShows } from '@/lib/shows';
 import { LineupCard, LineupRow, ShowLineupCard } from '@/components/LineupCard';
 import { useShareApp } from '@/lib/shareApp';
+import { OfflineState } from '@/components/OfflineState';
+import { useService } from '@/lib/reachability';
 
 type RadioView = 'radio' | 'extra' | 'podcasts';
 
@@ -60,6 +62,11 @@ const BOARD_FALLBACK = { bg: '#0E1E3A', accent: '#FF6B6B', text: '#F7F9FC' };
  * Nothing is drawn when the server said nothing (a chart on its first day has no movement for any
  * row), which is why `move` being absent is not the same as "same".
  */
+/** The card's own movement colours (share_cards.py: UP_COLOUR / DOWN_COLOUR), so the board and
+ *  the picture never disagree about which way is good news. */
+const CHART_UP = '#2ECC71';
+const CHART_DOWN = '#FF5A5F';
+
 function ChartMoveMark({
   entry, design, accent, ink,
 }: {
@@ -77,17 +84,34 @@ function ChartMoveMark({
   // Last week's number says nothing for a new entry -- it had none.
   const showLast = lastWeek && !isNew && typeof entry.lastWeek === 'number';
   if (!showBadge && !showArrow && !showLast) return null;
+  // THE NUMBER IS THE POINT -- the same rule the shared card follows (share_cards.py,
+  // `_move_chip`). An arrow says a song moved; "+4" says how far, which is the part worth
+  // reading. Where last week's place is unknown the arrow stands alone, because inventing a
+  // distance would be worse than showing none. A non-mover gets a dash rather than an arrow:
+  // ten arrows down a chart read as ten things happening.
+  const delta = !isNew && typeof entry.lastWeek === 'number'
+    ? entry.lastWeek - entry.position
+    : null;
+  const movedUp = entry.move === 'up';
+  const moveColour = entry.move === 'same' || !delta
+    ? `${ink}8C`
+    : movedUp ? CHART_UP : CHART_DOWN;
   return (
     <View style={styles.chartBoardMove}>
       {showBadge ? (
         <Text style={[styles.chartBoardNew, { color: accent, borderColor: accent }]}>NEW</Text>
       ) : null}
       {showArrow ? (
-        <Feather
-          name={entry.move === 'up' ? 'arrow-up' : entry.move === 'down' ? 'arrow-down' : 'minus'}
-          size={14}
-          color={entry.move === 'up' ? accent : `${ink}8C`}
-        />
+        entry.move === 'same' || !delta ? (
+          <Text style={[styles.chartBoardDash, { color: `${ink}8C` }]}>–</Text>
+        ) : (
+          <View style={styles.chartBoardChip}>
+            <Feather name={movedUp ? 'arrow-up' : 'arrow-down'} size={12} color={moveColour} />
+            <Text style={[styles.chartBoardDelta, { color: moveColour }]}>
+              {delta > 0 ? `+${delta}` : String(delta)}
+            </Text>
+          </View>
+        )
       ) : null}
       {showLast ? <Text style={[styles.chartBoardLast, { color: `${ink}99` }]}>{entry.lastWeek}</Text> : null}
     </View>
@@ -130,8 +154,28 @@ function ChartBoard({
       {kicker ? <Text style={[styles.chartBoardKicker, { color: accent }]}>{kicker.toUpperCase()}</Text> : null}
       <Text style={[styles.chartBoardTitle, { color: ink }]}>{title}</Text>
       <View style={[styles.chartBoardRule, { backgroundColor: accent }]} />
-      {entries.map((entry) => (
-        <View key={`board-${entry.position}`} style={styles.chartBoardRow}>
+      {entries.map((entry, index) => (
+        /* THE TOP THREE ARE LIT, as they are on the card: ten identical rows give the eye
+           nothing to land on, and the three places anybody argues about are the top three.
+           The tint is mixed from the design's OWN accent over its own background and fades
+           across the three, so a recoloured design stays one design -- never a colour of this
+           screen's own. Skipped on a chart of three or fewer, where lighting everything lights
+           nothing. */
+        <View
+          key={`board-${entry.position}`}
+          style={[
+            styles.chartBoardRow,
+            index < 3 && entries.length > 3
+              ? {
+                  backgroundColor: `${accent}${['24', '18', '0E'][index]}`,
+                  borderLeftWidth: 3,
+                  borderLeftColor: accent,
+                  paddingLeft: 9,
+                  borderRadius: 8,
+                }
+              : null,
+          ]}
+        >
           <Text style={[styles.chartBoardPos, { color: accent }]}>{entry.position}</Text>
           {artwork ? (
             // The empty square is deliberate: a row with no cached cover keeps the same shape as
@@ -194,6 +238,18 @@ function ChartSection({ chart, station }: { chart: StationChart; station: 'radio
   const share = useShareApp();
   const dates = chart.kind === 'countdown' ? (chart.pastDates ?? []) : [];
   const viewingPast = picked !== null && dates.includes(picked);
+  // The picture of an earlier day, drawn in the SAME design as today's. Only asked for once a day
+  // is actually being looked at, so the usual case costs nothing.
+  const pastCard = usePastChartCard(chart.countdownId, viewingPast ? picked : null);
+  const [cardFailed, setCardFailed] = React.useState(false);
+  // The card for whichever day is on screen. Today's travels with the chart; an earlier day's is
+  // fetched. Null means this countdown has no design yet, and the chart is drawn below instead.
+  const card = viewingPast ? (pastCard.data ?? null) : (chart.card ?? null);
+  const cardLoading = viewingPast && pastCard.isLoading;
+  // A card that will not load must not leave an empty screen: one failure and this falls back to
+  // drawing the chart, which needs nothing from the network.
+  React.useEffect(() => { setCardFailed(false); }, [card?.url]);
+  const showPicture = Boolean(card?.url) && !cardFailed;
   const entries = viewingPast ? (past.data ?? []) : chart.entries;
   const shown = chart.kind === 'countdown' ? entries : entries.slice(0, 10);
   // An earlier day's caption, written the way the dashboard writes the picture's: title and date,
@@ -264,25 +320,36 @@ function ChartSection({ chart, station }: { chart: StationChart; station: 'radio
           </Pressable>
         </Modal>
       ) : null}
-      {viewingPast && past.isLoading ? <ActivityIndicator style={styles.chartStatus} /> : null}
+      {viewingPast && (past.isLoading || cardLoading) ? <ActivityIndicator style={styles.chartStatus} /> : null}
       {viewingPast && past.isError ? <Text style={styles.chartStatusText}>That day's chart isn't available.</Text> : null}
-      {/* ONE board for both days now, drawn as text in the design's colours -- today's used to be
-          the card PNG. The PICTURE is still what Share sends for today, so what people post is
-          unchanged; an earlier day has no picture and never can (one card file per countdown,
-          overwritten in place), so that one shares the rows as words. */}
-      {shown.length > 0 ? (
+      {/* The PICTURE is the chart on this screen: the card the dashboard drew, in the operator's
+          own design, logos and all. An earlier day has its own picture in that same design -- same
+          background, that day's songs -- fetched when the day is chosen. The drawn board below is
+          the fallback for a countdown with no design yet, and for an image that will not load. */}
+      {shown.length > 0 || showPicture ? (
         <View style={styles.chartCardBlock}>
-          <ChartBoard
-            design={chart.design}
-            kicker={viewingPast && picked ? formatChartDay(picked) : (chart.design?.headerText ?? '')}
-            title={chart.title}
-            entries={shown}
-          />
+          {showPicture && card ? (
+            <Image
+              source={{ uri: card.url }}
+              style={styles.chartCardImage}
+              contentFit="contain"
+              transition={180}
+              accessibilityLabel={`${chart.title}${picked ? ` — ${formatChartDay(picked)}` : ''}`}
+              onError={() => setCardFailed(true)}
+            />
+          ) : shown.length > 0 ? (
+            <ChartBoard
+              design={chart.design}
+              kicker={viewingPast && picked ? formatChartDay(picked) : (chart.design?.headerText ?? '')}
+              title={chart.title}
+              entries={shown}
+            />
+          ) : null}
           {share.enabled ? (
             <Pressable
               onPress={() =>
-                !viewingPast && chart.card
-                  ? share.shareCardImage(chart.card.caption || chart.title, chart.card.url)
+                card
+                  ? share.shareCardImage(card.caption || chart.title, card.url)
                   : share.shareCard(pastCaption, '')
               }
               accessibilityRole="button"
@@ -323,7 +390,11 @@ function RequestHours({ status }: { status: RequestStatus }) {
 export default function RadioScreen() {
   const colors = useColors();
   const insets = useSafeAreaInsets();
-  const { mode } = useLocalSearchParams<{ mode?: string }>();
+  // WHAT AN AIMED TAP ASKED FOR (lib/destination.ts). A notification, a takeover or a shared
+  // link can land here with an instruction: this station, playing, requests open, the chart.
+  const { mode, play, requests, chart, show, episode } = useLocalSearchParams<{
+    mode?: string; play?: string; requests?: string; chart?: string; show?: string; episode?: string;
+  }>();
   const [artist, setArtist] = React.useState('');
   const [title, setTitle] = React.useState('');
   const [sender, setSender] = React.useState('');
@@ -334,13 +405,18 @@ export default function RadioScreen() {
   const [debouncedExtraSearch, setDebouncedExtraSearch] = React.useState('');
   const { features, songRequests, links } = useAppConfig();
   const [rawViewMode, setViewMode] = React.useState<RadioView>(
-    mode === 'podcasts' ? 'podcasts' : 'radio',
+    mode === 'podcasts' ? 'podcasts' : mode === 'extra' || mode === 'xtra' ? 'extra' : 'radio',
   );
   // If the Control Room switches podcasts off while someone is on that tab, fall back to the radio.
   const viewMode: RadioView = rawViewMode === 'podcasts' && !features.podcasts ? 'radio' : rawViewMode;
   const shareMessage = (fallback: string) => (links.shareText ? `${links.shareText}` : fallback);
   // Station shares carry the app download link too (it used to be text only).
-  const { shareWithLink, shareApp } = useShareApp();
+  // `share` as a whole as well as the two helpers: the fact card shares a PICTURE
+  // (`shareCardImage`), which the destructured pair does not include.
+  const share = useShareApp();
+  const { shareWithLink, shareApp } = share;
+  // The request panel starts folded: one strip, tapped open when somebody actually wants it.
+  const [requestPanelOpen, setRequestPanelOpen] = React.useState(false);
   // Already includes the request window: the server applies the schedule before it
   // answers, so these two booleans are the whole gate.
   const radioRequestsOpen = features.songRequests && songRequests.radioEnabled;
@@ -375,6 +451,38 @@ export default function RadioScreen() {
     if (viewMode === 'radio' || viewMode === 'extra') setViewingStation(viewMode);
   }, [viewMode, setViewingStation]);
   const isRadio = viewMode === 'radio';
+  // Which of the two the strip above the panel is talking about: a listener on Xtra must not
+  // be told requests are open because they happen to be open on Radio.
+  const requestsOpenNow = isRadio ? radioRequestsOpen : xtraRequestsOpen;
+  const pulseService = useService('pulse');
+
+  /* ACTING ON AN AIMED TAP.
+     Runs once per arrival, keyed by the parameters themselves, so coming back to this screen
+     by hand never replays an instruction a notification gave earlier. `play` is handled here
+     rather than inside the navigation helper, which keeps a cold start from a notification
+     and a tap inside the app on exactly the same path.
+     Requests only open when the station is actually taking them: a panel that opens onto
+     "requests are closed" is a worse answer than leaving it folded. */
+  const aimed = `${mode ?? ''}|${play ?? ''}|${requests ?? ''}|${chart ?? ''}`;
+  const aimedDone = React.useRef('');
+  React.useEffect(() => {
+    if (aimedDone.current === aimed) return;
+    aimedDone.current = aimed;
+    if (mode === 'podcasts') setViewMode('podcasts');
+    else if (mode === 'extra' || mode === 'xtra') setViewMode('extra');
+    else if (mode === 'radio') setViewMode('radio');
+    if (requests === '1' && requestsOpenNow) setRequestPanelOpen(true);
+    if (play === '1') {
+      const wanted = mode === 'extra' || mode === 'xtra' ? 'extra' : 'radio';
+      // Only ever starts; never stops. Someone already listening who taps "play Xtra" must
+      // end up on Xtra, not in silence, which is what calling a toggle blindly would do.
+      if (!(playbackKind === 'radio' && isPlaying && selectedStationId === wanted)) {
+        selectStation(wanted);
+        toggleRadioPlayback();
+      }
+    }
+  }, [aimed, mode, play, requests, requestsOpenNow, playbackKind, isPlaying, selectedStationId,
+      selectStation, toggleRadioPlayback]);
   const isPodcasts = viewMode === 'podcasts';
   const radioPlaying = playbackKind === 'radio' && isPlaying && selectedStationId === viewMode;
   const extraSearchResults = useExtraSongSearch(debouncedExtraSearch, viewMode === 'extra');
@@ -388,7 +496,15 @@ export default function RadioScreen() {
   const radioLineupCount = (radioLineup.now ? 1 : 0) + (radioLineup.next ? 1 : 0) + radioLineup.later.length;
   const extraRequest = useExtraSongRequest();
   // "Clock this..." fact for the song on air, and the charts assigned to this station.
-  const songFact = useSongFact(viewingCurrentTrack?.artist, viewingCurrentTrack?.title);
+  // ONE fact at a time, and the SYSTEM picks it (owner, 2026-11-22): no index is passed, so the
+  // server rotates over the song's facts and a listener gets one. There is deliberately no
+  // "another one" control -- the listener is given a fact, not a list to page through.
+  const songFact = useSongFact(
+    viewingCurrentTrack?.artist,
+    viewingCurrentTrack?.title,
+    undefined,
+    viewMode === 'extra' ? 'xtra' : 'radio',
+  );
   const stationCharts = useStationCharts(viewMode === 'extra' ? 'xtra' : 'radio');
   const charts = viewMode === 'podcasts' ? [] : (stationCharts.data ?? []);
 
@@ -490,7 +606,7 @@ export default function RadioScreen() {
         </View>
 
         {isPodcasts ? (
-          <PodcastsPanel />
+          <PodcastsPanel openShow={show} openEpisode={episode} />
         ) : (
           <>
         <View style={styles.playerArtworkWrap}>
@@ -512,9 +628,25 @@ export default function RadioScreen() {
 
         <View style={styles.controls}>
           {features.share ? (
-            <Pressable style={styles.secondaryControl} onPress={() => shareWithLink(shareMessage(`Listen to ${viewingStation.name}`))}>
+            /* FLEX THIS SONG (owner, 2026-11-22). The button under the player used to share
+               the station in the abstract; it now sends what is actually on air, with the
+               station's logo as the picture. With no track metadata yet it still works -- the
+               template drops the empty placeholders rather than sending their seams. */
+            <Pressable
+              style={styles.secondaryControl}
+              accessibilityRole="button"
+              accessibilityLabel="Share the song playing now"
+              onPress={() =>
+                share.shareNowPlaying({
+                  song: viewingCurrentTrack?.title || viewingTrackTitle,
+                  artist: viewingCurrentTrack?.artist || viewingTrackArtist,
+                  station: viewingStation.name,
+                  logo: viewingStation.logo,
+                })
+              }
+            >
               <Feather name="share-2" size={19} color={colors.mutedForeground} />
-              <Text style={styles.controlText}>Share</Text>
+              <Text style={styles.controlText}>Flex this song</Text>
             </Pressable>
           ) : (
             <View style={styles.secondaryControl} />
@@ -538,7 +670,15 @@ export default function RadioScreen() {
             <Text style={styles.trackEyebrow}>ON AIR</Text>
             <PlayingEqualizer playing={radioPlaying} />
           </View>
-          {viewingMetadataLoading && isRadio && !viewingCurrentTrack ? (
+          {/* NEVER A FABRICATED TRACK (owner, 2026-11-22). With the metadata service
+              unreachable the station name stays -- it is bundled and true -- and the track
+              line says it cannot be read, rather than spinning for ever or inventing one. */}
+          {pulseService.unreachable && !viewingCurrentTrack ? (
+            <>
+              <Text style={styles.trackTitle}>{viewingStation.name}</Text>
+              <Text style={styles.trackArtist}>Track details unavailable offline</Text>
+            </>
+          ) : viewingMetadataLoading && isRadio && !viewingCurrentTrack ? (
             <View style={styles.metadataLoading}>
               <ActivityIndicator size="small" color={colors.primary} />
               <Text style={styles.trackArtist}>Finding the current track…</Text>
@@ -555,6 +695,52 @@ export default function RadioScreen() {
             </Pressable>
           )}
         </View>
+
+        {!isPodcasts && songFact.data ? (
+          <View style={styles.factCard}>
+            <Text style={styles.factKicker}>CLOCK THIS...</Text>
+            <Text style={styles.factText}>{songFact.data.body}</Text>
+            <View style={styles.factActions}>
+              {share.enabled && songFact.data.shareUrl ? (
+                <Pressable
+                  onPress={() =>
+                    share.shareCardImage(
+                      songFact.data?.body ?? '',
+                      songFact.data?.shareUrl ?? '',
+                    )
+                  }
+                  accessibilityRole="button"
+                  accessibilityLabel="Share this fact as a card"
+                  style={styles.factAction}
+                >
+                  <Feather name="share-2" size={12} color="#FF6B6B" />
+                  <Text style={styles.factActionText}>Share this fact</Text>
+                </Pressable>
+              ) : null}
+            </View>
+          </View>
+        ) : null}
+
+        {!isRadio && viewingNextTrack && (
+          <View style={styles.nextTrackSection}>
+            <View style={styles.nextTrackRow}>
+              <Text style={styles.nextTrackLabel}>NEXT</Text>
+              {viewingNextTrack.imageUrl ? (
+                <Image source={viewingNextTrack.imageUrl} contentFit="cover" style={styles.nextTrackArtwork} />
+              ) : (
+                <View style={styles.nextTrackArtworkFallback}>
+                  <Feather name="music" size={13} color={colors.accent} />
+                </View>
+              )}
+              <View style={styles.historyCopy}>
+                <Text numberOfLines={1} style={styles.nextTrackTitle}>{viewingNextTrack.title}</Text>
+                {!!viewingNextTrack.artist && (
+                  <Text numberOfLines={1} style={styles.nextTrackArtist}>{viewingNextTrack.artist}</Text>
+                )}
+              </View>
+            </View>
+          </View>
+        )}
 
         {viewingPreviousTracks.length > 0 && (
           <View style={styles.historySection}>
@@ -578,34 +764,6 @@ export default function RadioScreen() {
                 </View>
               </View>
             ))}
-          </View>
-        )}
-
-        {!isPodcasts && songFact.data ? (
-          <View style={styles.factCard}>
-            <Text style={styles.factKicker}>CLOCK THIS...</Text>
-            <Text style={styles.factText}>{songFact.data.body}</Text>
-          </View>
-        ) : null}
-
-        {!isRadio && viewingNextTrack && (
-          <View style={styles.nextTrackSection}>
-            <Text style={styles.sectionEyebrow}>NEXT UP</Text>
-            <View style={styles.nextTrackRow}>
-              {viewingNextTrack.imageUrl ? (
-                <Image source={viewingNextTrack.imageUrl} contentFit="cover" style={styles.nextTrackArtwork} />
-              ) : (
-                <View style={styles.nextTrackArtworkFallback}>
-                  <Feather name="music" size={20} color={colors.accent} />
-                </View>
-              )}
-              <View style={styles.historyCopy}>
-                <Text numberOfLines={1} style={styles.nextTrackTitle}>{viewingNextTrack.title}</Text>
-                {!!viewingNextTrack.artist && (
-                  <Text numberOfLines={1} style={styles.historyArtist}>{viewingNextTrack.artist}</Text>
-                )}
-              </View>
-            </View>
           </View>
         )}
 
@@ -659,194 +817,226 @@ export default function RadioScreen() {
           </View>
         </View>
 
-        {isRadio && !radioRequestsOpen && (
-          <View style={styles.requestSection}>
-            <Text style={styles.sectionEyebrow}>YOUR SONG, ON AIR</Text>
-            <Text style={styles.requestTitle}>Requests are closed</Text>
-            <Text style={styles.requestIntro}>{songRequests.closedMessage}</Text>
-            <RequestHours status={songRequests.radioStatus} />
-          </View>
-        )}
-
-        {isRadio && radioRequestsOpen && (
-          <View style={styles.requestSection}>
-            <Text style={styles.sectionEyebrow}>YOUR SONG, ON AIR</Text>
-            <Text style={styles.requestTitle}>Request a track</Text>
-            <Text style={styles.requestIntro}>Tell the EJazz team what you want to hear next.</Text>
-            <RequestHours status={songRequests.radioStatus} />
-
-            <View style={styles.fieldRow}>
-              <TextInput
-                value={title}
-                onChangeText={setTitle}
-                placeholder="Song title *"
-                placeholderTextColor={colors.mutedForeground}
-                style={[styles.input, styles.halfInput]}
-                autoCapitalize="words"
-              />
-              <TextInput
-                value={artist}
-                onChangeText={setArtist}
-                placeholder="Artist *"
-                placeholderTextColor={colors.mutedForeground}
-                style={[styles.input, styles.halfInput]}
-                autoCapitalize="words"
-              />
+        {/* REQUESTS, FOLDED AWAY (owner, 2026-11-22: "instead of a big ass find it
+            request it session just show a small row"). The whole request experience -- the
+            radio form, the Xtra library search, the closed-hours notice -- now sits behind one
+            strip. Closed rather than open by default: most people open the app to listen, and
+            the request panel was pushing everything else off the screen. The strip itself says
+            which of the two states it will open into, so a listener does not tap to find out
+            requests are shut. */}
+        <View style={styles.requestWrap}>
+          <Pressable
+            onPress={() => setRequestPanelOpen((v) => !v)}
+            accessibilityRole="button"
+            accessibilityState={{ expanded: requestPanelOpen }}
+            accessibilityLabel={requestsOpenNow ? 'Make your request now' : 'Requests are closed'}
+            style={styles.requestStrip}
+          >
+            <Feather name={requestsOpenNow ? 'radio' : 'clock'} size={14} color="#FF6B6B" />
+            <Text style={styles.requestStripText}>
+              {requestsOpenNow ? 'Make your request now' : 'Requests are closed'}
+            </Text>
+            <Feather
+              name={requestPanelOpen ? 'chevron-up' : 'chevron-down'}
+              size={16}
+              color="#A7B7CC"
+            />
+          </Pressable>
+          {requestPanelOpen ? (
+            <>
+          {isRadio && !radioRequestsOpen && (
+            <View style={styles.requestSection}>
+              <Text style={styles.requestTitle}>Requests are closed</Text>
+              <Text style={styles.requestIntro}>{songRequests.closedMessage}</Text>
+              <RequestHours status={songRequests.radioStatus} />
             </View>
-            <TextInput
-              value={sender}
-              onChangeText={setSender}
-              placeholder="Your name *"
-              placeholderTextColor={colors.mutedForeground}
-              style={styles.input}
-              autoCapitalize="words"
-            />
-            <TextInput
-              value={email}
-              onChangeText={setEmail}
-              placeholder="Email *"
-              placeholderTextColor={colors.mutedForeground}
-              style={styles.input}
-              autoCapitalize="none"
-              keyboardType="email-address"
-            />
-            <TextInput
-              value={dedication}
-              onChangeText={setDedication}
-              placeholder="Dedication (optional)"
-              placeholderTextColor={colors.mutedForeground}
-              style={[styles.input, styles.dedicationInput]}
-              multiline
-              textAlignVertical="top"
-            />
+          )}
 
-            {!!formError && <Text style={styles.formError}>{formError}</Text>}
-            {request.isError && (
-              <View style={styles.requestMessageError}>
-                <Feather name="wifi-off" size={16} color={colors.destructive} />
-                <Text style={styles.requestMessageText}>The request service is unavailable. Please try again.</Text>
-              </View>
-            )}
-            {request.data && (
-              <View style={request.data.success ? styles.requestMessageSuccess : styles.requestMessageError}>
-                <Feather
-                  name={request.data.success ? 'check-circle' : 'info'}
-                  size={16}
-                  color={request.data.success ? colors.success : colors.destructive}
+          {isRadio && radioRequestsOpen && (
+            <View style={styles.requestSection}>
+              <Text style={styles.requestTitle}>Request a track</Text>
+              <Text style={styles.requestIntro}>Tell the EJazz team what you want to hear next.</Text>
+              <RequestHours status={songRequests.radioStatus} />
+
+              <View style={styles.fieldRow}>
+                <TextInput
+                  value={title}
+                  onChangeText={setTitle}
+                  placeholder="Song title *"
+                  placeholderTextColor={colors.mutedForeground}
+                  style={[styles.input, styles.halfInput]}
+                  autoCapitalize="words"
                 />
-                <Text style={styles.requestMessageText}>{request.data.message}</Text>
+                <TextInput
+                  value={artist}
+                  onChangeText={setArtist}
+                  placeholder="Artist *"
+                  placeholderTextColor={colors.mutedForeground}
+                  style={[styles.input, styles.halfInput]}
+                  autoCapitalize="words"
+                />
               </View>
-            )}
-
-            <Pressable
-              onPress={submitRequest}
-              disabled={request.isPending}
-              style={({ pressed }) => [
-                styles.requestButton,
-                { backgroundColor: colors.primary, opacity: pressed || request.isPending ? 0.72 : 1 },
-              ]}
-            >
-              {request.isPending ? (
-                <ActivityIndicator size="small" color={colors.primaryForeground} />
-              ) : (
-                <>
-                  <Feather name="send" size={16} color={colors.primaryForeground} />
-                  <Text style={styles.requestButtonText}>SEND REQUEST</Text>
-                </>
-              )}
-            </Pressable>
-          </View>
-        )}
-
-        {!isRadio && !xtraRequestsOpen && (
-          <View style={styles.requestSection}>
-            <Text style={styles.sectionEyebrow}>FIND IT. REQUEST IT.</Text>
-            <Text style={styles.requestTitle}>Requests are closed</Text>
-            <Text style={styles.requestIntro}>{songRequests.closedMessage}</Text>
-            <RequestHours status={songRequests.xtraStatus} />
-          </View>
-        )}
-
-        {!isRadio && xtraRequestsOpen && (
-          <View style={styles.requestSection}>
-            <Text style={styles.sectionEyebrow}>FIND IT. REQUEST IT.</Text>
-            <Text style={styles.requestTitle}>Request on EJazz Xtra</Text>
-            <Text style={styles.requestIntro}>Search the station library, then request the track you want.</Text>
-            <RequestHours status={songRequests.xtraStatus} />
-            <View style={styles.searchInputWrap}>
-              <Feather name="search" size={17} color={colors.mutedForeground} />
               <TextInput
-                value={extraSearch}
-                onChangeText={(value) => {
-                  setExtraSearch(value);
-                  extraRequest.reset();
-                }}
-                placeholder="Search artist or song"
+                value={sender}
+                onChangeText={setSender}
+                placeholder="Your name *"
                 placeholderTextColor={colors.mutedForeground}
-                style={styles.searchInput}
+                style={styles.input}
+                autoCapitalize="words"
+              />
+              <TextInput
+                value={email}
+                onChangeText={setEmail}
+                placeholder="Email *"
+                placeholderTextColor={colors.mutedForeground}
+                style={styles.input}
                 autoCapitalize="none"
-                autoCorrect={false}
+                keyboardType="email-address"
               />
-              {extraSearchResults.isFetching && (
-                <ActivityIndicator size="small" color={colors.primary} />
+              <TextInput
+                value={dedication}
+                onChangeText={setDedication}
+                placeholder="Dedication (optional)"
+                placeholderTextColor={colors.mutedForeground}
+                style={[styles.input, styles.dedicationInput]}
+                multiline
+                textAlignVertical="top"
+              />
+
+              {!!formError && <Text style={styles.formError}>{formError}</Text>}
+              {request.isError && (
+                <View style={styles.requestMessageError}>
+                  <Feather name="wifi-off" size={16} color={colors.destructive} />
+                  <Text style={styles.requestMessageText}>The request service is unavailable. Please try again.</Text>
+                </View>
+              )}
+              {request.data && (
+                <View style={request.data.success ? styles.requestMessageSuccess : styles.requestMessageError}>
+                  <Feather
+                    name={request.data.success ? 'check-circle' : 'info'}
+                    size={16}
+                    color={request.data.success ? colors.success : colors.destructive}
+                  />
+                  <Text style={styles.requestMessageText}>{request.data.message}</Text>
+                </View>
+              )}
+
+              <Pressable
+                onPress={submitRequest}
+                disabled={request.isPending}
+                style={({ pressed }) => [
+                  styles.requestButton,
+                  { backgroundColor: colors.primary, opacity: pressed || request.isPending ? 0.72 : 1 },
+                ]}
+              >
+                {request.isPending ? (
+                  <ActivityIndicator size="small" color={colors.primaryForeground} />
+                ) : (
+                  <>
+                    <Feather name="send" size={16} color={colors.primaryForeground} />
+                    <Text style={styles.requestButtonText}>SEND REQUEST</Text>
+                  </>
+                )}
+              </Pressable>
+            </View>
+          )}
+
+          {!isRadio && !xtraRequestsOpen && (
+            <View style={styles.requestSection}>
+              <Text style={styles.requestTitle}>Requests are closed</Text>
+              <Text style={styles.requestIntro}>{songRequests.closedMessage}</Text>
+              <RequestHours status={songRequests.xtraStatus} />
+            </View>
+          )}
+
+          {!isRadio && xtraRequestsOpen && (
+            <View style={styles.requestSection}>
+              <Text style={styles.requestTitle}>Request on EJazz Xtra</Text>
+              <Text style={styles.requestIntro}>Search the station library, then request the track you want.</Text>
+              <RequestHours status={songRequests.xtraStatus} />
+              <View style={styles.searchInputWrap}>
+                <Feather name="search" size={17} color={colors.mutedForeground} />
+                <TextInput
+                  value={extraSearch}
+                  onChangeText={(value) => {
+                    setExtraSearch(value);
+                    extraRequest.reset();
+                  }}
+                  placeholder="Search artist or song"
+                  placeholderTextColor={colors.mutedForeground}
+                  style={styles.searchInput}
+                  autoCapitalize="none"
+                  autoCorrect={false}
+                />
+                {extraSearchResults.isFetching && (
+                  <ActivityIndicator size="small" color={colors.primary} />
+                )}
+              </View>
+
+              {extraSearch.length > 0 && extraSearch.trim().length < 3 && (
+                <Text style={styles.searchHint}>Type at least 3 characters to search.</Text>
+              )}
+              {extraSearchResults.isError && (
+                <View style={styles.requestMessageError}>
+                  <Feather name="wifi-off" size={16} color={colors.destructive} />
+                  <Text style={styles.requestMessageText}>Search is unavailable right now. Please try again.</Text>
+                </View>
+              )}
+              {!!extraSearchResults.data?.message && (
+                <Text style={styles.searchHint}>{extraSearchResults.data.message}</Text>
+              )}
+              {extraSearchResults.data?.tracks.map((track) => (
+                <View key={track.id} style={styles.searchResultRow}>
+                  <Text numberOfLines={2} style={styles.searchResultTitle}>{track.title}</Text>
+                  <Pressable
+                    onPress={() => extraRequest.mutate(track.id)}
+                    disabled={extraRequest.isPending}
+                    style={({ pressed }) => [
+                      styles.resultRequestButton,
+                      { opacity: pressed || extraRequest.isPending ? 0.6 : 1 },
+                    ]}
+                  >
+                    {extraRequest.isPending && extraRequest.variables === track.id ? (
+                      <ActivityIndicator size="small" color={colors.primary} />
+                    ) : (
+                      <Text style={styles.resultRequestText}>REQUEST</Text>
+                    )}
+                  </Pressable>
+                </View>
+              ))}
+
+              {extraRequest.isError && (
+                <View style={styles.requestMessageError}>
+                  <Feather name="wifi-off" size={16} color={colors.destructive} />
+                  <Text style={styles.requestMessageText}>The request could not be sent. Please try again.</Text>
+                </View>
+              )}
+              {extraRequest.data && (
+                <View style={extraRequest.data.success ? styles.requestMessageSuccess : styles.requestMessageError}>
+                  <Feather
+                    name={extraRequest.data.success ? 'check-circle' : 'info'}
+                    size={16}
+                    color={extraRequest.data.success ? colors.success : colors.destructive}
+                  />
+                  <Text style={styles.requestMessageText}>{extraRequest.data.message}</Text>
+                </View>
               )}
             </View>
+          )}
+            </>
+          ) : null}
+        </View>
 
-            {extraSearch.length > 0 && extraSearch.trim().length < 3 && (
-              <Text style={styles.searchHint}>Type at least 3 characters to search.</Text>
-            )}
-            {extraSearchResults.isError && (
-              <View style={styles.requestMessageError}>
-                <Feather name="wifi-off" size={16} color={colors.destructive} />
-                <Text style={styles.requestMessageText}>Search is unavailable right now. Please try again.</Text>
-              </View>
-            )}
-            {!!extraSearchResults.data?.message && (
-              <Text style={styles.searchHint}>{extraSearchResults.data.message}</Text>
-            )}
-            {extraSearchResults.data?.tracks.map((track) => (
-              <View key={track.id} style={styles.searchResultRow}>
-                <Text numberOfLines={2} style={styles.searchResultTitle}>{track.title}</Text>
-                <Pressable
-                  onPress={() => extraRequest.mutate(track.id)}
-                  disabled={extraRequest.isPending}
-                  style={({ pressed }) => [
-                    styles.resultRequestButton,
-                    { opacity: pressed || extraRequest.isPending ? 0.6 : 1 },
-                  ]}
-                >
-                  {extraRequest.isPending && extraRequest.variables === track.id ? (
-                    <ActivityIndicator size="small" color={colors.primary} />
-                  ) : (
-                    <Text style={styles.resultRequestText}>REQUEST</Text>
-                  )}
-                </Pressable>
-              </View>
-            ))}
-
-            {extraRequest.isError && (
-              <View style={styles.requestMessageError}>
-                <Feather name="wifi-off" size={16} color={colors.destructive} />
-                <Text style={styles.requestMessageText}>The request could not be sent. Please try again.</Text>
-              </View>
-            )}
-            {extraRequest.data && (
-              <View style={extraRequest.data.success ? styles.requestMessageSuccess : styles.requestMessageError}>
-                <Feather
-                  name={extraRequest.data.success ? 'check-circle' : 'info'}
-                  size={16}
-                  color={extraRequest.data.success ? colors.success : colors.destructive}
-                />
-                <Text style={styles.requestMessageText}>{extraRequest.data.message}</Text>
-              </View>
-            )}
-          </View>
-        )}
           </>
         )}
         {charts.map((chart) => (
           <ChartSection key={chart.id} chart={chart} station={viewMode === 'extra' ? 'xtra' : 'radio'} />
         ))}
+        {/* A chart is only ever shown when the server confirms it is the current one, so an
+            unreachable service means no chart -- said out loud, not left as a gap. */}
+        {!isPodcasts && charts.length === 0 && pulseService.unreachable ? (
+          <OfflineState kind="charts" service="pulse" compact />
+        ) : null}
 
       </KeyboardAwareScrollViewCompat>
     </LinearGradient>
@@ -886,12 +1076,19 @@ const styles = StyleSheet.create({
   factCard: { marginHorizontal: 20, marginTop: 16, padding: 14, borderLeftWidth: 2, borderLeftColor: '#FF6B6B', backgroundColor: '#0D2A57' },
   factKicker: { color: '#FF6B6B', fontSize: 10, fontWeight: '700', letterSpacing: 1.5, marginBottom: 6 },
   factText: { color: '#F7F9FC', fontSize: 13, lineHeight: 19 },
+  factActions: { flexDirection: 'row', flexWrap: 'wrap', gap: 14, marginTop: 10 },
+  factAction: { flexDirection: 'row', alignItems: 'center', gap: 5 },
+  factActionText: { color: '#FF6B6B', fontSize: 11, fontWeight: '700', letterSpacing: 0.4 },
   chartSection: { marginHorizontal: 20, marginTop: 26, borderTopWidth: 1, borderTopColor: '#204570', paddingTop: 18 },
   chartTitle: { color: '#F7F9FC', fontSize: 18, fontWeight: '700', letterSpacing: -0.4, marginBottom: 8 },
   chartTitleRow: { flexDirection: 'row', alignItems: 'center', gap: 10, marginBottom: 8 },
   chartDayButton: { padding: 6, borderRadius: 8, borderWidth: 1, borderColor: '#204570' },
   chartBack: { paddingBottom: 10 },
   chartCardBlock: { gap: 12, paddingBottom: 14 },
+  // Full width at 9:16, the shape the dashboard's default design draws. contentFit="contain"
+  // means a square or wide design is letterboxed rather than cropped -- a cropped chart loses
+  // the songs at the bottom, which is the whole point of it.
+  chartCardImage: { width: '100%', aspectRatio: 9 / 16, borderRadius: 14, backgroundColor: '#0B1730' },
   // Full width at 9:16, the shape the dashboard's default design draws: the picture IS the chart
   // on this screen now, so it is shown at the size you can read it rather than as a thumbnail.
   // The chart board: one box for both days. Colours come from the design at render time, so only
@@ -909,6 +1106,9 @@ const styles = StyleSheet.create({
   chartBoardNew: { fontSize: 9, fontWeight: '800', letterSpacing: 0.6, borderWidth: 1, borderRadius: 4,
                    paddingHorizontal: 3, paddingVertical: 1 },
   chartBoardLast: { fontSize: 12, fontWeight: '700' },
+  chartBoardChip: { flexDirection: 'row', alignItems: 'center', gap: 1 },
+  chartBoardDelta: { fontSize: 12.5, fontWeight: '800' },
+  chartBoardDash: { fontSize: 14, fontWeight: '700' },
   chartBoardFooter: { fontSize: 12, fontWeight: '700', marginTop: 14, opacity: 0.9 },
   chartCardShare: { flexDirection: 'row', alignItems: 'center', gap: 6, alignSelf: 'flex-start',
                     backgroundColor: '#FF6B6B', paddingVertical: 7, paddingHorizontal: 12, borderRadius: 999 },
@@ -932,11 +1132,21 @@ const styles = StyleSheet.create({
   scheduleCopy: { flex: 1 },
   scheduleOnAir: { color: '#4ADE80', fontSize: 10, fontWeight: '700', letterSpacing: 1 },
   historySection: { marginHorizontal: 20, marginTop: 26, borderTopWidth: 1, borderTopColor: '#204570', paddingTop: 18 },
-  nextTrackSection: { marginHorizontal: 20, marginTop: 22, padding: 14, borderLeftWidth: 2, borderLeftColor: '#E43B48', backgroundColor: '#0D2A57' },
-  nextTrackRow: { flexDirection: 'row', alignItems: 'center' },
-  nextTrackArtwork: { width: 54, height: 54, backgroundColor: '#123363' },
-  nextTrackArtworkFallback: { width: 54, height: 54, alignItems: 'center', justifyContent: 'center', backgroundColor: '#123363' },
-  nextTrackTitle: { color: '#F7F9FC', fontSize: 14, fontWeight: '700' },
+  /* NEXT UP is a strip now, not a section (owner, 2026-11-22: "it's a huge row, reduce it's
+     size"). Half the padding, a 36px cover instead of 54, its own inline "NEXT" label instead
+     of a section heading above it, and the type one step down -- what is coming next is worth
+     a glance, not a third of the screen. */
+  nextTrackSection: { marginHorizontal: 20, marginTop: 14, paddingVertical: 8, paddingHorizontal: 10, borderLeftWidth: 2, borderLeftColor: '#E43B48', backgroundColor: '#0D2A57' },
+  nextTrackRow: { flexDirection: 'row', alignItems: 'center', gap: 10 },
+  nextTrackLabel: { color: '#E43B48', fontSize: 9, fontWeight: '700', letterSpacing: 1.2 },
+  nextTrackArtwork: { width: 36, height: 36, backgroundColor: '#123363' },
+  nextTrackArtworkFallback: { width: 36, height: 36, alignItems: 'center', justifyContent: 'center', backgroundColor: '#123363' },
+  nextTrackTitle: { color: '#F7F9FC', fontSize: 12.5, fontWeight: '700' },
+  nextTrackArtist: { color: '#A7B7CC', fontSize: 10.5, marginTop: 1 },
+  requestWrap: { marginHorizontal: 20, marginTop: 22 },
+  requestStrip: { flexDirection: 'row', alignItems: 'center', gap: 9, paddingVertical: 12,
+    paddingHorizontal: 13, borderWidth: 1, borderColor: '#2C4B75', backgroundColor: '#0D2A57' },
+  requestStripText: { flex: 1, color: '#F7F9FC', fontSize: 13, fontWeight: '700' },
   sectionEyebrow: { color: '#FF6B6B', fontSize: 10, fontWeight: '700', letterSpacing: 1.5, marginBottom: 12 },
   historyRow: { flexDirection: 'row', alignItems: 'center', minHeight: 58, borderBottomWidth: 1, borderBottomColor: '#17365E', paddingVertical: 8 },
   historyArtwork: { width: 42, height: 42, backgroundColor: '#123363' },

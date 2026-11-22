@@ -11,6 +11,9 @@ import {
   usePodcastFeed,
 } from '@/lib/podcasts';
 import { PodcastScrubber } from '@/components/PodcastScrubber';
+import { OfflineState } from '@/components/OfflineState';
+import { episodeRef } from '@/lib/destination';
+import { useService } from '@/lib/reachability';
 
 function ExpandableDescription({
   children,
@@ -103,11 +106,31 @@ function ShowCard({ config, onOpen }: { config: PodcastConfig; onOpen: (slug: Po
   );
 }
 
-export function PodcastsPanel() {
+export function PodcastsPanel({ openShow, openEpisode }: {
+  /** An aimed tap can ask for one show, or one episode of it (lib/destination.ts). */
+  openShow?: string;
+  openEpisode?: string;
+} = {}) {
   const colors = useColors();
   const shows = usePodcastShows();
   const [selectedShow, setSelectedShow] = React.useState<PodcastSlug | null>(null);
   const selectedQuery = usePodcastFeed(selectedShow);
+  const podcastService = useService('pulse');
+
+  /* Applied once per instruction, so pressing "all shows" afterwards is not undone on the
+     next render -- which is what a plain `if (openShow)` would do. */
+  const asked = React.useRef('');
+  /* An aimed episode cannot be opened on the spot: the show's feed has not been fetched yet,
+     so the reference is parked here and claimed by the effect below once the episodes exist. */
+  const [wantedEpisode, setWantedEpisode] = React.useState('');
+  React.useEffect(() => {
+    const want = `${openShow ?? ''}|${openEpisode ?? ''}`;
+    if (!openShow || asked.current === want) return;
+    asked.current = want;
+    const known = shows.find((show) => show.slug === openShow);
+    if (known) setSelectedShow(known.slug);
+    setWantedEpisode(known && openEpisode ? episodeRef(openEpisode) : '');
+  }, [openShow, openEpisode, shows]);
   const {
     playbackKind,
     currentPodcast,
@@ -125,6 +148,28 @@ export function PodcastsPanel() {
     podcastPosition,
     podcastDuration,
   } = usePlayer();
+
+  /**
+   * THE AIMED EPISODE (`episode:<slug>:<ref>`). It plays, for the same reason the `play`
+   * destination plays: someone who tapped "listen to this episode" has already asked for it.
+   *
+   * Matched on episodeRef of the episode's own guid, because the stored reference is a
+   * cleaned guid rather than the guid itself. The reference is cleared whether or not the
+   * episode was found -- an episode that has aged out of the feed leaves the show open, which
+   * is the honest fallback, instead of a search that retries on every render.
+   *
+   * Like `play`, it only ever STARTS: an episode already playing is left alone rather than
+   * toggled off by the tap that was meant to open it.
+   */
+  const episodes = selectedQuery.data?.episodes;
+  React.useEffect(() => {
+    if (!wantedEpisode || !selectedQuery.data || !episodes) return;
+    setWantedEpisode('');
+    const match = episodes.find((episode) => episodeRef(episode.id) === wantedEpisode);
+    if (!match) return;
+    if (playbackKind === 'podcast' && currentPodcast?.id === match.id) return;
+    playPodcast(match, selectedQuery.data);
+  }, [wantedEpisode, episodes, selectedQuery.data, playbackKind, currentPodcast, playPodcast]);
   if (!selectedShow) {
     return (
       <View style={styles.panel}>
@@ -152,6 +197,10 @@ export function PodcastsPanel() {
   }
 
   if (selectedQuery.isError || !selectedQuery.data) {
+    // An unreachable service gets the offline card, which says so and offers one button; a
+    // reachable service that failed keeps the old wording, because that is a different thing
+    // and the listener can do something about it by tapping.
+    if (podcastService.unreachable) return <OfflineState kind="podcasts" service="pulse" />;
     return (
       <Pressable onPress={() => selectedQuery.refetch()} style={styles.fullStatus}>
         <Feather name="wifi-off" size={24} color={colors.accent} />

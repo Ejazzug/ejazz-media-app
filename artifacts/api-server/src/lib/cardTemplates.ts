@@ -58,6 +58,7 @@ export interface CardSource {
     | "news"       // the News Desk queue and published articles
     | "podcast"    // podcasts/shows/<Show>/episodes
     | "release"    // a new-release store
+    | "song-facts" // the song_facts table, via the dashboard's repurpose hub
     | "manual";    // nothing suggests it; an operator writes it
   /** True only if a real feed can fill this card TODAY. A false here is not a bug to fix in
    *  this file -- it is a fact about the box, and the Studio says so rather than offering a
@@ -131,6 +132,16 @@ export const CARD_FAMILIES: Record<string, CardFormat[]> = {
     { ratio: "1:1", design: "announcement", size: "1080x1080" },
     { ratio: "16:9", design: "announcement-wide", size: "1920x1080" },
     { ratio: "9:16", design: "announcement-story", size: "1080x1920" },
+  ],
+  // `fact.json` and `fact-story.json` were already on disk with no caller; `fact-wide.json`
+  // was drawn to complete the set, because a family here offers all three shapes or the
+  // catalogue is lying about what an operator can pick. Its artwork is a left-hand PANEL
+  // rather than the square's top band: at 1920x1080 a full-width band eats a third of the
+  // canvas and crowds the fact under it.
+  fact: [
+    { ratio: "1:1", design: "fact", size: "1080x1080" },
+    { ratio: "16:9", design: "fact-wide", size: "1920x1080" },
+    { ratio: "9:16", design: "fact-story", size: "1080x1920" },
   ],
 };
 
@@ -437,6 +448,40 @@ export const CARD_TEMPLATES: CardTemplate[] = [
       kind: "manual",
       available: true,
       note: "Whatever the station wants to say. Nothing suggests it, and nothing needs to.",
+    },
+  },
+  {
+    // The thirteenth, added 2026-11-18 so a song fact can leave the player and become
+    // something: a card on a phone, a post, a share. The designs it draws with -- fact.json
+    // and fact-story.json -- were already on disk and had NO caller at all; this is what
+    // calls them. The kicker is pinned to the words the app already shows under the player
+    // ("CLOCK THIS..."), not the design's own "DID YOU KNOW" default, so the card and the
+    // phone say the same thing.
+    id: "song-fact",
+    name: "Song Fact",
+    family: "fact",
+    bucket: "engagement",
+    fixed: { kicker: "CLOCK THIS..." },
+    fields: [
+      { key: "fact", label: "The fact", type: "paragraph", required: true, maxLength: 400, hint: "One or two sentences -- the same line that shows under the player.", example: "Billie Eilish recorded the vocal in a bathroom to catch the natural reverb." },
+      { key: "song", label: "Song", type: "line", required: true, maxLength: 70, example: "When The Party's Over" },
+      { key: "artist", label: "Artist", type: "line", maxLength: 60, example: "Billie Eilish" },
+      { key: "artwork", label: "Artwork", type: "asset", maxLength: 400, hint: "Optional. The fact reads on its own when there is no art -- the design says so.", example: "/opt/radio/podcasts/station_art/ejazz_xtra.png" },
+      { key: "cta", label: "Call to action", type: "line", maxLength: 40, example: "More on EJazz" },
+      // The two the app's "Share this fact" fills in, so a fact doing the rounds says which
+      // station it came from and carries that station's mark (owner, 2026-11-22). Both have
+      // defaults in the design, so a card made by hand in the Studio still renders.
+      { key: "footer", label: "Footer line", type: "line", maxLength: 80, hint: "Who it is from, under the button. The app sends \"<station> on EJazz Media App\".", example: "EJazz Xtra on EJazz Media App" },
+      { key: "logo", label: "Station logo", type: "asset", maxLength: 400, hint: "Optional. The corner mark; the design falls back to EJazz Radio's.", example: "/opt/radio/podcasts/station_art/ejazz_xtra.png" },
+    ],
+    // `song` is the title because content_items.title is notNull and a fact's own body is the
+    // paragraph: a row titled with 45 words of prose reads terribly in every list there is.
+    titleFrom: "song",
+    bodyFrom: "fact",
+    source: {
+      kind: "song-facts",
+      available: true,
+      note: "The song_facts table, reached from the dashboard's repurpose hub. A fact only gets here after it has been proofread -- an unproofread one is held (enabled=false) and is not shown to a listener either.",
     },
   },
 ];

@@ -1,10 +1,14 @@
 import { Router, type IRouter } from "express";
 import type { Request, Response, NextFunction } from "express";
-import { and, desc, eq, sql } from "drizzle-orm";
-import { db, contentItemsTable } from "@workspace/db";
+import { and, desc, eq, isNotNull, ne, sql } from "drizzle-orm";
+import { db, contentItemsTable, songFactsTable, type SongFact } from "@workspace/db";
 import { getAppConfig } from "../lib/appConfig";
 import { parseApprovalDecision } from "../lib/approvals";
 import { cardTemplate, cardRatioFromUrl } from "../lib/cardTemplates";
+import { createCard } from "../lib/cardCreate";
+import { artistKey, factCounts, rephraseFact, sweepTrack, titleKey, wordings } from "../lib/songFacts";
+import { cleanDestination, describeDestination } from "../lib/destinations";
+import { approvalRequired } from "../lib/contentGate";
 
 const router: IRouter = Router();
 
@@ -191,6 +195,18 @@ function forDashboard(row: typeof contentItemsTable.$inferSelect) {
     schedule_at: row.scheduleAt,
     start_at: row.startAt,
     end_at: row.endAt,
+    // THE TWO QUESTIONS AN OPERATOR ASKS (owner, 2026-11-22: "i need to be able to see which
+    // card have been sent", and an expiry to go with it). "Sent" is about the push, which
+    // cannot be taken back. "Showing" is whether a phone asking right now would be served
+    // this card -- a different thing, and the one an expiry changes.
+    dest: row.dest ?? "",
+    dest_label: describeDestination(row.dest ?? ""),
+    expired: Boolean(row.endAt && row.endAt.getTime() < Date.now()),
+    showing:
+      row.status === "live" &&
+      row.approvalState === "approved" &&
+      (!row.startAt || row.startAt.getTime() <= Date.now()) &&
+      (!row.endAt || row.endAt.getTime() >= Date.now()),
     created_by: row.createdBy,
     created_at: row.createdAt,
   };
@@ -259,6 +275,437 @@ router.post("/cards/:id/approval", async (req, res) => {
     res.json({ ok: true, was: row.approvalState, card: forDashboard(item) });
   } catch (err) {
     res.status(500).json({ error: err instanceof Error ? err.message : "the decision was not saved" });
+  }
+});
+
+// ---------------------------------------------------------------- song facts
+//
+// The dashboard's repurpose hub and its library sweep reach the fact store through here, and
+// lib/song_facts.py is the only thing on that side that calls them. Why this prefix and not
+// /api/admin/: the same reason the card approval lives here -- /api/internal/ is not forwarded
+// by ejazz-proxy, so it is unreachable off the tunnel, while /api/admin/ would need the admin
+// session cookie Flask has no way to mint.
+//
+// Note what is NOT here: no delete, and no way to switch on a fact that has not been
+// proofread. The facts section in the Control Room stays where a person edits or removes one.
+
+/** The shape the dashboard reads. `pushed_at` is the hub tray's whole contract. */
+function factForDashboard(row: SongFact) {
+  return {
+    id: row.id,
+    artist: row.artist,
+    title: row.title,
+    artist_key: row.artistKey,
+    title_key: row.titleKey,
+    body: row.body,
+    source: row.source,
+    enabled: row.enabled,
+    proof_state: row.proofState,
+    proof_notes: row.proofNotes,
+    pushed_at: row.pushedAt ? row.pushedAt.toISOString() : null,
+    retry_after: row.retryAfter ? row.retryAfter.toISOString() : null,
+    sources: row.sources ?? [],
+    // Every wording, `body` first -- what the CSV export turns into one row each, and what
+    // the facts section counts when it says how many a song has.
+    wordings: wordings(row),
+    variants: row.variants ?? [],
+    created_at: row.createdAt ? row.createdAt.toISOString() : null,
+    updated_at: row.updatedAt ? row.updatedAt.toISOString() : null,
+  };
+}
+
+/**
+ * GET /api/internal/song-facts[?pushed=1][&state=live|held|none][&limit=]
+ *
+ * `pushed=1` is what the hub's tray asks for: facts a person sent over from the facts section.
+ * `counts` is over the whole store whatever the filter says, so a page showing one slice can
+ * still report the rest without a second call.
+ */
+router.get("/song-facts", async (req, res) => {
+  try {
+    const wants = (key: string) => (typeof req.query[key] === "string" ? String(req.query[key]).trim() : "");
+    const state = wants("state");
+    const limit = Math.min(Math.max(Number(wants("limit")) || 500, 1), 2000);
+    const filters = [];
+    if (wants("pushed") === "1") filters.push(isNotNull(songFactsTable.pushedAt));
+    if (state === "live") filters.push(and(eq(songFactsTable.enabled, true), ne(songFactsTable.body, "")));
+    if (state === "held") filters.push(and(eq(songFactsTable.enabled, false), ne(songFactsTable.body, "")));
+    if (state === "none") filters.push(eq(songFactsTable.body, ""));
+
+    const rows = await db.select().from(songFactsTable)
+      .where(filters.length ? and(...filters) : undefined)
+      .orderBy(desc(songFactsTable.updatedAt))
+      .limit(limit);
+    res.json({ counts: await factCounts(), items: rows.map(factForDashboard) });
+  } catch (error) {
+    res.status(500).json({ error: error instanceof Error ? error.message : "song facts failed" });
+  }
+});
+
+/**
+ * POST /api/internal/song-facts/generate -- {artist, title, hold?}
+ *
+ * One song, one answer, and the answer says WHY. The caps, the markers, the provider choice
+ * and the writer are all the ones `factForTrack()` uses -- `sweepTrack()` only reports which
+ * rule applied, so a sweep cannot report a song as dull when the budget is simply spent.
+ *
+ * `hold` defaults to true: a swept fact is written disabled and waits for the dashboard's
+ * proofread to PATCH a verdict back. Nothing here can put an unproofread fact under the
+ * player.
+ */
+router.post("/song-facts/generate", async (req, res) => {
+  const b = (req.body || {}) as Record<string, unknown>;
+  const artist = typeof b.artist === "string" ? b.artist : "";
+  const title = typeof b.title === "string" ? b.title : "";
+  if (!artist.trim()) { res.status(400).json({ error: "An artist is required." }); return; }
+  try {
+    const result = await sweepTrack(artist, title, { hold: b.hold !== false });
+    res.json({
+      ok: true,
+      outcome: result.outcome,
+      message: result.message,
+      fact: result.fact ? factForDashboard(result.fact) : null,
+    });
+  } catch (error) {
+    res.status(500).json({ error: error instanceof Error ? error.message : "generation failed" });
+  }
+});
+
+/**
+ * POST /api/internal/song-facts/import -- facts written somewhere else, coming back in.
+ *
+ * The round trip this serves: export the library as a CSV with an empty `fact` column, fill
+ * it in by hand or with another tool, upload it here. It exists because the station's own
+ * generator cannot always answer -- on 2026-11-18 the search-grounding quota was exhausted
+ * and the ungrounded model returned NONE for everything.
+ *
+ * **It only ever ADDS or UPDATES.** That is the whole reason this is not the existing sheet
+ * sync: `syncSheet()` treats the sheet as the source of truth and DELETES any fact missing
+ * from it, so uploading one batch of forty would wipe the other hundred and sixty. Nothing
+ * here deletes anything.
+ *
+ * Rows land as `source: "manual"` and `proof_state: "human"` -- a person chose these words,
+ * whatever helped them write it -- which is exactly what protects them from being overwritten
+ * later by the generator or by a sheet sync.
+ */
+router.post("/song-facts/import", async (req, res) => {
+  const body = (req.body || {}) as Record<string, unknown>;
+  const rows = Array.isArray(body.rows) ? body.rows : [];
+  if (!rows.length) { res.status(400).json({ error: "No rows." }); return; }
+  if (rows.length > 2000) { res.status(400).json({ error: "More than 2000 rows." }); return; }
+
+  const str = (v: unknown, max: number) =>
+    (typeof v === "string" ? v.replace(/\s+/g, " ").trim().slice(0, max) : "");
+  let added = 0, updated = 0, skipped = 0, held = 0;
+  const problems: string[] = [];
+
+  // Several rows for the same song are several WORDINGS of it, not a row overwriting itself.
+  // That is how a spreadsheet says "this song has three facts": three lines with the same
+  // artist and title. Without this the last line simply won the race and the other two were
+  // silently lost.
+  const grouped = new Map<string, { artist: string; title: string; bodies: string[]; enabled: boolean; notes: string }>();
+  for (const raw of rows) {
+    const r = (raw || {}) as Record<string, unknown>;
+    const artist = str(r.artist, 120);
+    const title = str(r.title, 120);
+    const factBody = str(r.body ?? r.fact, 400);
+    const ak = artistKey(artist);
+    if (!ak || factBody.length < 10) { skipped++; continue; }
+    const tk = titleKey(title);
+    const key = `${ak}|${tk}`;
+    const entry = grouped.get(key);
+    if (entry) {
+      if (!entry.bodies.some((b) => b.toLowerCase() === factBody.toLowerCase())) {
+        entry.bodies.push(factBody);
+      }
+      // A song is held if ANY of its wordings was held: the held one must not be shown.
+      if (r.enabled === false) entry.enabled = false;
+      if (!entry.notes) entry.notes = str(r.proof_notes, 2000);
+    } else {
+      grouped.set(key, {
+        artist, title, bodies: [factBody],
+        enabled: r.enabled !== false, notes: str(r.proof_notes, 2000),
+      });
+    }
+  }
+
+  for (const [key, g] of grouped) {
+    const [ak, tk] = key.split("|");
+    const artist = g.artist, title = g.title;
+    const factBody = g.bodies[0];
+    const enabled = g.enabled;
+    if (!enabled) held++;
+    const values = {
+      artistKey: ak, titleKey: tk, artist, title, body: factBody,
+      source: "manual", enabled,
+      proofState: "human", proofNotes: g.notes,
+      retryAfter: null,
+      variants: g.bodies.slice(1, 5),
+    };
+    try {
+      const existing = await db.select({ id: songFactsTable.id }).from(songFactsTable)
+        .where(and(eq(songFactsTable.artistKey, ak), eq(songFactsTable.titleKey, tk))).limit(1);
+      await db.insert(songFactsTable).values(values).onConflictDoUpdate({
+        target: [songFactsTable.artistKey, songFactsTable.titleKey],
+        set: { ...values, updatedAt: new Date() },
+      });
+      if (existing.length) updated++; else added++;
+    } catch (error) {
+      skipped++;
+      if (problems.length < 5) {
+        problems.push(`${artist} - ${title}: ${error instanceof Error ? error.message : "failed"}`);
+      }
+    }
+  }
+  res.json({ ok: true, added, updated, skipped, held, problems, counts: await factCounts() });
+});
+
+/**
+ * POST /api/internal/song-facts/:id/rephrase -- more wordings for one fact.
+ *
+ * The dashboard's bulk pass calls this once per fact rather than asking for a batch, so a
+ * run can stop in the middle without leaving half a reply unaccounted for, and so one
+ * refusal is reported against the fact it belongs to.
+ */
+router.post("/song-facts/:id/rephrase", async (req, res) => {
+  const id = Number(req.params.id);
+  if (!Number.isInteger(id)) { res.status(400).json({ error: "invalid id" }); return; }
+  const wantRaw = Number((req.body as Record<string, unknown> | undefined)?.want);
+  const want = Number.isFinite(wantRaw) ? Math.max(1, Math.min(4, Math.trunc(wantRaw))) : 2;
+  try {
+    res.json(await rephraseFact(id, want));
+  } catch (error) {
+    res.status(500).json({ error: error instanceof Error ? error.message : "rephrase failed" });
+  }
+});
+
+/**
+ * PATCH /api/internal/song-facts/:id -- the proofread verdict coming back, and the hub flag.
+ *
+ * The dashboard runs the three proofread passes (the deterministic clean-up, grounding.py's
+ * quote check, then the wording pass) because grounding.py lives on that side, and sends the
+ * result here. `enabled` is included deliberately: a fact that passed goes live, and one whose
+ * quote could not be verified stays held with the reason in `proof_notes` for a person.
+ *
+ * `source` is NOT touched. A proofread AI fact is still an AI fact -- `proof_state` is what
+ * records that something read it -- and only a person typing in the facts section makes a row
+ * 'manual'.
+ */
+router.patch("/song-facts/:id", async (req, res) => {
+  const id = Number(req.params.id);
+  if (!Number.isInteger(id)) { res.status(400).json({ error: "invalid id" }); return; }
+  const b = (req.body || {}) as Record<string, unknown>;
+  const str = (v: unknown, max: number) => (typeof v === "string" ? v.replace(/\s+/g, " ").trim().slice(0, max) : "");
+  const proofState = str(b.proof_state, 16);
+  if (proofState && !["auto", "human"].includes(proofState)) {
+    res.status(400).json({ error: "proof_state must be auto or human." });
+    return;
+  }
+  const patch: Record<string, unknown> = { updatedAt: new Date() };
+  if (typeof b.body === "string") {
+    const body = str(b.body, 400);
+    if (body && body.length < 10) {
+      res.status(400).json({ error: "A fact of at least 10 characters is required." });
+      return;
+    }
+    patch.body = body;
+  }
+  if (proofState) patch.proofState = proofState;
+  if (typeof b.proof_notes === "string") patch.proofNotes = str(b.proof_notes, 2000);
+  if (typeof b.enabled === "boolean") patch.enabled = b.enabled;
+  if (b.pushed === true) patch.pushedAt = new Date();
+  if (b.pushed === false) patch.pushedAt = null;
+  // An empty body is a "no fact" marker, and a marker must never be switched on.
+  if (patch.body === "") patch.enabled = false;
+
+  try {
+    const [row] = await db.update(songFactsTable).set(patch)
+      .where(eq(songFactsTable.id, id)).returning();
+    if (!row) { res.status(404).json({ error: "No such fact." }); return; }
+    res.json({ ok: true, fact: factForDashboard(row) });
+  } catch (error) {
+    res.status(500).json({ error: error instanceof Error ? error.message : "the fact was not saved" });
+  }
+});
+
+/**
+ * TIPS -- /api/internal/tips  (owner, task #5)
+ *
+ * A tip is a content item of type `tip`: words, no template, no rendered picture. Two things
+ * make it different from a card, and both are deliberate:
+ *
+ *  - IT IS NEVER PUSHED. A card can interrupt someone; a tip waits to be found. The app paces
+ *    the series per listener (lib/tipDrip.ts: one on arrival, one a day after), so a tip
+ *    written today reaches a listener who installed last year at once and a listener who
+ *    installs tomorrow in their own order. Nothing here needs to know who anybody is.
+ *  - IT GOES OUT LIVE AND APPROVED unless the approval gate for tips is on. There is no
+ *    picture to render and no notification to recall, so the draft step a card needs would
+ *    only be a step.
+ *
+ * `start_at` is what the drip orders the series by, so an operator can slot a new tip into
+ * the middle of the series by dating it rather than by renumbering anything.
+ */
+router.get("/tips", async (_req, res) => {
+  try {
+    const rows = await db.select().from(contentItemsTable)
+      .where(eq(contentItemsTable.type, "tip")).orderBy(desc(contentItemsTable.createdAt));
+    res.json({ items: rows.map(forDashboard), counts: { total: rows.length } });
+  } catch (error) {
+    const message = error instanceof Error ? error.message : "tips failed";
+    // The one failure worth naming: the enum has to be widened by hand before a tip can
+    // exist at all, and "invalid input value for enum" tells an operator nothing.
+    res.status(500).json({ error: message, ...(enumMissing(message) ? { needsSql: TIP_ENUM_SQL } : {}) });
+  }
+});
+
+/** The hand-written DDL a tip needs before it can be stored. Never drizzle-kit push. */
+const TIP_ENUM_SQL = "ALTER TYPE content_type ADD VALUE IF NOT EXISTS 'tip';";
+const enumMissing = (message: string) =>
+  /invalid input value for enum/i.test(message) || /content_type/i.test(message);
+
+router.post("/tips", async (req, res) => {
+  const body = (req.body ?? {}) as Record<string, unknown>;
+  const title = String(body.title ?? "").trim();
+  const text = String(body.body ?? "").trim();
+  if (!title) { res.status(400).json({ error: "A tip needs a title." }); return; }
+  if (title.length > 120) { res.status(400).json({ error: "That title is longer than 120 characters." }); return; }
+  if (text.length > 600) { res.status(400).json({ error: "That tip is longer than 600 characters." }); return; }
+
+  const dest = String(body.dest ?? "").trim();
+  if (dest && !cleanDestination(dest)) {
+    res.status(400).json({ error: "That tap destination is not one the app can open." });
+    return;
+  }
+  const when = (value: unknown): Date | null | "bad" => {
+    const raw = String(value ?? "").trim();
+    if (!raw) return null;
+    const at = new Date(raw);
+    return Number.isNaN(at.getTime()) ? "bad" : at;
+  };
+  const startAt = when(body.start_at);
+  const endAt = when(body.end_at);
+  if (startAt === "bad" || endAt === "bad") {
+    res.status(400).json({ error: "That date is not one the server understands." });
+    return;
+  }
+
+  try {
+    const approvalState = (await approvalRequired("tip")) ? "pending" : "approved";
+    const [row] = await db.insert(contentItemsTable).values({
+      type: "tip",
+      title,
+      body: text || null,
+      placement: "home",
+      status: "live",
+      // A tip is paced by the app, never pushed -- see the comment above.
+      pushEnabled: false,
+      pushTopic: "all",
+      dest: cleanDestination(dest),
+      startAt: startAt ?? null,
+      endAt: endAt ?? null,
+      approvalState,
+      createdBy: String(body.by ?? "").trim() || null,
+    }).returning();
+    res.status(201).json({ ok: true, tip: forDashboard(row) });
+  } catch (error) {
+    const message = error instanceof Error ? error.message : "the tip was not saved";
+    res.status(500).json({ error: message, ...(enumMissing(message) ? { needsSql: TIP_ENUM_SQL } : {}) });
+  }
+});
+
+/**
+ * POST /api/internal/cards -- the hub sending something to the app.
+ *
+ * The same `createCard()` the Control Room's own door uses, so the approval gate, the signed
+ * picture and the push choke point stay one implementation. A caller that leaves `status`
+ * alone gets a draft, which sends no push: the hub asks for 'live' only when an operator has
+ * chosen "publish now" and confirmed it.
+ */
+router.post("/cards", async (req, res) => {
+  try {
+    const outcome = await createCard(req.body);
+    if (!outcome.ok) {
+      res.status(outcome.status).json({
+        error: outcome.error,
+        ...(outcome.problems ? { problems: outcome.problems } : {}),
+        ...(outcome.detail ? { detail: outcome.detail } : {}),
+      });
+      return;
+    }
+    res.status(201).json({
+      ok: true,
+      card: forDashboard(outcome.row as never),
+      ratio: outcome.ratio,
+      pushDelivery: outcome.pushDelivery,
+    });
+  } catch (error) {
+    res.status(500).json({ error: error instanceof Error ? error.message : "the card was not made" });
+  }
+});
+
+/**
+ * PATCH /api/internal/cards/:id -- the two things an operator changes AFTER a card exists:
+ * when it stops showing, and where a tap goes.
+ *
+ * Deliberately narrow. The words and the picture of a card that is already on phones are not
+ * editable here, because a card is keyed by what it says: changing it in place would rewrite
+ * something people have already seen. Everything else about the row -- its approval, its
+ * push, its schedule -- has its own endpoint, for the same reason.
+ *
+ * `end_at: null` clears an expiry. An expiry in the past is accepted on purpose: it is how an
+ * operator takes a card off every phone at once, which is the honest version of "delete" for
+ * something that has already been delivered.
+ */
+router.patch("/cards/:id", async (req, res) => {
+  const id = Number(req.params.id);
+  if (!Number.isInteger(id) || id <= 0) {
+    res.status(400).json({ error: "A card id is a whole number." });
+    return;
+  }
+  const body = (req.body ?? {}) as Record<string, unknown>;
+  const patch: Record<string, unknown> = {};
+
+  if ("end_at" in body) {
+    const raw = body.end_at;
+    if (raw === null || raw === "") {
+      patch.endAt = null;
+    } else {
+      const when = new Date(String(raw));
+      if (Number.isNaN(when.getTime())) {
+        res.status(400).json({ error: "That expiry is not a date the server understands." });
+        return;
+      }
+      patch.endAt = when;
+    }
+  }
+
+  if ("dest" in body) {
+    const raw = String(body.dest ?? "").trim();
+    if (raw && !cleanDestination(raw)) {
+      res.status(400).json({ error: "That tap destination is not one the app can open." });
+      return;
+    }
+    patch.dest = cleanDestination(raw);
+  }
+
+  if (!Object.keys(patch).length) {
+    res.status(400).json({ error: "Nothing to change: send end_at, dest, or both." });
+    return;
+  }
+  patch.updatedAt = new Date();
+
+  try {
+    const [row] = await db.update(contentItemsTable)
+      .set(patch)
+      .where(and(eq(contentItemsTable.id, id), eq(contentItemsTable.type, "card")))
+      .returning();
+    if (!row) {
+      res.status(404).json({ error: "No such card." });
+      return;
+    }
+    res.json({ ok: true, card: forDashboard(row) });
+  } catch (error) {
+    res.status(500).json({ error: error instanceof Error ? error.message : "the card was not changed" });
   }
 });
 

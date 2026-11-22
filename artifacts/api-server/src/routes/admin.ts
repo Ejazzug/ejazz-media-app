@@ -16,7 +16,7 @@ import {
 import {
   fetchDashboardCountdowns, snapshotCountdown, clearHistory, historyStats, type DashboardCountdown,
 } from "../lib/countdownCharts";
-import { artistKey, titleKey, listFacts } from "../lib/songFacts";
+import { artistKey, titleKey, listFacts, rephraseFact } from "../lib/songFacts";
 import { isGroqConfigured } from "../lib/groq";
 import { syncSheet, lastSheetSync, validateSheetUrl } from "../lib/songFactsSheet";
 import { attemptContentPush } from "../lib/contentPush";
@@ -25,6 +25,10 @@ import {
   cardRenderPath, cardImageUrl, cardRatioFromUrl, cardRow, DEFAULT_CARD_RATIO,
 } from "../lib/cardTemplates";
 import { cleanHttpUrl } from "../lib/linkText";
+import { cleanDestination, DESTINATIONS, describeDestination, episodeRef } from "../lib/destinations";
+// createCard owns the gate, the signed picture and the push choke point for BOTH card doors;
+// withDates lives beside it because card creation is the stricter caller of the two.
+import { createCard, withDates } from "../lib/cardCreate";
 import { approvalRequired } from "../lib/contentGate";
 import { normalizeShowInput, describeRepeat, slotsOf, daysOf, todayInEat } from "../lib/showSchedule";
 import { recentAutoFacts, runDaypart } from "../lib/funFacts";
@@ -38,21 +42,6 @@ import {
 } from "../lib/gemini";
 
 const router: IRouter = Router();
-
-/** The Control Room sends dates as ISO strings; the schema expects Date objects. */
-function withDates(body: unknown): unknown {
-  if (!body || typeof body !== "object" || Array.isArray(body)) return body;
-  const out: Record<string, unknown> = { ...(body as Record<string, unknown>) };
-  for (const key of ["startAt", "endAt", "scheduleAt"]) {
-    const value = out[key];
-    if (typeof value === "string") {
-      const parsed = new Date(value);
-      out[key] = Number.isNaN(parsed.getTime()) ? value : parsed;
-    }
-  }
-  return out;
-}
-
 
 /**
  * Validates and normalises the link / image / tap-behaviour fields before the schema sees
@@ -77,6 +66,28 @@ function normalisePushFields(body: unknown): { body: unknown; error?: string } {
   if ("openMode" in out && out.openMode !== "details" && out.openMode !== "link") out.openMode = "details";
   if (out.openMode === "link" && "linkUrl" in out && !out.linkUrl) {
     return { body, error: "Choose a link to open, or set the tap to open the full message." };
+  }
+  // WHERE A TAP GOES. Refused rather than quietly dropped: an operator who picked "one
+  // article" and typed nothing has made a mistake worth hearing about, because the push
+  // itself cannot be recalled once it is in a tray.
+  if ("dest" in out) {
+    const raw = String(out.dest ?? "").trim();
+    if (!raw) {
+      out.dest = "";
+    } else {
+      const clean = cleanDestination(raw);
+      if (!clean) {
+        return { body, error: "That tap destination is not one the app can open. Pick one from the list, and fill in the id it asks for." };
+      }
+      out.dest = clean;
+      // The two destinations that are really the old openMode values keep them in step, so
+      // one row never says two different things about the same tap.
+      if (clean === "link") out.openMode = "link";
+      if (clean === "details") out.openMode = "details";
+      if (clean === "link" && "linkUrl" in out && !out.linkUrl) {
+        return { body, error: "Choose a link to open, or pick another destination." };
+      }
+    }
   }
   return { body: out };
 }
@@ -107,8 +118,12 @@ router.post("/logout", (_req, res) => {
   res.json({ ok: true });
 });
 
-router.get("/session", (req, res) => {
-  res.json({ authenticated: Boolean(req.cookies?.[ADMIN_COOKIE]) });
+router.get("/session", (_req, res) => {
+  // Always authenticated: the admin password was removed on 2026-11-18 (see
+  // `middlewares/adminAuth.ts`). Reporting anything else would draw a login wall in front of
+  // routes that no longer check one, which teaches an operator the wrong thing about what is
+  // protecting this service -- nothing is.
+  res.json({ authenticated: true, passwordRequired: false });
 });
 
 router.use(requireAdmin);
@@ -262,53 +277,17 @@ router.post("/cards/preview", (req, res) => {
 /**
  * POST /api/admin/cards -- make one.
  *
- * Two steps on purpose: the signed image path contains the row's id, which only the insert can
- * hand back. A card whose image_url could not be written afterwards is deleted rather than
- * left on the list pointing at nothing.
+ * The work is in lib/cardCreate.ts, because the repurpose hub makes cards too (over
+ * /api/internal/cards) and the gate, the signed picture and the push choke point must not
+ * exist twice. This route is the operator's door onto it; that module explains the rules.
  */
 router.post("/cards", async (req, res) => {
-  const b = (req.body || {}) as Record<string, unknown>;
-  const template = cardTemplate(b.templateId);
-  if (!template) { res.status(400).json({ error: "Choose one of the card templates." }); return; }
-  const ratio = cardRatio(b.ratio) || DEFAULT_CARD_RATIO;
-  const { fields, problems } = normaliseCardFields(template, b.fields);
-  if (problems.length) { res.status(400).json({ error: problems[0], problems }); return; }
-
-  // The operator chooses placement, schedule, push and status; the CARD owns type, title,
-  // body and template_fields, and image_url is written after the insert. Spread in that
-  // order so a request cannot smuggle in a title that disagrees with the picture.
-  const operator = { ...b };
-  for (const key of ["templateId", "fields", "ratio", "imageUrl"]) delete operator[key];
-  const parsed = insertContentItemSchema.safeParse(withDates({
-    ...operator,
-    ...cardRow(template, fields),
-  }));
-  if (!parsed.success) { res.status(400).json({ error: parsed.error.flatten() }); return; }
-
-  // Where a card ENTERS the gate. The approval fields are left out of insertContentItemSchema
-  // on purpose -- a card that could approve itself with a PATCH would make the gate
-  // decorative -- so the state is chosen here, from the policy the dashboard holds, and
-  // changed afterwards only by a decision on /approvals.
-  const approvalState = (await approvalRequired("card")) ? "pending" : "approved";
-  const [item] = await db.insert(contentItemsTable)
-    .values({ ...parsed.data, approvalState }).returning();
-  let saved;
-  try {
-    [saved] = await db.update(contentItemsTable)
-      .set({ imageUrl: cardImageUrl(item.id, template, fields, ratio), updatedAt: new Date() })
-      .where(eq(contentItemsTable.id, item.id)).returning();
-  } catch (err) {
-    await db.delete(contentItemsTable).where(eq(contentItemsTable.id, item.id));
-    res.status(500).json({ error: "The card could not be given a picture, so it was not kept.", detail: String(err).slice(0, 200) });
+  const outcome = await createCard(req.body);
+  if (!outcome.ok) {
+    res.status(outcome.status).json({ error: outcome.error, ...(outcome.problems ? { problems: outcome.problems } : {}), ...(outcome.detail ? { detail: outcome.detail } : {}) });
     return;
   }
-  // A card that is live the moment it is made pushes like any other item -- one choke point,
-  // lib/contentPush.ts, which writes the notifications audit row.
-  const pushDelivery = await attemptContentPush(saved);
-  const [current] = pushDelivery?.sent
-    ? await db.select().from(contentItemsTable).where(eq(contentItemsTable.id, saved.id))
-    : [saved];
-  res.status(201).json({ ...current, ratio, pushDelivery });
+  res.status(201).json({ ...outcome.row, ratio: outcome.ratio, pushDelivery: outcome.pushDelivery });
 });
 
 /**
@@ -353,6 +332,69 @@ router.patch("/cards/:id", async (req, res) => {
   res.json({ ...current, ratio, pushDelivery });
 });
 
+/** Every tap destination the app can open, for the Control Room's picker. */
+router.get("/destinations", (_req, res) => {
+  res.json({ destinations: DESTINATIONS });
+});
+
+/**
+ * GET /api/admin/podcast-episodes?show=<slug>
+ *
+ * The episodes of one show, each with the REFERENCE that `episode:<slug>:<ref>` wants.
+ *
+ * This exists because the grammar was unusable without it: an episode's id is its feed guid,
+ * and an operator has no way to know that "Echoes Of Fame, 22 Nov" is
+ * `echoes_of_fame/echoes_of_fame_2026-11-22.mp3` unless something reads the feed for them.
+ * The reference is derived here with the same `episodeRef` the app uses, so the two always
+ * agree, and nothing is stored: the feed is the record.
+ *
+ * The parse is two regexes rather than an XML library on purpose -- this reads two fields
+ * from a well-formed feed the station publishes itself, for a picker, and a malformed feed
+ * should cost an operator an empty list rather than the service a dependency.
+ */
+router.get("/podcast-episodes", async (req, res) => {
+  const slug = String(req.query.show ?? "").trim().toLowerCase();
+  if (!slug) { res.status(400).json({ error: "Which show?" }); return; }
+
+  const config = await getAppConfig();
+  const show = config.podcasts.find((entry) => entry.slug === slug);
+  if (!show) { res.status(404).json({ error: "No show with that slug." }); return; }
+
+  try {
+    const answer = await fetch(show.feedUrl, {
+      headers: { Accept: "application/rss+xml,application/xml,text/xml" },
+      signal: AbortSignal.timeout(8000),
+    });
+    if (!answer.ok) throw new Error("the feed answered " + answer.status);
+    const xml = await answer.text();
+    const items = xml.split(/<item[\s>]/i).slice(1, 51);
+    const read = (block: string, tag: string) => {
+      const match = block.match(new RegExp("<" + tag + "[^>]*>([\\s\\S]*?)</" + tag + ">", "i"));
+      if (!match) return "";
+      return match[1]
+        .replace(/<!\[CDATA\[([\s\S]*?)\]\]>/g, "$1")
+        .replace(/<[^>]+>/g, "")
+        .trim();
+    };
+    const episodes = items.map((block) => {
+      const guid = read(block, "guid");
+      return {
+        title: read(block, "title").slice(0, 160),
+        date: read(block, "pubDate").slice(0, 40),
+        guid,
+        ref: episodeRef(guid),
+        // Exactly what an operator pastes into the id box, so there is nothing to assemble.
+        dest: episodeRef(guid) ? `episode:${slug}:${episodeRef(guid)}` : "",
+      };
+    }).filter((episode) => episode.ref);
+    res.json({ show: { slug: show.slug, name: show.name }, episodes });
+  } catch (error) {
+    res.status(502).json({
+      error: "That feed could not be read: " + (error instanceof Error ? error.message : "unknown"),
+    });
+  }
+});
+
 /** The saved cards, newest first, each with the shape it was published in. */
 router.get("/cards", async (_req, res) => {
   const rows = await db.select().from(contentItemsTable)
@@ -364,6 +406,18 @@ router.get("/cards", async (_req, res) => {
       ...row,
       ratio: cardRatioFromUrl(row.imageUrl),
       templateName: template?.name || null,
+      // Said in words here rather than worked out in the page's JavaScript: the list, the
+      // notification log and the app all have to agree about where a tap goes.
+      destLabel: describeDestination(row.dest ?? ""),
+      // "Sent" is the push; "showing" is whether the app would serve it right now. They are
+      // different questions and an operator asks both (owner, 2026-11-22: "i need to be able
+      // to see which card have been sent").
+      expired: Boolean(row.endAt && row.endAt.getTime() < Date.now()),
+      showing:
+        row.status === "live" &&
+        row.approvalState === "approved" &&
+        (!row.startAt || row.startAt.getTime() <= Date.now()) &&
+        (!row.endAt || row.endAt.getTime() >= Date.now()),
       // A row whose template has been renamed out of the catalogue is reported, not hidden:
       // its picture still renders from whatever design it was made with.
       templateKnown: Boolean(template),
@@ -693,6 +747,58 @@ router.patch("/song-facts/:id", async (req, res) => {
     return;
   }
   res.json(row);
+});
+
+/**
+ * Push a fact to the repurpose hub, or take it back.
+ *
+ * `pushedAt` IS the contract between the two services: the facts section sets it here, and
+ * the dashboard's hub reads it over the loopback bridge. There is no second store and no
+ * Node-to-Flask call, which is why pushing cannot half-happen.
+ *
+ * Deliberately NOT folded into `PATCH /song-facts/:id`: that route forces `source: "manual"`
+ * to protect an edited fact from the generator and the sheet sync. Pushing is not editing, so
+ * going through it would relabel an AI fact as typed merely for having been used again -- and
+ * would then exempt it from the sheet sync for good.
+ *
+ * Pushing says nothing about where the fact will go or when. The hub asks that.
+ */
+router.post("/song-facts/:id/push", async (req, res) => {
+  const id = Number(req.params.id);
+  if (!Number.isInteger(id)) {
+    res.status(400).json({ error: "Bad id." });
+    return;
+  }
+  const push = (req.body as Record<string, unknown> | undefined)?.pushed !== false;
+  const [row] = await db
+    .update(songFactsTable)
+    .set({ pushedAt: push ? new Date() : null })
+    .where(eq(songFactsTable.id, id))
+    .returning();
+  if (!row) {
+    res.status(404).json({ error: "Not found." });
+    return;
+  }
+  res.json(row);
+});
+
+/**
+ * Ask for more wordings of one fact, so the player stops repeating itself.
+ *
+ * Groq, not Gemini: a rephrasing asserts nothing new, so it needs no search grounding -- the
+ * quota that ran out on 2026-11-18. A reply that moves a number or alters a quote is thrown
+ * away rather than stored, so this cannot quietly rewrite the fact it was asked to reword.
+ */
+router.post("/song-facts/:id/rephrase", async (req, res) => {
+  const id = Number(req.params.id);
+  if (!Number.isInteger(id)) {
+    res.status(400).json({ error: "Bad id." });
+    return;
+  }
+  const wantRaw = Number((req.body as Record<string, unknown> | undefined)?.want);
+  const want = Number.isFinite(wantRaw) ? Math.max(1, Math.min(4, Math.trunc(wantRaw))) : 2;
+  const result = await rephraseFact(id, want);
+  res.status(result.ok ? 200 : 422).json(result);
 });
 
 router.delete("/song-facts/:id", async (req, res) => {

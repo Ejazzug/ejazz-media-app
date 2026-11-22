@@ -22,8 +22,10 @@ import { FreshEjazzSection } from '@/components/FreshEjazzSection';
 // eslint-disable-next-line @typescript-eslint/no-unused-vars -- kept for the commented section below
 import { ContinueEjazzSection } from '@/components/ContinueEjazzSection';
 import { TheTeaSection } from '@/components/TheTeaSection';
-import { FeaturedCard, PromoBanner, SponsorSlot, UpdateBanner } from '@/components/RemoteControls';
+import { FeaturedCard, PromoBanner, SponsorSlot, TakeoverPanel, UpdateBanner } from '@/components/RemoteControls';
 import { useAppConfig } from '@/lib/appConfig';
+import { OfflineBanner, OfflineState } from '@/components/OfflineState';
+import { useService } from '@/lib/reachability';
 
 export default function HomeScreen() {
   const colors = useColors();
@@ -54,6 +56,12 @@ export default function HomeScreen() {
   };
   const isLoading = featured.isLoading || latest.isLoading;
   const isError = featured.isError && latest.isError;
+  // A FRESH INSTALL WITH NO NETWORK (owner, 2026-11-22). Nothing has ever been cached, so the
+  // news section has nothing honest to show -- but the page around it is all bundled and must
+  // still look finished. `unreachable` only becomes true after a probe has actually failed,
+  // so a normal launch shows its spinner rather than an offline notice it has not earned.
+  const newsService = useService('news');
+  const newsOffline = newsService.unreachable && stories.length === 0;
   const retryNews = () => {
     featured.refetch();
     latest.refetch();
@@ -80,6 +88,11 @@ export default function HomeScreen() {
           </View>
         </View>
 
+        {/* First, above everything, and bled to the screen edges: see TakeoverPanel. It draws
+            nothing at all unless a takeover is live, so Home is unchanged the rest of the time. */}
+        <TakeoverPanel />
+
+        <OfflineBanner />
         <UpdateBanner />
         <PromoBanner />
 
@@ -162,7 +175,9 @@ export default function HomeScreen() {
           </Pressable>
         </View>
 
-        {isLoading ? (
+        {newsOffline ? (
+          <OfflineState kind="news" service="news" />
+        ) : isLoading ? (
           <View style={styles.newsStatus}>
             <ActivityIndicator color={colors.primary} />
             <Text style={styles.newsStatusText}>Loading the latest stories…</Text>
