@@ -12,6 +12,43 @@ Referenced by `codemagic.yaml` (`ejazz_eas` variable group comment).
 
 ---
 
+## Before you start anything in Codemagic: `tools/ota/ship.sh`
+
+One command, run on the box when the work is finished:
+
+```bash
+bash tools/ota/ship.sh              # or --dry-run to see what it would do
+```
+
+It refuses on an uncommitted change, typechecks the app, builds the api-server,
+merges the work branch into `codemagic-release`, **pushes**, checks the next
+versionCode against Play, and then says which workflow the change needs and
+prints the exact `OTA_CONFIRM_PRODUCTION` value to paste.
+
+It exists because every rejection this project has actually had was mechanical:
+
+| What happened | When | What catches it now |
+|---|---|---|
+| Merged locally, never pushed -- Codemagic built the previous head | 2026-11-23 | step 4, which verifies `origin` moved |
+| `OTA_CONFIRM_PRODUCTION` left at an older SHA | 2026-11-23 | printed for the new HEAD at the end |
+| A versionCode Play already had | builds #20, #21 | step 5 (`version-status.sh`) |
+| A native change published as an OTA | 2026-11-23 | step 6, by fingerprint |
+
+**Step 6 is the one that saves a cycle.** A config plugin, `app.config`, the
+dependency set or `eas.json` is hashed into the runtime fingerprint, so JS
+published onto a build without the native half is refused -- which is right,
+but you find out after the run. Record what each build shipped and the question
+answers itself:
+
+```bash
+unzip -p <the.apk> assets/fingerprint > tools/ota/last-shipped-fingerprint.txt
+```
+
+Until that file exists the script falls back to looking for native files in the
+push. That fallback only ever says "this needs a build"; it never claims an OTA
+is safe, because it cannot see a transitive dependency moving.
+
+
 ## 0. Current state — read this before planning any release
 
 | Fact | Value |
