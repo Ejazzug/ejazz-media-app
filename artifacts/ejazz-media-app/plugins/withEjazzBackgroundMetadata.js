@@ -14,7 +14,7 @@ function patchAudioControlsService(source) {
   source = replaceOnce(
     source,
     'import kotlinx.coroutines.launch',
-    'import kotlinx.coroutines.launch\nimport kotlinx.coroutines.delay\nimport android.util.Log\nimport org.json.JSONObject\nimport java.net.HttpURLConnection',
+    'import kotlinx.coroutines.launch\nimport kotlinx.coroutines.delay\nimport kotlinx.coroutines.withContext\nimport android.util.Log\nimport org.json.JSONObject\nimport java.net.HttpURLConnection',
     'coroutine imports',
   );
   source = replaceOnce(
@@ -36,7 +36,21 @@ function patchAudioControlsService(source) {
         try {
           val activePlayer = currentPlayer
           val metadata = currentMetadata
-          if (activePlayer?.ref?.isPlaying == true && metadata != null) {
+          // THE PLAYER MAY ONLY BE TOUCHED FROM THE MAIN THREAD. The service scope is
+          // Dispatchers.IO, and ExoPlayer's verifyApplicationThread() throws
+          // "Player is accessed on the wrong thread" for a read as innocent as
+          // isPlaying. The catch below swallowed that exception every 15 seconds, so
+          // the loop ran for the whole session and never once updated the lock screen
+          // -- which is why the only thing that refreshed it was a push waking the JS
+          // side, where this all happens on the main thread anyway (owner, 2026-11-23:
+          // *"lock screen still doesn't update, but when i send a notification it
+          // updates"*). The fetch stays on IO; only the read hops.
+          val playing = if (activePlayer != null) {
+            withContext(Dispatchers.Main) { activePlayer.ref.isPlaying }
+          } else {
+            false
+          }
+          if (playing && metadata != null) {
             val latest = fetchStationMetadata(metadata)
             if (latest != null && activePlayer == currentPlayer) {
               // Main dispatcher directly, NOT appContext?.mainQueue: appContext can be null

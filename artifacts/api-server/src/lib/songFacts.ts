@@ -114,6 +114,11 @@ function buildPrompt(artist: string, title: string): string {
     "- Say it the way you would say it to a friend: short words, present tense where it fits, one idea per sentence. No 'renowned', no 'iconic', no 'the hit single', no 'beloved'.",
     "- Do NOT begin with 'Clock this' or 'Clock it'. The app already prints those words directly above your line, and a line that opens with them says them twice.",
     "- No emoji, no hashtags, no ALL CAPS, no exclamation marks. The line is the energy; punctuation is not.",
+    // The line is read on its own under the player, with no heading naming the artist above
+    // it, so "She broke into the scene in 2014" is a sentence about nobody (owner,
+    // 2026-11-23). `nameTheSubject()` repairs what is already stored; this stops new ones.
+    "- NAME WHO IT IS ABOUT. Never open with a bare 'She', 'He' or 'They': the line is read on its own, with nothing above it saying whose song this is. Use the artist's name the first time, pronouns after that.",
+    "- Finish the sentence. Never end on an ellipsis or trail off: a line that stops dead reads as a bug, not as suspense.",
     "THE FACTS ARE NOT NEGOTIABLE. The voice is yours; the facts are not.",
     "- NOT the obvious. No bare release year, chart position, award list, streaming numbers, genre label or feature credit -- unless that fact is itself the surprise and you say what makes it surprising.",
     "- A short quote from the artist about the song is welcome: their real words only, and name them as the speaker. Never quote the lyrics.",
@@ -416,6 +421,57 @@ export function factLines(text: string | null | undefined): string[] {
   return parts.length ? parts : [raw];
 }
 
+/**
+ * Whether a wording is a whole fact rather than the tail end of one.
+ *
+ * 1069 rows came in through the CSV import on 2026-11-22 carrying variants that had been cut
+ * mid-sentence -- "She first broke into the Kampala music scene in 2014 after..." -- and 72
+ * that were nothing but an ellipsis. The bodies were all intact; only the extra wordings were
+ * damaged, and the app duly printed a sentence that stops dead (owner, 2026-11-23: *"some
+ * don't show full text"*).
+ *
+ * Filtering at serve time rather than only cleaning the table, because the table is the
+ * record and a future import can do this again. The floor is the same one the writer applies
+ * to `body` (15 characters), plus: nothing that ends in an ellipsis, which in this data never
+ * means style and always means the text was cut.
+ */
+export function isWholeFact(text: string): boolean {
+  const t = (text ?? "").trim();
+  if (t.length < 15) return false;
+  if (/(\.\.\.|\u2026)$/.test(t)) return false;
+  return true;
+}
+
+/**
+ * Put the artist's NAME where a bare pronoun opens a fact.
+ *
+ * Under the player a fact is read on its own, with no heading above it, so "She first broke
+ * into the Kampala music scene in 2014" is a sentence about nobody (owner, 2026-11-23: *"some
+ * facts arent clear, for example if a fact says 'she broke ....' who are we talking about"*).
+ * On a card the artist is printed underneath and the pronoun resolves; in the app it does
+ * not, and the app is where most of these are read.
+ *
+ * Only the OPENING pronoun is replaced, and only when the fact does not already name the
+ * artist somewhere: rewriting every pronoun would turn a two-clause fact into a paragraph
+ * that repeats the name, and the fact's own words are the record.
+ */
+export function nameTheSubject(text: string, artist: string | null | undefined): string {
+  const t = (text ?? "").trim();
+  const name = (artist ?? "").trim();
+  if (!t || !name) return t;
+  if (t.toLowerCase().includes(name.toLowerCase())) return t;
+  const subject = /^(she|he|they)\b/i;
+  const possessive = /^(her|his|their)\b/i;
+  if (subject.test(t)) return name + t.replace(subject, "");
+  // "Her debut single ..." -> "Azawi's debut single ...", and an "s" already on the end of
+  // the name takes the bare apostrophe English gives it.
+  if (possessive.test(t)) {
+    const owned = /s$/i.test(name) ? name + "'" : name + "'s";
+    return owned + t.replace(possessive, "");
+  }
+  return t;
+}
+
 /** Every usable wording of a fact, `body` first. */
 export function wordings(row: SongFact | null): string[] {
   if (!row || !row.body) return [];
@@ -424,10 +480,17 @@ export function wordings(row: SongFact | null): string[] {
   // Each stored string is first split into the facts it contains, so a three-bullet body
   // becomes three entries here and `pickWording` hands out ONE of them.
   const flat: string[] = [];
-  for (const stored of [row.body, ...(row.variants ?? [])]) flat.push(...factLines(stored));
+  // What `body` looks like AFTER the rename, so the exemption below still recognises it.
+  const named_body = nameTheSubject((row.body ?? "").trim(), row.artist);
+  for (const stored of [row.body, ...(row.variants ?? [])]) {
+    for (const line of factLines(stored)) flat.push(nameTheSubject(line, row.artist));
+  }
   for (const w of flat) {
     const t = (w ?? "").trim();
     const k = t.toLowerCase();
+    // `body` is exempt from the whole-fact test: it is what every other reader shows, and a
+    // listener seeing the same text the card shows beats showing nothing at all.
+    if (t !== named_body && !isWholeFact(t)) continue;
     if (t && !seen.has(k)) {
       seen.add(k);
       out.push(t);

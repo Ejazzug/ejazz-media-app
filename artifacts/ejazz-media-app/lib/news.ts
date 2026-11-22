@@ -285,6 +285,96 @@ export function useNewsSearch(query: string, categoryId: number | null) {
   });
 }
 
+/**
+ * A WordPress collection BESIDE /posts -- /categories, today.
+ *
+ * `apiUrl()` builds post URLs and knows how to find /posts whether or not the configured
+ * value already ends in it; this reuses that reasoning for a sibling, so a deployment that
+ * points the app at a different WordPress needs no second setting.
+ */
+function wpCollectionUrl(resource: string, params: Record<string, string>) {
+  if (!NEWS_API_URL) throw new Error('The News API URL is empty or undefined in this app build.');
+  const root = NEWS_API_URL.replace(/\/+$/, '').replace(/\/posts(?:\?.*)?$/, '');
+  const url = new URL(`${root}/${resource}`);
+  Object.entries(params).forEach(([key, value]) => url.searchParams.set(key, value));
+  return url.toString();
+}
+
+/**
+ * The category ids a podcast's own stories are filed under -- ALL of them.
+ *
+ * A show is a CATEGORY on ejazzug.com, not a tag (owner, 2026-11-23: *"it's not tags, it's
+ * categories"*), and more than one category can carry the same show: measured on the live
+ * site, "Pop Radar" is 9156 with twelve stories AND 9161 ("pop-radar-entertainment") with
+ * eight. Taking the slug match alone would have quietly dropped those eight, so every
+ * category whose NAME is the show's name counts, and WordPress ORs the list.
+ *
+ * Returns [] when the site has no category for the show, which is not an error: it means
+ * nobody has filed a story under it yet.
+ */
+async function requestShowCategoryIds(slug: string, name: string): Promise<number[]> {
+  const read = async (params: Record<string, string>) => {
+    const { data } = await requestJson(wpCollectionUrl('categories', { per_page: '20', ...params }));
+    return Array.isArray(data) ? (data as { id?: unknown; name?: unknown; slug?: unknown }[]) : [];
+  };
+  const wanted = name.trim().toLowerCase();
+  const found = [...(await read({ search: name })), ...(await read({ slug }))];
+  const ids: number[] = [];
+  for (const row of found) {
+    const sameName = String(row.name ?? '').trim().toLowerCase() === wanted;
+    const sameSlug = String(row.slug ?? '').trim().toLowerCase() === slug.trim().toLowerCase();
+    if ((sameName || sameSlug) && typeof row.id === 'number' && !ids.includes(row.id)) {
+      ids.push(row.id);
+    }
+  }
+  return ids;
+}
+
+async function requestShowPage(page: number, categoryIds: number[]): Promise<PostsPage> {
+  const { data, response } = await requestJson(apiUrl('', {
+    categories: categoryIds.join(','),
+    per_page: '10',
+    _embed: '1',
+    page: String(page),
+  }));
+  if (!Array.isArray(data) || !data.every(isWordPressPost)) {
+    console.error('[EJazz News] Invalid show posts response.', { page, categoryIds, data });
+    throw new Error('News API response did not contain a valid WordPress posts array.');
+  }
+  const totalPages = Number(response.headers.get('x-wp-totalpages') ?? page);
+  return { stories: data.map(mapPost), nextPage: page < totalPages ? page + 1 : undefined };
+}
+
+/**
+ * THE STORIES FILED UNDER A PODCAST (owner, 2026-11-23: *"in news categories i need articles
+ * with tags of the podcasts the podcasts themselves"*).
+ *
+ * The id lookup is its own query so the answer is cached per show for a day rather than
+ * re-asked on every page of stories.
+ */
+export function useShowCategoryIds(show: { slug: string; name: string } | null) {
+  return useQuery({
+    queryKey: ['ejazz-news', 'show-categories', show?.slug ?? 'none'],
+    queryFn: () => requestShowCategoryIds(show?.slug ?? '', show?.name ?? ''),
+    enabled: Boolean(show?.slug),
+    staleTime: 24 * 60 * 60 * 1000,
+    retry: 1,
+  });
+}
+
+export function useNewsForShow(categoryIds: number[] | undefined) {
+  const ids = categoryIds ?? [];
+  return useInfiniteQuery({
+    queryKey: ['ejazz-news', 'show-stories', ids.join(',') || 'none'],
+    queryFn: ({ pageParam }) => requestShowPage(pageParam, ids),
+    enabled: ids.length > 0,
+    initialPageParam: 1,
+    getNextPageParam: (lastPage) => lastPage.nextPage,
+    staleTime: NEWS_CACHE_TTL_MS,
+    retry: 1,
+  });
+}
+
 export function useLatestNews(categoryId?: number) {
   return useInfiniteQuery({
     queryKey: ['ejazz-news', 'latest', categoryId ?? 'all'],
