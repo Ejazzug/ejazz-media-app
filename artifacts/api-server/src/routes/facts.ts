@@ -35,17 +35,56 @@ function stationOf(raw: unknown): { name: string; logo: string } {
   return STATIONS[key] || STATIONS.radio;
 }
 
-function sharePathFor(fact: string, song: string, artist: string, station: unknown): string | null {
+/** The dashboard, which is where art resolution and rendering both live. */
+const RENDERER = "http://127.0.0.1:9000";
+/** The fact card's picture slot, from templates/fact.json. */
+const CARD_ART_SLOT = { width: 1080, height: 420 };
+
+/**
+ * The picture for the share card, resolved by the box that owns art resolution.
+ *
+ * NODE HAS NO ART. It knows the song and the station and nothing else, so every fact card it
+ * built left the picture slot empty and the template's own default filled it -- the EJazz
+ * Xtra mark, blown across the top of a card whose corner logo said EJazz Radio (owner,
+ * 2026-11-23). The defaults are gone from the templates now, and this is what fills the slot
+ * properly: the sleeve, else a licensed photograph of the artist, else an emoji tile.
+ *
+ * Never fatal and never slow: a card with no picture is still a card, so a failure or a
+ * timeout returns nothing and the slot stays background.
+ */
+async function cardArtFor(artist: string, song: string, station: string): Promise<{ path: string; credit: string }> {
+  try {
+    const r = await fetch(RENDERER + "/api/design-art", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ artist, song, station, kind: "fact", credit: true, ...CARD_ART_SLOT }),
+      signal: AbortSignal.timeout(8000),
+    });
+    if (!r.ok) return { path: "", credit: "" };
+    const body = (await r.json()) as { path?: unknown; credit?: unknown };
+    return {
+      path: typeof body.path === "string" ? body.path : "",
+      credit: typeof body.credit === "string" ? body.credit : "",
+    };
+  } catch {
+    return { path: "", credit: "" };
+  }
+}
+
+async function sharePathFor(fact: string, song: string, artist: string, station: unknown): Promise<string | null> {
   const template = cardTemplate("song-fact");
   if (!template) return null;
   const format = cardFormat(template, "1:1");
   const from = stationOf(station);
+  const art = await cardArtFor(artist, song, from.name);
   const data = cardRenderData(template, {
     fact,
     song,
     artist,
     footer: `${from.name} on EJazz Media App`,
     logo: from.logo,
+    ...(art.path ? { artwork: art.path } : {}),
+    ...(art.credit ? { credit: art.credit } : {}),
   });
   return "/api/designer/render/" + encodeURIComponent(format.design)
     + "?size=" + encodeURIComponent(format.size)
@@ -103,7 +142,7 @@ router.get("/for-track", async (req, res) => {
         index,
         total: all.length,
         wordings: all.length,
-        shareUrl: sharePathFor(body, title.trim(), artist.trim(), req.query.station),
+        shareUrl: await sharePathFor(body, title.trim(), artist.trim(), req.query.station),
       },
     });
   } catch {
