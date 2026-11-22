@@ -1,7 +1,7 @@
 import { Feather } from '@expo/vector-icons';
 import { Image } from 'expo-image';
 import { LinearGradient } from 'expo-linear-gradient';
-import { useLocalSearchParams } from 'expo-router';
+import { useLocalSearchParams, useRouter } from 'expo-router';
 import React from 'react';
 import { ActivityIndicator, Modal, Pressable, ScrollView, StyleSheet, Text, TextInput, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
@@ -463,6 +463,24 @@ export default function RadioScreen() {
      and a tap inside the app on exactly the same path.
      Requests only open when the station is actually taking them: a panel that opens onto
      "requests are closed" is a worse answer than leaving it folded. */
+  /**
+   * AN AIM IS AN INSTRUCTION, NOT A SETTING -- and `show`/`episode` were the two that never
+   * learned it. They stay on the route after they have been honoured, and `PodcastsPanel`
+   * unmounts every time the switcher leaves Podcasts, so each trip back mounted it afresh
+   * with the same aim still attached and it started the episode again. Owner, 2026-11-23:
+   * *"switching to the podcasts tab, plays the podcast automatically, turn it off"*.
+   *
+   * Cleared from the route once consumed. The panel's own effect runs first -- React runs a
+   * child's effects before its parent's -- so it has already taken the aim into its own
+   * state by the time this empties the params. A later tap on an episode sets them again,
+   * which is a NEW instruction and still plays, exactly as it should.
+   */
+  const router = useRouter();
+  React.useEffect(() => {
+    if (!show && !episode) return;
+    router.setParams({ show: '', episode: '' });
+  }, [show, episode, router]);
+
   const aimed = `${mode ?? ''}|${play ?? ''}|${requests ?? ''}|${chart ?? ''}`;
   const aimedDone = React.useRef('');
   React.useEffect(() => {
