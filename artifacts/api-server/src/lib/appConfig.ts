@@ -149,6 +149,24 @@ export type AppConfig = {
     startAt: string;
     endAt: string;
   };
+  /**
+   * THE CARD RAIL ON HOME (owner, 2026-11-23: cards "should appear on the home page after the
+   * now playing section... a maximum of 3 of the latest cards and not from the same category").
+   *
+   * Only the shape of the rail lives here. WHICH cards are in it is not a setting: it is the
+   * live, approved, in-window cards the content feed already serves, so withdrawing a card or
+   * giving it an end date is how an operator takes it off Home -- one control, on the card
+   * itself, instead of a second list here that could disagree with it.
+   */
+  homeCards: {
+    enabled: boolean;
+    /** How many may show at once. */
+    max: number;
+    /** How many may share a category, so Radio and Xtra can each have a song fact up. */
+    perCategory: number;
+    /** The rail's heading. */
+    heading: string;
+  };
   links: {
     contactEmail: string;
     instagramUrl: string;
@@ -217,6 +235,7 @@ export const DEFAULT_APP_CONFIG: AppConfig = {
     dest: "", linkUrl: "", startAt: "", endAt: "", dismissible: true, showUntilTapped: true,
   },
   sponsor: { enabled: false, label: "SPONSORED", imageUrl: "", linkUrl: "", startAt: "", endAt: "" },
+  homeCards: { enabled: true, max: 3, perCategory: 2, heading: "Fresh from EJazz" },
   links: {
     contactEmail: "",
     instagramUrl: "",
@@ -281,6 +300,21 @@ function version(value: unknown, fallback = ""): string {
   const v = value.trim();
   if (!v) return "";
   return /^\d+(\.\d+){0,3}$/.test(v) ? v : fallback;
+}
+
+/**
+ * A small whole number, clamped. Anything unparseable keeps the default.
+ *
+ * The blank check is not decoration: `Number("")` is 0, not NaN, so an empty box or a missing
+ * section would have clamped to the MINIMUM instead of keeping the operator's default -- a
+ * saved config with no `homeCards` at all would have quietly cut Home's rail to one card.
+ */
+function count(value: unknown, fallback: number, min: number, max: number): number {
+  const raw = typeof value === "number" ? value : String(value ?? "").trim();
+  if (raw === "") return fallback;
+  const parsed = Number(raw);
+  if (!Number.isFinite(parsed)) return fallback;
+  return Math.min(max, Math.max(min, Math.trunc(parsed)));
 }
 
 function isoDate(value: unknown, fallback = ""): string {
@@ -408,6 +442,7 @@ export function normalizeAppConfig(input: unknown): AppConfig {
   const ft = obj(src.featured);
   const bn = obj(src.banner);
   const sp = obj(src.sponsor);
+  const hc = obj(src.homeCards);
   const tk = obj(src.takeover);
   const lk = obj(src.links);
 
@@ -486,6 +521,16 @@ export function normalizeAppConfig(input: unknown): AppConfig {
       linkUrl: url(sp.linkUrl),
       startAt: isoDate(sp.startAt),
       endAt: isoDate(sp.endAt),
+    },
+    homeCards: {
+      enabled: bool(hc.enabled, d.homeCards.enabled),
+      // Ceilings, not opinions: six cards is already more than Home has room for, and a
+      // per-category limit above the total could never bite. Nothing here can be saved in a
+      // state that empties the rail by accident -- a zero becomes one, and switching it off
+      // is the `enabled` flag, which says so plainly.
+      max: count(hc.max, d.homeCards.max, 1, 6),
+      perCategory: count(hc.perCategory, d.homeCards.perCategory, 1, 6),
+      heading: text(hc.heading, d.homeCards.heading, 40) || d.homeCards.heading,
     },
     links: {
       contactEmail: email(lk.contactEmail),

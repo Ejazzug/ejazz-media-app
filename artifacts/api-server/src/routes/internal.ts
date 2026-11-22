@@ -195,6 +195,11 @@ function forDashboard(row: typeof contentItemsTable.$inferSelect) {
     schedule_at: row.scheduleAt,
     start_at: row.startAt,
     end_at: row.endAt,
+    // For Home's rail: whose card this is, and what a listener's share says. The station is
+    // also the rail's diversity key -- see lib/homeCards.ts in the app -- so a page that can
+    // set it is the difference between two song facts being up at once and only one.
+    station: row.relatedStation,
+    share_caption: row.shareCaption,
     // THE TWO QUESTIONS AN OPERATOR ASKS (owner, 2026-11-22: "i need to be able to see which
     // card have been sent", and an expiry to go with it). "Sent" is about the push, which
     // cannot be taken back. "Showing" is whether a phone asking right now would be served
@@ -652,6 +657,12 @@ router.post("/cards", async (req, res) => {
  * something people have already seen. Everything else about the row -- its approval, its
  * push, its schedule -- has its own endpoint, for the same reason.
  *
+ * The SHARE CAPTION and the STATION are editable, and neither of them breaks that rule: the
+ * caption is not on the card, it is the sentence that travels beside it when a listener
+ * shares, and the station is a label for whose card it is. Both exist for Home's rail (owner,
+ * 2026-11-23) -- the station is what lets a Radio song fact and an Xtra song fact be up at
+ * the same time, where two from one station would be the same thing said twice.
+ *
  * `end_at: null` clears an expiry. An expiry in the past is accepted on purpose: it is how an
  * operator takes a card off every phone at once, which is the honest version of "delete" for
  * something that has already been delivered.
@@ -688,8 +699,30 @@ router.patch("/cards/:id", async (req, res) => {
     patch.dest = cleanDestination(raw);
   }
 
+  if ("share_caption" in body) {
+    // Trimmed, and an empty one becomes NULL rather than "": null is "nobody wrote a
+    // caption", which is what makes the app fall back to the title. An empty string would
+    // read as a caption that says nothing, and the app would share a blank line.
+    const raw = String(body.share_caption ?? "").trim();
+    if (raw.length > 280) {
+      res.status(400).json({ error: "A caption is 280 characters at most." });
+      return;
+    }
+    patch.shareCaption = raw || null;
+  }
+
+  if ("station" in body) {
+    const raw = String(body.station ?? "").trim().toLowerCase();
+    const known = raw === "" ? null : (raw === "radio" || raw === "xtra" ? raw : undefined);
+    if (known === undefined) {
+      res.status(400).json({ error: "A station is radio, xtra, or empty for both." });
+      return;
+    }
+    patch.relatedStation = known;
+  }
+
   if (!Object.keys(patch).length) {
-    res.status(400).json({ error: "Nothing to change: send end_at, dest, or both." });
+    res.status(400).json({ error: "Nothing to change: send end_at, dest, share_caption or station." });
     return;
   }
   patch.updatedAt = new Date();
