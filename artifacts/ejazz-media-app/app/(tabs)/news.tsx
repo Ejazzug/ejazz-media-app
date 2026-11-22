@@ -6,8 +6,7 @@ import { ActivityIndicator, Dimensions, Pressable, RefreshControl, ScrollView, S
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { EditorialPlaceholder, MINI_PLAYER_CLEARANCE, ScreenHeader, StoryCard } from '@/components/MediaComponents';
 import { useColors } from '@/hooks/useColors';
-import { MIN_SEARCH_LENGTH, NEWS_CATEGORIES, useFeaturedNews, useLatestNews, useNewsForShow, useNewsSearch, useShowCategoryIds } from '@/lib/news';
-import { usePodcastFeed } from '@/lib/podcasts';
+import { MIN_SEARCH_LENGTH, NEWS_CATEGORIES, NEWS_CHIP_CATEGORIES, useFeaturedNews, useLatestNews, useNewsForShow, useNewsSearch, usePodcastCategories } from '@/lib/news';
 import { OfflineState } from '@/components/OfflineState';
 import { useService } from '@/lib/reachability';
 import { usePodcastShows } from '@/lib/appConfig';
@@ -28,7 +27,10 @@ export default function NewsScreen() {
   const asked = Number(category);
   const askedCategory =
     Number.isFinite(asked) && NEWS_CATEGORIES.some((c) => c.id === asked) ? asked : null;
-  const [categoryId, setCategoryId] = useState<number>(askedCategory ?? 12);
+  /* `null` is ALL -- the mixed latest across every category that has a chip. It is the
+     default now that Top Stories is the carousel and not a tab, and the ALL chip is the way
+     back to it after picking one. */
+  const [categoryId, setCategoryId] = useState<number | null>(askedCategory ?? null);
   /**
    * THE PODCAST CHIP FILTERS THIS SCREEN, it no longer leaves it (owner, 2026-11-23: *"in
    * news categories i need articles with tags of the podcasts the podcasts themselves"*).
@@ -58,13 +60,17 @@ export default function NewsScreen() {
     setCategoryId(askedCategory);
   }, [askedCategory]);
   const featured = useFeaturedNews();
-  const latest = useLatestNews(categoryId);
+  const latest = useLatestNews(categoryId ?? undefined);
   const search = useNewsSearch(searchTerm, searchInCategory ? categoryId : null);
   const newsService = useService('news');
   const shows = usePodcastShows();
-  const showCategories = useShowCategoryIds(podcast);
-  const showStories = useNewsForShow(showCategories.data);
-  const episodes = usePodcastFeed(podcast?.slug ?? null);
+  /* Every show that has a category of its own; the ones that have none get no chip. */
+  const podcastCategories = usePodcastCategories(shows);
+  const podcastChips = useMemo(
+    () => shows.filter((show) => (podcastCategories.data?.[show.slug] ?? []).length > 0),
+    [shows, podcastCategories.data],
+  );
+  const showStories = useNewsForShow(podcast ? podcastCategories.data?.[podcast.slug] : undefined);
   /** The carousel: the newest top stories, up to three. */
   const carousel = useMemo(() => (featured.data ?? []).slice(0, CAROUSEL_SIZE), [featured.data]);
   const stories = useMemo(
@@ -87,16 +93,13 @@ export default function NewsScreen() {
    * A show with no tag on the site is not an error: it means nobody has filed a story under
    * it yet. The episodes still show, and the list below says so plainly.
    */
-  const noShowCategory = Boolean(podcast) && showCategories.isFetched && (showCategories.data ?? []).length === 0;
+  const noShowCategory = podcast !== null && podcastCategories.isFetched
+    && (podcastCategories.data?.[podcast.slug] ?? []).length === 0;
   const refresh = () => {
     featured.refetch();
     latest.refetch();
     if (searching) search.refetch();
-    if (podcast) {
-      showCategories.refetch();
-      showStories.refetch();
-      episodes.refetch();
-    }
+    if (podcast) showStories.refetch();
   };
   const newsError = latest.error instanceof Error
     ? latest.error.message
@@ -156,7 +159,7 @@ export default function NewsScreen() {
                 >
                   <Text style={[styles.scopeText, searchInCategory === inCategory && styles.scopeTextOn]}>
                     {inCategory
-                      ? (NEWS_CATEGORIES.find((c) => c.id === categoryId)?.label ?? 'This category').toUpperCase()
+                      ? (NEWS_CATEGORIES.find((c) => c.id === categoryId)?.label ?? 'EJazz News').toUpperCase()
                       : 'EVERYTHING'}
                   </Text>
                 </Pressable>
@@ -170,7 +173,19 @@ export default function NewsScreen() {
             it leaves for that show, which is why the two groups are divided and the podcast
             ones wear a microphone. */}
         <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.categoryRow}>
-          {NEWS_CATEGORIES.map((category) => (
+          <Pressable
+            onPress={() => { setCategoryId(null); setPodcast(null); setQuery(''); }}
+            accessibilityRole="button"
+            accessibilityState={{ selected: !podcast && categoryId === null }}
+            style={[styles.category,
+                    !podcast && categoryId === null && { backgroundColor: colors.accent }]}
+          >
+            <Text style={[styles.categoryText,
+                          !podcast && categoryId === null && { color: colors.accentForeground }]}>
+              ALL
+            </Text>
+          </Pressable>
+          {NEWS_CHIP_CATEGORIES.map((category) => (
             <Pressable
               key={category.id}
               onPress={() => {
@@ -187,8 +202,8 @@ export default function NewsScreen() {
               </Text>
             </Pressable>
           ))}
-          {shows.length > 0 ? <View style={styles.chipDivider} /> : null}
-          {shows.map((show) => {
+          {podcastChips.length > 0 ? <View style={styles.chipDivider} /> : null}
+          {podcastChips.map((show) => {
             const on = podcast?.slug === show.slug;
             return (
               <Pressable
@@ -257,56 +272,14 @@ export default function NewsScreen() {
           </>
         ) : null}
 
-        {/* THE PODCAST ITSELF, above its stories. The owner asked for both in one place:
-            the episodes to play, and the articles filed under the show. */}
-        {podcast && !searching ? (
-          <>
-            <Text style={styles.featuredLabel}>{podcast.name.toUpperCase()} • EPISODES</Text>
-            {episodes.isLoading ? (
-              <View style={styles.status}><ActivityIndicator color={colors.primary} /></View>
-            ) : (episodes.data?.episodes ?? []).length === 0 ? (
-              <Text style={styles.episodeEmpty}>No episodes published yet.</Text>
-            ) : (
-              <View style={styles.episodeList}>
-                {(episodes.data?.episodes ?? []).slice(0, 3).map((episode) => (
-                  <Pressable
-                    key={episode.id}
-                    onPress={() => router.push({
-                      pathname: '/(tabs)/radio',
-                      params: { mode: 'podcasts', show: podcast.slug, episode: episode.id },
-                    })}
-                    accessibilityRole="button"
-                    accessibilityLabel={`Play the episode ${episode.title}`}
-                    style={styles.episode}
-                  >
-                    <Feather name="play-circle" size={20} color={colors.primary} />
-                    <View style={styles.episodeMeta}>
-                      <Text numberOfLines={2} style={styles.episodeTitle}>{episode.title}</Text>
-                      <Text style={styles.episodeDate}>{episode.dateLabel}</Text>
-                    </View>
-                  </Pressable>
-                ))}
-                <Pressable
-                  onPress={() => router.push({
-                    pathname: '/(tabs)/radio',
-                    params: { mode: 'podcasts', show: podcast.slug },
-                  })}
-                  accessibilityRole="button"
-                  style={styles.episodeAll}
-                >
-                  <Text style={styles.retry}>ALL EPISODES</Text>
-                </Pressable>
-              </View>
-            )}
-          </>
-        ) : null}
-
         <Text style={styles.latestLabel}>
           {searching
             ? `RESULTS FOR “${searchTerm.toUpperCase()}” • ${searchInCategory ? 'THIS CATEGORY' : 'EVERYTHING'}`
             : podcast
-              ? `${podcast.name.toUpperCase()} • STORIES`
-              : `${NEWS_CATEGORIES.find((category) => category.id === categoryId)?.label.toUpperCase()} • LATEST`}
+              ? `${podcast.name.toUpperCase()} • LATEST`
+              : categoryId === null
+                ? 'EJAZZ NEWS • LATEST'
+                : `${NEWS_CATEGORIES.find((category) => category.id === categoryId)?.label.toUpperCase()} • LATEST`}
         </Text>
 
         {newsService.unreachable && list.length === 0 ? (
@@ -318,7 +291,7 @@ export default function NewsScreen() {
               {`No stories are showStories ${podcast?.name ?? 'this show'} yet — the episodes are above.`}
             </Text>
           </View>
-        ) : listQuery.isLoading || (podcast && showCategories.isLoading) ? (
+        ) : listQuery.isLoading || (podcast && podcastCategories.isLoading) ? (
           <View style={styles.status}>
             <ActivityIndicator color={colors.primary} />
             <Text style={styles.statusText}>{searching ? 'Searching EJazz News…' : 'Loading EJazz News…'}</Text>

@@ -78,6 +78,11 @@ function rpcUrl(method: string, params: Record<string, string>) {
   url.searchParams.set('username', RADIO_USERNAME);
   url.searchParams.set('charset', 'UTF-8');
   Object.entries(params).forEach(([key, value]) => url.searchParams.set(key, value));
+  // A DIFFERENT URL EVERY TIME. Request headers alone are not enough to be sure of a fresh
+  // answer: a cached entry can be served before the request is made, and any proxy between
+  // here and Centova caches by URL. An unknown parameter is ignored by rpc.php (checked
+  // against the live endpoint), so this costs nothing and guarantees the poll asks.
+  url.searchParams.set('_ts', String(Date.now()));
   return url.toString();
 }
 
@@ -87,7 +92,14 @@ async function requestJson(url: string) {
 
   try {
     const response = await fetch(url, {
-      headers: { Accept: 'application/json' },
+      // NO-CACHE, BECAUSE THE STATION'S OWN CACHE HEADER IS LONGER THAN THE POLL.
+      // Centova answers the now-playing RPC with `Cache-Control: max-age=120`, measured
+      // 2026-11-23. Android's fetch goes through OkHttp, which installs a response cache
+      // and honours that header, so most polls never left the phone and the song on screen
+      // sat still for minutes at a time -- the owner's *"doesn't update in real time...
+      // except when i go to the radio menu"*. These headers plus the `_ts` parameter in
+      // `rpcUrl` are what make a poll actually ask.
+      headers: { Accept: 'application/json', 'Cache-Control': 'no-cache', Pragma: 'no-cache' },
       signal: controller.signal,
     });
     if (!response.ok) throw new Error('Radio service request failed');
@@ -158,6 +170,10 @@ async function fetchRecentTracks() {
   }
 
   const currentTrack = normalizeTrack(payload.data[0][0]);
+  // The other half of the logcat trail from PlayerContext's metadata tick: what the station
+  // actually answered. A tick with no line here is a failed request; a line that repeats is
+  // the station still playing the same song.
+  console.log('[EJazz NowPlaying] radio says', currentTrack?.title ?? '(nothing)');
   const previousTracks = payload.data[0]
     .slice(1)
     .map(normalizeTrack)
@@ -271,7 +287,13 @@ function numberOr(value: unknown, fallback: number): number {
 }
 
 async function fetchExtraNowPlaying(): Promise<ExtraNowPlaying> {
-  const payload = await extraGet(`${EXTRA_API_URL}/api/nowplaying/${EXTRA_STATION_ID}`);
+  // `_ts` for the same reason as the Centova RPC in `rpcUrl`: AzuraCast answers this with
+  // `Cache-Control: public, max-age=15` and the poll is also 15 seconds, so a cached copy
+  // served to a poll costs a whole cycle. Xtra was never as badly stuck as Radio -- fifteen
+  // seconds against fifteen -- but the fix is the same one and belongs in both places.
+  const payload = await extraGet(
+    `${EXTRA_API_URL}/api/nowplaying/${EXTRA_STATION_ID}?_ts=${Date.now()}`,
+  );
   if (!payload || typeof payload !== 'object' || Array.isArray(payload)) {
     throw new Error('Unexpected EJazz Xtra metadata response');
   }
@@ -478,10 +500,13 @@ export function useRecentTracks(enabled: boolean, isAppActive: boolean = true) {
     queryKey: ['radio', 'recent-tracks'],
     queryFn: fetchRecentTracks,
     enabled,
-    staleTime: 60_000,
-    // Keep the in-app history current when Android allows the JS runtime to run;
-    // the native audio service separately refreshes lock-screen metadata.
-    refetchInterval: enabled ? (isAppActive ? 75_000 : 60_000) : false,
+    staleTime: 20_000,
+    // 30 SECONDS, not 75. A radio station's now-playing line is the one thing on the screen
+    // that is supposed to be live, and three quarters of the old interval was spent showing
+    // a song that had already finished. Keep the in-app history current when Android allows
+    // the JS runtime to run; the native audio service refreshes the lock screen separately,
+    // on its own 15-second loop.
+    refetchInterval: enabled ? (isAppActive ? 30_000 : 60_000) : false,
     refetchIntervalInBackground: true,
     retry: 1,
   });

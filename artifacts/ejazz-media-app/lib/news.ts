@@ -9,6 +9,19 @@ export const NEWS_CATEGORIES = [
   { id: 3181, label: 'Africa' },
 ] as const;
 
+/** Top Stories, which is the carousel's category and no longer a chip. */
+export const TOP_STORIES_ID = 12;
+
+/**
+ * The categories that get a chip.
+ *
+ * Top Stories is not one of them (owner, 2026-11-23: *"top stories shouldn't be a tab in
+ * news. let it just take that section at the top with the 3 sliders"*). It still names the
+ * carousel's query and still labels a story that belongs to it, which is why it stays in
+ * NEWS_CATEGORIES above -- it is simply not somewhere you navigate to twice.
+ */
+export const NEWS_CHIP_CATEGORIES = NEWS_CATEGORIES.filter(({ id }) => id !== TOP_STORIES_ID);
+
 const ALLOWED_CATEGORY_IDS = NEWS_CATEGORIES.map(({ id }) => id);
 const CATEGORY_LABELS = new Map<number, string>(NEWS_CATEGORIES.map(({ id, label }) => [id, label]));
 const NEWS_API_URL = process.env.EXPO_PUBLIC_EJAZZ_NEWS_API_URL?.trim() ?? '';
@@ -301,33 +314,41 @@ function wpCollectionUrl(resource: string, params: Record<string, string>) {
 }
 
 /**
- * The category ids a podcast's own stories are filed under -- ALL of them.
+ * Every podcast show that has a CATEGORY of its own on the site, and its ids.
  *
- * A show is a CATEGORY on ejazzug.com, not a tag (owner, 2026-11-23: *"it's not tags, it's
- * categories"*), and more than one category can carry the same show: measured on the live
- * site, "Pop Radar" is 9156 with twelve stories AND 9161 ("pop-radar-entertainment") with
- * eight. Taking the slug match alone would have quietly dropped those eight, so every
- * category whose NAME is the show's name counts, and WordPress ORs the list.
+ * One request for the whole category list rather than one per show, because the screen has
+ * to know the answer before it draws: a show with no category gets no chip at all. Two of
+ * them have none and are not meant to -- owner, 2026-11-23: *"each podcast has a
+ * corresponding category on the website except finance & future tech and xtreme BPM"* -- and
+ * matching on the name means that stays true by itself as shows come and go, with nothing
+ * hardcoded to fall out of date.
  *
- * Returns [] when the site has no category for the show, which is not an error: it means
- * nobody has filed a story under it yet.
+ * A show can own MORE THAN ONE category: measured on the live site, "Pop Radar" is 9156 with
+ * twelve stories and 9161 with eight. Both are returned and WordPress ORs them, where taking
+ * the first would have quietly dropped eight stories.
  */
-async function requestShowCategoryIds(slug: string, name: string): Promise<number[]> {
-  const read = async (params: Record<string, string>) => {
-    const { data } = await requestJson(wpCollectionUrl('categories', { per_page: '20', ...params }));
-    return Array.isArray(data) ? (data as { id?: unknown; name?: unknown; slug?: unknown }[]) : [];
-  };
-  const wanted = name.trim().toLowerCase();
-  const found = [...(await read({ search: name })), ...(await read({ slug }))];
-  const ids: number[] = [];
-  for (const row of found) {
-    const sameName = String(row.name ?? '').trim().toLowerCase() === wanted;
-    const sameSlug = String(row.slug ?? '').trim().toLowerCase() === slug.trim().toLowerCase();
-    if ((sameName || sameSlug) && typeof row.id === 'number' && !ids.includes(row.id)) {
-      ids.push(row.id);
-    }
-  }
-  return ids;
+export function usePodcastCategories(shows: ReadonlyArray<{ slug: string; name: string }>) {
+  const names = shows.map((show) => `${show.slug}:${show.name}`).join('|');
+  return useQuery({
+    queryKey: ['ejazz-news', 'podcast-categories', names],
+    enabled: shows.length > 0 && Boolean(NEWS_API_URL),
+    staleTime: 24 * 60 * 60 * 1000,
+    retry: 1,
+    queryFn: async () => {
+      const { data } = await requestJson(wpCollectionUrl('categories', { per_page: '100' }));
+      const rows = Array.isArray(data) ? (data as { id?: unknown; name?: unknown }[]) : [];
+      const found: Record<string, number[]> = {};
+      for (const show of shows) {
+        const wanted = show.name.trim().toLowerCase();
+        const ids = rows
+          .filter((row) => String(row.name ?? '').trim().toLowerCase() === wanted)
+          .map((row) => row.id)
+          .filter((id): id is number => typeof id === 'number');
+        if (ids.length) found[show.slug] = ids;
+      }
+      return found;
+    },
+  });
 }
 
 async function requestShowPage(page: number, categoryIds: number[]): Promise<PostsPage> {
@@ -345,23 +366,7 @@ async function requestShowPage(page: number, categoryIds: number[]): Promise<Pos
   return { stories: data.map(mapPost), nextPage: page < totalPages ? page + 1 : undefined };
 }
 
-/**
- * THE STORIES FILED UNDER A PODCAST (owner, 2026-11-23: *"in news categories i need articles
- * with tags of the podcasts the podcasts themselves"*).
- *
- * The id lookup is its own query so the answer is cached per show for a day rather than
- * re-asked on every page of stories.
- */
-export function useShowCategoryIds(show: { slug: string; name: string } | null) {
-  return useQuery({
-    queryKey: ['ejazz-news', 'show-categories', show?.slug ?? 'none'],
-    queryFn: () => requestShowCategoryIds(show?.slug ?? '', show?.name ?? ''),
-    enabled: Boolean(show?.slug),
-    staleTime: 24 * 60 * 60 * 1000,
-    retry: 1,
-  });
-}
-
+/** The stories filed under one show's category or categories. */
 export function useNewsForShow(categoryIds: number[] | undefined) {
   const ids = categoryIds ?? [];
   return useInfiniteQuery({
