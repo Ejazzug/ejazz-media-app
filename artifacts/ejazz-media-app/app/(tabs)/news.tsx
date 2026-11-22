@@ -6,7 +6,8 @@ import { ActivityIndicator, Dimensions, Pressable, RefreshControl, ScrollView, S
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { EditorialPlaceholder, MINI_PLAYER_CLEARANCE, ScreenHeader, StoryCard } from '@/components/MediaComponents';
 import { useColors } from '@/hooks/useColors';
-import { MIN_SEARCH_LENGTH, NEWS_CATEGORIES, useFeaturedNews, useLatestNews, useNewsSearch } from '@/lib/news';
+import { MIN_SEARCH_LENGTH, NEWS_CATEGORIES, useFeaturedNews, useLatestNews, useNewsForShow, useNewsSearch, useShowCategoryIds } from '@/lib/news';
+import { usePodcastFeed } from '@/lib/podcasts';
 import { OfflineState } from '@/components/OfflineState';
 import { useService } from '@/lib/reachability';
 import { usePodcastShows } from '@/lib/appConfig';
@@ -28,6 +29,13 @@ export default function NewsScreen() {
   const askedCategory =
     Number.isFinite(asked) && NEWS_CATEGORIES.some((c) => c.id === asked) ? asked : null;
   const [categoryId, setCategoryId] = useState<number>(askedCategory ?? 12);
+  /**
+   * THE PODCAST CHIP FILTERS THIS SCREEN, it no longer leaves it (owner, 2026-11-23: *"in
+   * news categories i need articles with tags of the podcasts the podcasts themselves"*).
+   * Picking a show puts its own episodes at the top and the stories TAGGED with it below;
+   * picking a category chip clears it again.
+   */
+  const [podcast, setPodcast] = useState<{ slug: string; name: string } | null>(null);
   const [searchOpen, setSearchOpen] = useState(false);
   const [query, setQuery] = useState('');
   /**
@@ -54,6 +62,9 @@ export default function NewsScreen() {
   const search = useNewsSearch(searchTerm, searchInCategory ? categoryId : null);
   const newsService = useService('news');
   const shows = usePodcastShows();
+  const showCategories = useShowCategoryIds(podcast);
+  const showStories = useNewsForShow(showCategories.data);
+  const episodes = usePodcastFeed(podcast?.slug ?? null);
   /** The carousel: the newest top stories, up to three. */
   const carousel = useMemo(() => (featured.data ?? []).slice(0, CAROUSEL_SIZE), [featured.data]);
   const stories = useMemo(
@@ -65,13 +76,27 @@ export default function NewsScreen() {
     () => search.data?.pages.flatMap((page) => page.stories) ?? [],
     [search.data],
   );
+  const showStoryList = useMemo(
+    () => showStories.data?.pages.flatMap((page) => page.stories) ?? [],
+    [showStories.data],
+  );
   /** One list, whichever mode the screen is in, so the markup below has one code path. */
-  const list = searching ? searchStories : stories;
-  const listQuery = searching ? search : latest;
+  const list = searching ? searchStories : podcast ? showStoryList : stories;
+  const listQuery = searching ? search : podcast ? showStories : latest;
+  /**
+   * A show with no tag on the site is not an error: it means nobody has filed a story under
+   * it yet. The episodes still show, and the list below says so plainly.
+   */
+  const noShowCategory = Boolean(podcast) && showCategories.isFetched && (showCategories.data ?? []).length === 0;
   const refresh = () => {
     featured.refetch();
     latest.refetch();
     if (searching) search.refetch();
+    if (podcast) {
+      showCategories.refetch();
+      showStories.refetch();
+      episodes.refetch();
+    }
   };
   const newsError = latest.error instanceof Error
     ? latest.error.message
@@ -150,33 +175,45 @@ export default function NewsScreen() {
               key={category.id}
               onPress={() => {
                 setCategoryId(category.id);
+                setPodcast(null);
                 setQuery('');
               }}
-              style={[styles.category, categoryId === category.id && { backgroundColor: colors.accent }]}
+              style={[styles.category,
+                      !podcast && categoryId === category.id && { backgroundColor: colors.accent }]}
             >
-              <Text style={[styles.categoryText, categoryId === category.id && { color: colors.accentForeground }]}>
+              <Text style={[styles.categoryText,
+                            !podcast && categoryId === category.id && { color: colors.accentForeground }]}>
                 {category.label.toUpperCase()}
               </Text>
             </Pressable>
           ))}
           {shows.length > 0 ? <View style={styles.chipDivider} /> : null}
-          {shows.map((show) => (
-            <Pressable
-              key={show.slug}
-              onPress={() => router.push({ pathname: '/(tabs)/radio', params: { mode: 'podcasts', show: show.slug } })}
-              accessibilityRole="button"
-              accessibilityLabel={`Open the podcast ${show.name}`}
-              style={[styles.category, styles.podcastChip]}
-            >
-              <Feather name="mic" size={11} color={colors.primary} />
-              <Text style={styles.categoryText}>{show.name.toUpperCase()}</Text>
-            </Pressable>
-          ))}
+          {shows.map((show) => {
+            const on = podcast?.slug === show.slug;
+            return (
+              <Pressable
+                key={show.slug}
+                onPress={() => {
+                  setPodcast(on ? null : { slug: show.slug, name: show.name });
+                  setQuery('');
+                }}
+                accessibilityRole="button"
+                accessibilityState={{ selected: on }}
+                accessibilityLabel={`Stories and episodes for the podcast ${show.name}`}
+                style={[styles.category, styles.podcastChip, on && { backgroundColor: colors.accent }]}
+              >
+                <Feather name="mic" size={11} color={on ? colors.accentForeground : colors.primary} />
+                <Text style={[styles.categoryText, on && { color: colors.accentForeground }]}>
+                  {show.name.toUpperCase()}
+                </Text>
+              </Pressable>
+            );
+          })}
         </ScrollView>
 
         {/* Three top stories, swipeable one card at a time. Hidden while searching: a search
             is a question about the archive, and a carousel of something else is in the way. */}
-        {carousel.length > 0 && !searching ? (
+        {carousel.length > 0 && !searching && !podcast ? (
           <>
             <Text style={styles.featuredLabel}>FEATURED • TOP STORIES</Text>
             <ScrollView
@@ -220,15 +257,68 @@ export default function NewsScreen() {
           </>
         ) : null}
 
+        {/* THE PODCAST ITSELF, above its stories. The owner asked for both in one place:
+            the episodes to play, and the articles filed under the show. */}
+        {podcast && !searching ? (
+          <>
+            <Text style={styles.featuredLabel}>{podcast.name.toUpperCase()} • EPISODES</Text>
+            {episodes.isLoading ? (
+              <View style={styles.status}><ActivityIndicator color={colors.primary} /></View>
+            ) : (episodes.data?.episodes ?? []).length === 0 ? (
+              <Text style={styles.episodeEmpty}>No episodes published yet.</Text>
+            ) : (
+              <View style={styles.episodeList}>
+                {(episodes.data?.episodes ?? []).slice(0, 3).map((episode) => (
+                  <Pressable
+                    key={episode.id}
+                    onPress={() => router.push({
+                      pathname: '/(tabs)/radio',
+                      params: { mode: 'podcasts', show: podcast.slug, episode: episode.id },
+                    })}
+                    accessibilityRole="button"
+                    accessibilityLabel={`Play the episode ${episode.title}`}
+                    style={styles.episode}
+                  >
+                    <Feather name="play-circle" size={20} color={colors.primary} />
+                    <View style={styles.episodeMeta}>
+                      <Text numberOfLines={2} style={styles.episodeTitle}>{episode.title}</Text>
+                      <Text style={styles.episodeDate}>{episode.dateLabel}</Text>
+                    </View>
+                  </Pressable>
+                ))}
+                <Pressable
+                  onPress={() => router.push({
+                    pathname: '/(tabs)/radio',
+                    params: { mode: 'podcasts', show: podcast.slug },
+                  })}
+                  accessibilityRole="button"
+                  style={styles.episodeAll}
+                >
+                  <Text style={styles.retry}>ALL EPISODES</Text>
+                </Pressable>
+              </View>
+            )}
+          </>
+        ) : null}
+
         <Text style={styles.latestLabel}>
           {searching
             ? `RESULTS FOR “${searchTerm.toUpperCase()}” • ${searchInCategory ? 'THIS CATEGORY' : 'EVERYTHING'}`
-            : `${NEWS_CATEGORIES.find((category) => category.id === categoryId)?.label.toUpperCase()} • LATEST`}
+            : podcast
+              ? `${podcast.name.toUpperCase()} • STORIES`
+              : `${NEWS_CATEGORIES.find((category) => category.id === categoryId)?.label.toUpperCase()} • LATEST`}
         </Text>
 
         {newsService.unreachable && list.length === 0 ? (
           <OfflineState kind="news" service="news" />
-        ) : listQuery.isLoading ? (
+        ) : noShowCategory ? (
+          <View style={styles.status}>
+            <Feather name="tag" size={24} color={colors.mutedForeground} />
+            <Text style={styles.statusText}>
+              {`No stories are showStories ${podcast?.name ?? 'this show'} yet — the episodes are above.`}
+            </Text>
+          </View>
+        ) : listQuery.isLoading || (podcast && showCategories.isLoading) ? (
           <View style={styles.status}>
             <ActivityIndicator color={colors.primary} />
             <Text style={styles.statusText}>{searching ? 'Searching EJazz News…' : 'Loading EJazz News…'}</Text>
@@ -248,7 +338,9 @@ export default function NewsScreen() {
                 ? searchInCategory
                   ? 'Nothing in this category matches. Try EVERYTHING.'
                   : 'Nothing in the archive matches that.'
-                : 'No stories have been published here yet.'}
+                : podcast
+                  ? `No stories are showStories ${podcast.name} yet — the episodes are above.`
+                  : 'No stories have been published here yet.'}
             </Text>
           </View>
         ) : (
@@ -306,6 +398,14 @@ const styles = StyleSheet.create({
   featuredDate: { color: '#FF6B6B', fontSize: 10, fontWeight: '700', letterSpacing: 1.4 },
   featuredTitle: { color: '#F7F9FC', fontSize: 23, lineHeight: 28, fontWeight: '700', letterSpacing: -0.5, marginTop: 9 },
   featuredLink: { color: '#E43B48', fontSize: 10, fontWeight: '700', letterSpacing: 1.2, marginTop: 17 },
+  episodeList: { paddingHorizontal: 20, gap: 8, marginBottom: 4 },
+  episode: { flexDirection: 'row', alignItems: 'center', gap: 12, paddingVertical: 10,
+             paddingHorizontal: 12, borderRadius: 10, backgroundColor: 'rgba(255,255,255,0.04)' },
+  episodeMeta: { flex: 1, gap: 2 },
+  episodeTitle: { color: '#F7F9FC', fontSize: 13, fontWeight: '600' },
+  episodeDate: { color: '#8C96AD', fontSize: 11 },
+  episodeAll: { alignSelf: 'flex-start', paddingVertical: 4 },
+  episodeEmpty: { color: '#8C96AD', fontSize: 12, paddingHorizontal: 20, paddingBottom: 8 },
   latestLabel: { color: '#A7B7CC', fontSize: 10, fontWeight: '700', letterSpacing: 1.6, marginHorizontal: 20, marginTop: 33, marginBottom: 17 },
   list: { gap: 20, marginHorizontal: 20 },
   status: { minHeight: 210, alignItems: 'center', justifyContent: 'center', gap: 12, paddingHorizontal: 30 },

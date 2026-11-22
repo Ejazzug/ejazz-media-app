@@ -57,72 +57,69 @@ const build = (over: Partial<Parameters<typeof buildHubItems>[0]> = {}) => build
   notifications: [], content: [], dismissed: new Set(), releasedTipIds: new Set(), ...over,
 });
 
+const tip = (over: Partial<PulseContentItem> & { id: number }) => card({ ...over, type: 'tip' });
+
 // --- which content items belong in the hub ---
-check("a card is in", build({ content: [card({ id: 1 })] }).map((i) => i.key), ["c:1"]);
+// A CARD IS NOT ONE OF THEM (owner, 2026-11-23: the cards page belongs in the dashboard, at
+// /approvals). It reaches a listener as the push that announced it, like everything else.
+check("a card is not in the hub", build({ content: [card({ id: 1 })] }).length, 0);
 check("a fact is not: it is Home's Clock it",
   build({ content: [card({ id: 2, type: 'fact' })] }).length, 0);
 for (const type of ['poll', 'quiz', 'announcement', 'song_battle', 'push_alert', 'show_alert'] as const) {
   check(`a ${type} is not: it arrives as a push`, build({ content: [card({ id: 3, type })] }).length, 0);
 }
 check("an unreleased tip is not shown at all",
-  build({ content: [card({ id: 4, type: 'tip' })] }).length, 0);
+  build({ content: [tip({ id: 4 })] }).length, 0);
 check("a released tip is",
-  build({ content: [card({ id: 4, type: 'tip' })], releasedTipIds: new Set([4]) }).map((i) => i.kind), ["tip"]);
+  build({ content: [tip({ id: 4 })], releasedTipIds: new Set([4]) }).map((i) => i.kind), ["tip"]);
 
-// --- a card and its own push are one thing ---
-const dedupe = build({
+// --- a card's own push is now the only row for it, so nothing is deduped away ---
+const pushed = build({
   content: [card({ id: 5, title: 'The chart is in' })],
   notifications: [push({ id: '9', title: 'The chart is in' }), push({ id: '10', title: 'Something else' })],
 });
-check("the card wins over its own push", dedupe.map((i) => i.key).sort(), ["c:5", "n:10"]);
-check("matching ignores case and padding", build({
-  content: [card({ id: 6, title: 'The Chart Is In' })],
-  notifications: [push({ id: '11', title: '  the chart is in ' })],
-}).map((i) => i.key), ["c:6"]);
-check("an untitled push is not deduped away by an untitled card", build({
-  content: [card({ id: 7, title: '' })],
-  notifications: [push({ id: '12', title: '' })],
-}).length, 2);
+check("both pushes stand, and the card adds no row", pushed.map((i) => i.key).sort(), ["n:10", "n:9"]);
 
 // --- ordering and arrival time ---
 const ordered = build({
   content: [
-    card({ id: 20, createdAt: new Date(T0 - 5 * HOUR).toISOString() }),
+    tip({ id: 20, createdAt: new Date(T0 - 5 * HOUR).toISOString() }),
     // Scheduled for later than it was written: the schedule is when it was sent.
-    card({ id: 21, createdAt: new Date(T0 - 9 * HOUR).toISOString(), startAt: new Date(T0 - HOUR).toISOString() }),
+    tip({ id: 21, createdAt: new Date(T0 - 9 * HOUR).toISOString(), startAt: new Date(T0 - HOUR).toISOString() }),
   ],
+  releasedTipIds: new Set([20, 21]),
   notifications: [push({ id: '30', receivedAt: T0 - 3 * HOUR })],
 });
 check("newest first, startAt beating createdAt", ordered.map((i) => i.key), ["c:21", "n:30", "c:20"]);
 
 // --- dismissals are namespaced ---
-check("a dismissed card goes", build({ content: [card({ id: 8 })], dismissed: new Set(['c:8']) }).length, 0);
-check("notification 8 and card 8 are different things",
-  build({ content: [card({ id: 8 })], notifications: [push({ id: '8' })], dismissed: new Set(['n:8']) })
+const released8 = { content: [tip({ id: 8 })], releasedTipIds: new Set([8]) };
+check("a dismissed tip goes", build({ ...released8, dismissed: new Set(['c:8']) }).length, 0);
+check("notification 8 and tip 8 are different things",
+  build({ ...released8, notifications: [push({ id: '8' })], dismissed: new Set(['n:8']) })
     .map((i) => i.key), ["c:8"]);
-check("a dismissal written before the hub merged cards still counts",
+check("a dismissal written before the hub merged content still counts",
   build({ notifications: [push({ id: '8' })], dismissed: new Set(['8', 'n:8']) }).length, 0);
 
 // --- what a row carries ---
-const row = build({ content: [card({ id: 40, body: 'A line about it', dest: 'chart:xtra' })] })[0];
-check("a card is a picture", row.isPicture, true);
-check("a card carries its destination", row.dest, "chart:xtra");
-check("a card gets a kicker", row.kicker, "FOR YOU");
-const tipRow = build({ content: [card({ id: 41, type: 'tip' })], releasedTipIds: new Set([41]) })[0];
-check("a tip is not a picture, whatever image it has", tipRow.isPicture, false);
+const tipRow = build({
+  content: [tip({ id: 41, body: 'A line about it', dest: 'chart:xtra' })],
+  releasedTipIds: new Set([41]),
+})[0];
+check("a tip carries its destination", tipRow.dest, "chart:xtra");
 check("a tip's kicker", tipRow.kicker, "EJAZZ TIP");
+check("a tip is not a picture, whatever image it has", tipRow.isPicture, false);
 const pushRow = build({ notifications: [push({ id: '50', linkUrl: 'https://ejazzug.com', openMode: 'link' })] })[0];
 check("a push keeps its link and mode", [pushRow.linkUrl, pushRow.openMode, pushRow.kicker],
   ["https://ejazzug.com", "link", ""]);
 
 // --- the filter chips ---
 const mixed = build({
-  content: [card({ id: 60 }), card({ id: 61, type: 'tip' })],
+  content: [tip({ id: 61 })],
   notifications: [push({ id: '70' })],
   releasedTipIds: new Set([61]),
 });
-check("all", filterHubItems(mixed, 'all').length, 3);
-check("cards only", filterHubItems(mixed, 'cards').map((i) => i.key), ["c:60"]);
+check("all", filterHubItems(mixed, 'all').length, 2);
 check("tips only", filterHubItems(mixed, 'tips').map((i) => i.key), ["c:61"]);
 
 // --- the drip: one tip now, then one a day ---

@@ -139,17 +139,42 @@ export function useShareApp() {
         open(message);
       }
     },
+    /**
+     * Share a rendered card as a PICTURE, with a name a phone will accept.
+     *
+     * IT ARRIVED AS A .BIN (owner, 2026-11-23: *"songs facts below the player are shared as
+     * .BIN"*). `Asset.fromURI().localUri` is a cache path with NO extension -- the card URL
+     * is `/api/designer/render/fact?size=...`, which has no filename in it for expo-asset to
+     * copy -- so WhatsApp and Gmail got bytes with nothing to name them, took the declared
+     * `image/png` as a lie about a JPEG, and fell back to application/octet-stream.
+     *
+     * The fix is a data URI plus an explicit `filename`, which react-native-share writes out
+     * under that name with that MIME. Done in JS on purpose: the obvious alternative is
+     * expo-file-system, and adding a native module changes the runtime fingerprint, which
+     * costs a store build for a bug that can otherwise ship as an OTA update.
+     *
+     * The type comes from the RESPONSE, not from a guess: these cards are JPEG today and the
+     * renderer may yet serve PNG for one with transparency.
+     */
     shareCardImage: async (caption: string, imageUrl: string) => {
       const message = withAppLink(caption.trim() || 'EJazz chart', update.storeUrl);
       try {
-        const asset = Asset.fromURI(imageUrl);
-        await asset.downloadAsync();
-        const local = asset.localUri;
-        if (!local) throw new Error('no local copy');
+        const response = await fetch(imageUrl);
+        if (!response.ok) throw new Error(`card ${response.status}`);
+        const type = (response.headers.get('content-type') || 'image/jpeg').split(';')[0].trim();
+        if (!type.startsWith('image/')) throw new Error(`not a picture: ${type}`);
+        const blob = await response.blob();
+        const dataUri = await new Promise<string>((resolve, reject) => {
+          const reader = new FileReader();
+          reader.onerror = () => reject(new Error('the card could not be read'));
+          reader.onload = () => resolve(String(reader.result));
+          reader.readAsDataURL(blob);
+        });
         await RNShare.open({
           message,
-          url: local,
-          type: 'image/png',
+          url: dataUri,
+          type,
+          filename: `ejazz-${Date.now()}.${type === 'image/png' ? 'png' : 'jpg'}`,
           // Cancelling is not a failure, and must not reach the catch below as one.
           failOnCancel: false,
         });

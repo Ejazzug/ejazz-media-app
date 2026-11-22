@@ -48,7 +48,7 @@ function formatReceivedAt(timestamp: number): string {
   );
 }
 
-const FILTER_LABELS: Record<HubFilter, string> = { all: 'ALL', cards: 'CARDS', tips: 'TIPS' };
+const FILTER_LABELS: Record<HubFilter, string> = { all: 'ALL', tips: 'TIPS' };
 
 export default function NotificationsScreen() {
   const colors = useColors();
@@ -186,9 +186,9 @@ export default function NotificationsScreen() {
   const kinds = useMemo(() => new Set(items.map((item) => item.kind)), [items]);
   const chips = useMemo<HubFilter[]>(() => {
     const available: HubFilter[] = ['all'];
-    if (kinds.has('card')) available.push('cards');
     if (kinds.has('tip')) available.push('tips');
-    // One kind of thing needs no chips to choose between.
+    // One kind of thing needs no chips to choose between -- and with cards gone from this
+    // list, that is the usual case: no tips released yet means no chips at all.
     return available.length > 1 ? available : [];
   }, [kinds]);
   const shown = useMemo(() => filterHubItems(items, filter), [items, filter]);
@@ -324,7 +324,7 @@ export default function NotificationsScreen() {
                 color={colors.mutedForeground}
               />
               <Text style={styles.emptyTitle}>
-                {filter === 'tips' ? 'No tips yet' : filter === 'cards' ? 'No cards yet' : 'No notifications yet'}
+                {filter === 'tips' ? 'No tips yet' : 'No notifications yet'}
               </Text>
               <Text style={styles.emptyCopy}>
                 {filter === 'tips'
