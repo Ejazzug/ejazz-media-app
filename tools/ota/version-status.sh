@@ -20,7 +20,11 @@ APP_DIR="$ROOT/artifacts/ejazz-media-app"
 PLAY_FILE="$ROOT/tools/ota/play-version-code.txt"
 
 read_play() {
-  grep -vE '^\s*(#|$)' "$PLAY_FILE" | head -1 | tr -d '[:space:]'
+  # The `|| true` is the same lesson a third time: an empty or missing file makes grep exit
+  # 1, and under `set -euo pipefail` that kills the caller mid-assignment, with status 1 and
+  # no output -- which reads exactly like a refusal. A broken check must never be mistakable
+  # for a verdict. Empty comes back as "", and the caller validates it.
+  { grep -vE '^\s*(#|$)' "$PLAY_FILE" 2>/dev/null || true; } | head -1 | tr -d '[:space:]'
 }
 
 if [ "${1:-}" = "--record" ]; then
@@ -50,15 +54,44 @@ fi
 export EXPO_TOKEN="${EXPO_TOKEN:-$EAS_ACCESS_TOKEN}"
 
 cd "$APP_DIR"
-raw="$(npx --yes eas build:version:get --platform android --non-interactive 2>/dev/null || true)"
-current="$(printf '%s' "$raw" | grep -oE 'versionCode - [0-9]+' | grep -oE '[0-9]+' | tail -1)"
+# BOTH `|| true`s are load-bearing under `set -euo pipefail`. Without the second one, a grep
+# that matches nothing exits 1, the assignment fails, and the script dies RIGHT HERE with
+# status 1 and not one line of output -- which is exactly how this guard failed Codemagic
+# builds #20 and #21 and told nobody why. Stderr is kept, not sent to /dev/null, because when
+# eas-cli cannot read the project its complaint is the whole diagnosis.
+# `eas` when the workflow has installed it globally (it has, by this point in the build),
+# `npx --yes` otherwise, which covers running this by hand on the box. --yes matters: npx
+# without it stops to ask permission to download, and CI has nobody to answer.
+if command -v eas >/dev/null 2>&1; then EAS_BIN=(eas); else EAS_BIN=(npx --yes eas); fi
+raw="$("${EAS_BIN[@]}" build:version:get --platform android --non-interactive 2>&1 || true)"
+current="$(printf '%s' "$raw" | grep -oE 'versionCode - [0-9]+' | grep -oE '[0-9]+' | tail -1 || true)"
 if [ -z "$current" ]; then
-  echo "Could not read the remote versionCode from EAS. Raw output:" >&2
+  echo "Could not read the remote versionCode from EAS." >&2
+  echo "This is a BROKEN CHECK, not a version collision -- nothing about Play is known here." >&2
+  echo "Usual causes: the step ran before 'pnpm install', so eas-cli cannot read the project;" >&2
+  echo "or EAS_ACCESS_TOKEN is missing from the ejazz_eas group. What eas-cli said:" >&2
+  echo "---" >&2
   printf '%s\n' "$raw" >&2
+  echo "---" >&2
+  exit 2
+fi
+
+if ! [[ "$current" =~ ^[0-9]+$ ]]; then
+  echo "EAS returned a versionCode that is not a number: '${current}'" >&2
   exit 2
 fi
 
 play="$(read_play)"
+# Validated, not trusted. An empty or malformed file would otherwise reach the arithmetic
+# below, where bash fails under `set -e` and the script dies with status 1 and no output --
+# indistinguishable from a real refusal, which is the failure this whole guard exists to
+# avoid inflicting on someone.
+if ! [[ "$play" =~ ^[0-9]+$ ]]; then
+  echo "tools/ota/play-version-code.txt does not hold a number (read: '${play}')." >&2
+  echo "This is a BROKEN CHECK, not a version collision. Put the highest versionCode" >&2
+  echo "uploaded to Play on its own line, below the comments." >&2
+  exit 2
+fi
 # Every profile that uploads to Play carries autoIncrement, so the next build is current + 1.
 # `production-apk` deliberately does not: it must reuse the AAB's code so the APK people test
 # IS the binary being shipped.
@@ -78,8 +111,10 @@ The EAS counter has fallen behind Play. Raise it, then build:
     printf '%s\n' "$play" | script -qec "npx --yes eas build:version:set --platform android --profile production" /dev/null
     npx --yes eas build:version:get --platform android --non-interactive   # read it BACK
 
-(`build:version:set` has no non-interactive flag and its pty echo prints escape noise that
-reads like a different number, which is why the read-back is part of the procedure.)
+(build:version:set has no non-interactive flag, and its pty echo prints escape noise that
+reads like a different number, which is why the read-back is part of the procedure. No
+backticks in this message: the heredoc is unquoted, because it interpolates the numbers, so
+anything in backticks would RUN -- and once did.)
 MSG
   exit 1
 fi
