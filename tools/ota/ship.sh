@@ -178,10 +178,16 @@ REPORT
 
     workflow : ejazz-android-release   (a store build, not an OTA)
 
-  After it is installed, record what it shipped so the next run can tell
-  the difference:
+  THEN DO NOT FORGET THIS. Once that build is installed on the phone,
+  record what it shipped. Every OTA after it is measured against this
+  value, and if it is missing or stale the publish refuses -- which is
+  how 2026-11-23 went:
 
-    unzip -p <the.apk> assets/fingerprint > $LAST_FP_FILE
+    bash tools/ota/record-shipped-fingerprint.sh            # from this tree
+    bash tools/ota/record-shipped-fingerprint.sh <the.apk>   # from the artifact
+
+  Record it AFTER the build is installed, not now: a hash recorded for a
+  build that never ran is a claim about nothing.
 REPORT
     ;;
   *)
@@ -193,7 +199,10 @@ REPORT
     variable : OTA_CONFIRM_PRODUCTION=$HEAD_SHA
     native?  : unverified
 
-    unzip -p <the.apk> assets/fingerprint > $LAST_FP_FILE
+  Record the installed build's fingerprint once and this stops being a
+  guess:
+
+    bash tools/ota/record-shipped-fingerprint.sh
 REPORT
     ;;
 esac
