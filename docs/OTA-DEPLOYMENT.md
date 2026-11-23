@@ -41,12 +41,41 @@ but you find out after the run. Record what each build shipped and the question
 answers itself:
 
 ```bash
-unzip -p <the.apk> assets/fingerprint > tools/ota/last-shipped-fingerprint.txt
+bash tools/ota/record-shipped-fingerprint.sh            # from this tree
+bash tools/ota/record-shipped-fingerprint.sh <the.apk>   # from the artifact (authoritative)
+bash tools/ota/record-shipped-fingerprint.sh --hash <40-hex>
 ```
 
-Until that file exists the script falls back to looking for native files in the
+Record it only once a build made from that commit is actually installed. A
+fingerprint is a pure function of the project files, so the no-argument form
+computes what a build of this tree ships without needing the APK -- but a value
+recorded before the build exists is a claim about a build that never ran.
+
+Until that file exists `ship.sh` falls back to looking for native files in the
 push. That fallback only ever says "this needs a build"; it never claims an OTA
 is safe, because it cannot see a transitive dependency moving.
+
+### Why the Codemagic run refuses, and what the recording fixes
+
+`tools/ota/check-fingerprint.sh` runs inside the OTA workflow and compares this
+commit against the newest build **registered on EAS**. Every build of this
+project is made with `eas build --local`, and EAS never registers those -- so
+the newest build it knows about is **v2.1.0 build 23 (2026-11-22, fingerprint
+`205d75f4`)**, while builds 25, 26 and 27 exist only as artifacts. Publishing
+anything newer than 23 therefore refused on a mismatch against a binary nobody
+is running, and the only way past it was to paste
+`OTA_EXPECTED_FINGERPRINT` by hand on every single run (2026-11-23).
+
+The gate now reads `tools/ota/last-shipped-fingerprint.txt` when the EAS record
+does not match, so the hash is remembered instead of retyped. Order of
+preference, strongest first:
+
+1. `OTA_EXPECTED_FINGERPRINT` in the environment -- one run only
+2. the newest build EAS has registered for the channel
+3. the recorded file
+
+A recorded hash that has gone stale makes the gate refuse, which is what a
+stale reference should do.
 
 
 ## 0. Current state — read this before planning any release
@@ -56,7 +85,9 @@ is safe, because it cannot see a transitive dependency moving.
 | Live Play Store binary | v0.1.0 (build 8), 2026-09-10, fingerprint `a567bfe5` |
 | **Can the live app receive OTA?** | **No. See §1.** |
 | Newest preview binary | v2.0.5 (build 21), 2026-11-12, fingerprint `18e635e1` — OTA works |
-| Current source fingerprint | `18e635e1aaef1d554b355307de0f106f091d0201` |
+| Current source fingerprint | `6c2c1fc7f861e80fd90c8f45cce4076ce8f8508a` (2026-11-23) |
+| Installed build on the test phone | v2.1.0 **build 27**, fingerprint `6c2c1fc7` — OTA works, recorded |
+| Newest build EAS has *registered* | v2.1.0 build 23, fingerprint `205d75f4` — 25/26/27 were local, so unregistered |
 | `preview` channel | Active, Unprotected, branch `preview`, 5 update groups published (see note) |
 | `production` channel | Active, **Unprotected**, branch `production`, **0 updates ever** |
 | Expo role — human operator | **Developer** |
