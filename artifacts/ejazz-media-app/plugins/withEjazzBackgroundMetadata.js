@@ -50,15 +50,46 @@ function patchAudioControlsService(source) {
           } else {
             false
           }
+          // LOGGED FOR REAL, with Log.i rather than console.log. A release build does not
+          // bridge JS console output into logcat, so every line the JS side prints about
+          // this is invisible on the owner's phone -- which is how 2026-11-23 was spent
+          // hunting for lines that could never appear. These survive a release build.
+          Log.i("EJazzNowPlaying", "tick playing=" + playing +
+            " player=" + (if (activePlayer != null) "yes" else "null") +
+            " metadata=" + (if (metadata != null) "yes" else "null") +
+            " session=" + (if (sessionMetadataPlayer != null) "yes" else "NULL") +
+            " active=" + (activePlayer?.isActiveForLockScreen ?: false))
           if (playing && metadata != null) {
             val latest = fetchStationMetadata(metadata)
+            Log.i("EJazzNowPlaying", "fetched=" + (latest?.title ?: "(nothing)"))
             if (latest != null && activePlayer == currentPlayer) {
               // Main dispatcher directly, NOT appContext?.mainQueue: appContext can be null
               // once the activity is gone, and that made this update silently do nothing,
               // which is exactly when the lock screen needs it (app in the background).
               launch(Dispatchers.Main) {
                 if (activePlayer == currentPlayer && activePlayer.ref.isPlaying) {
+                  // THE FLAG, FORCED. AudioPlayer.updateLockScreenMetadata returns without
+                  // a word when isActiveForLockScreen is false, and the service clears that
+                  // flag on its own in two places (clearSessionInternal, and the first lines
+                  // of setPlayerOptions before it sets it again). If it has been cleared
+                  // while the stream is still playing, every later metadata update -- from
+                  // here AND from the JS side -- is dropped silently, which is exactly the
+                  // owner's report: the song moves in the app and the lock screen does not.
+                  // Setting it costs nothing when it is already true.
+                  if (!activePlayer.isActiveForLockScreen) {
+                    Log.w("EJazzNowPlaying", "lock screen flag was FALSE while playing; setting it")
+                    activePlayer.isActiveForLockScreen = true
+                  }
+                  val before = currentMetadata?.title
                   updateMetadataInternal(activePlayer, latest)
+                  // Square brackets, not escaped quotes. This string is written inside a JS
+                  // template literal and then again inside Kotlin: a backslash-quote here
+                  // survives Python, is unescaped by JS, and reaches the compiler as a bare
+                  // quote -- which produced "pushed "" + ..." and would have failed the build
+                  // four minutes in. Verified by running the patch, not by reading it.
+                  Log.i("EJazzNowPlaying", "pushed [" + (before ?: "") + "] -> [" +
+                    (currentMetadata?.title ?: "") + "] session=" +
+                    (if (sessionMetadataPlayer != null) "yes" else "NULL"))
                 }
               }
             }
