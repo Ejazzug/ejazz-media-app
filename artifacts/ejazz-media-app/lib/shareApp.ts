@@ -158,11 +158,47 @@ export function useShareApp() {
      */
     shareCardImage: async (caption: string, imageUrl: string) => {
       const message = withAppLink(caption.trim() || 'EJazz chart', update.storeUrl);
+      const png = /\.png(\?|$)/i.test(imageUrl);
+      const type = png ? 'image/png' : 'image/jpeg';
+
+      // A REAL FILE FIRST (owner, 2026-11-23: *"when i share cards, the images never go with
+      // the caption, it's just the caption that goes with the link"*).
+      //
+      // The data URI below worked for the fun facts under the player and does not work here.
+      // Several Android targets simply drop a `data:` url and keep the text, which looks
+      // exactly like this share failing -- the caption and the link arrive, the picture does
+      // not, and nothing reports an error. A `file://` path is what a share sheet actually
+      // wants, and expo-asset can produce one for a REMOTE url without expo-file-system,
+      // which matters because adding that package would move the runtime fingerprint and cost
+      // a store build for a share button.
+      //
+      // Both paths are kept, in order, because the failure is per-target rather than absolute:
+      // a file if we can get one, the data URI if the download fails, and the words alone if
+      // even that fails. A share button that does nothing is worse than one that sends text.
+      try {
+        const asset = Asset.fromURI(imageUrl);
+        await asset.downloadAsync();
+        const local = asset.localUri;
+        if (!local) throw new Error('no local copy of the card');
+        await RNShare.open({
+          message,
+          url: local,
+          type,
+          filename: `ejazz-${Date.now()}.${png ? 'png' : 'jpg'}`,
+          failOnCancel: false,
+        });
+        return;
+      } catch (error: unknown) {
+        // Logged, not swallowed: "the picture did not go" was invisible for a day because
+        // every failure here looked like a successful text share.
+        console.log('[EJazz Share] card as a file failed, trying a data uri.', error);
+      }
+
       try {
         const response = await fetch(imageUrl);
         if (!response.ok) throw new Error(`card ${response.status}`);
-        const type = (response.headers.get('content-type') || 'image/jpeg').split(';')[0].trim();
-        if (!type.startsWith('image/')) throw new Error(`not a picture: ${type}`);
+        const served = (response.headers.get('content-type') || type).split(';')[0].trim();
+        if (!served.startsWith('image/')) throw new Error(`not a picture: ${served}`);
         const blob = await response.blob();
         const dataUri = await new Promise<string>((resolve, reject) => {
           const reader = new FileReader();
@@ -173,12 +209,13 @@ export function useShareApp() {
         await RNShare.open({
           message,
           url: dataUri,
-          type,
-          filename: `ejazz-${Date.now()}.${type === 'image/png' ? 'png' : 'jpg'}`,
+          type: served,
+          filename: `ejazz-${Date.now()}.${served === 'image/png' ? 'png' : 'jpg'}`,
           // Cancelling is not a failure, and must not reach the catch below as one.
           failOnCancel: false,
         });
-      } catch {
+      } catch (error: unknown) {
+        console.log('[EJazz Share] card picture could not be attached; sending the words.', error);
         open(message);
       }
     },
