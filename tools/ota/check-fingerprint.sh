@@ -119,6 +119,45 @@ if [ -n "$LATEST" ] && [ "$CURRENT" = "$LATEST" ]; then
   exit 0
 fi
 
+# THE RECORDED FINGERPRINT, when EAS has nothing. Every build of this project is
+# made with `eas build --local`, which EAS never registers, so the check above
+# finds no build on any channel and refuses -- correctly, but every single time,
+# and the only way past it was to paste OTA_EXPECTED_FINGERPRINT by hand on each
+# run (which is exactly what happened on 2026-11-23). The repo already knows the
+# answer: tools/ota/record-shipped-fingerprint.sh writes the hash of the build
+# that is installed, next to the commit it was taken from. So read it.
+#
+# This is the same reference as the variable above, just remembered instead of
+# retyped, and it is the LAST resort: an operator-supplied value wins, and so
+# does a real EAS record. A recorded hash that has gone stale -- because
+# something native moved after it was written -- makes this refuse, which is the
+# behaviour we want from a stale reference.
+RECORDED_FILE="$HERE/last-shipped-fingerprint.txt"
+if [ -f "$RECORDED_FILE" ]; then
+  RECORDED="$(tr -d '[:space:]' < "$RECORDED_FILE")"
+  STAMP="$(cat "$HERE/last-shipped-fingerprint.commit" 2>/dev/null || true)"
+  if [ -n "$RECORDED" ]; then
+    echo "recorded installed-build fingerprint: $RECORDED"
+    [ -n "$STAMP" ] && echo "    recorded at: $STAMP"
+    if [ "$CURRENT" = "$RECORDED" ]; then
+      echo "ok      matches the recorded fingerprint of the installed build"
+      exit 0
+    fi
+    echo
+    echo "REFUSING: this commit fingerprints to $CURRENT, but the build recorded"
+    echo "as installed is $RECORDED. Either something native changed since that"
+    echo "build -- in which case this needs a BUILD, not an update -- or the"
+    echo "recording is out of date. Installed apps would ignore this update."
+    echo
+    echo "If a newer build is installed, record it and try again:"
+    echo "    bash tools/ota/record-shipped-fingerprint.sh            # from this tree"
+    echo "    bash tools/ota/record-shipped-fingerprint.sh <the.apk>   # from the artifact"
+    echo
+    echo "Nothing was published."
+    exit 1
+  fi
+fi
+
 echo
 if [ -z "$LATEST" ]; then
   echo "REFUSING: EAS has no registered build for the '$BRANCH' channel, so there"
@@ -133,9 +172,11 @@ fi
 echo
 echo "Resolve it one of two ways, both deliberate:"
 echo "  * build a matching binary for this channel, then publish; or"
-echo "  * read the hash out of the binary that IS installed --"
-echo "      unzip -p <the.apk> assets/fingerprint"
-echo "    and start this workflow again with OTA_EXPECTED_FINGERPRINT set to it."
+echo "  * record the fingerprint of the binary that IS installed, once -- every"
+echo "    later run then reads it from the repo instead of asking:"
+echo "      bash tools/ota/record-shipped-fingerprint.sh            # from this tree"
+echo "      bash tools/ota/record-shipped-fingerprint.sh <the.apk>   # from the artifact"
+echo "    or set OTA_EXPECTED_FINGERPRINT for this one run only."
 echo
 echo "Nothing was published."
 exit 1
